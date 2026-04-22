@@ -7,6 +7,7 @@ export const themeStyles: ThemeStyle[] = [
     strapline: "Crisp constellation glass with star-chart accents.",
     className: "style-alpha",
     greekConstellation: ["alpha", "beta", "gamma"],
+    motif: "star lattice",
   },
   {
     id: "nebula",
@@ -14,6 +15,7 @@ export const themeStyles: ThemeStyle[] = [
     strapline: "Violet glow, softer contrast, denser clue atmosphere.",
     className: "style-nebula",
     greekConstellation: ["delta", "epsilon", "zeta"],
+    motif: "violet dust",
   },
   {
     id: "sunforge",
@@ -21,6 +23,7 @@ export const themeStyles: ThemeStyle[] = [
     strapline: "Amber and ember tones for warmer, bolder rounds.",
     className: "style-sunforge",
     greekConstellation: ["eta", "theta", "iota"],
+    motif: "ember grid",
   },
   {
     id: "arcade",
@@ -28,6 +31,7 @@ export const themeStyles: ThemeStyle[] = [
     strapline: "Mint-green pulse with playful synth energy.",
     className: "style-arcade",
     greekConstellation: ["kappa", "lambda", "mu"],
+    motif: "pixel grove",
   },
 ];
 

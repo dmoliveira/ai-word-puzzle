@@ -25,6 +25,7 @@ export type PuzzleWord = {
   topicId: TopicId;
   topicLabel: string;
   difficulty: ChallengeLevel;
+  frequencyBand: "common" | "uncommon" | "rare";
   length: number;
   prompt: string;
   microHint: string;
@@ -32,6 +33,30 @@ export type PuzzleWord = {
   visuals: string[];
   greekMark: string;
   weight: number;
+};
+
+export type PuzzleDirection = "across" | "down";
+
+export type PuzzlePlacement = {
+  wordId: string;
+  row: number;
+  col: number;
+  direction: PuzzleDirection;
+  clueNumber: number;
+};
+
+export type PuzzleBoardCell = {
+  row: number;
+  col: number;
+  solution: string;
+  clueNumbers: number[];
+  wordIds: string[];
+};
+
+export type PuzzleBoard = {
+  size: number;
+  placements: PuzzlePlacement[];
+  cells: PuzzleBoardCell[];
 };
 
 export type PuzzleOptions = {
@@ -53,6 +78,7 @@ export type PuzzleRun = {
   title: string;
   blurb: string;
   words: PuzzleWord[];
+  board: PuzzleBoard;
 };
 
 export type TopicPack = {
@@ -72,15 +98,39 @@ export type ThemeStyle = {
   strapline: string;
   className: string;
   greekConstellation: string[];
+  motif: string;
 };
 
 export type PersistedRunState = {
   run: PuzzleRun;
   guesses: Record<string, string>;
+  cellEntries: Record<string, string>;
   solvedIds: string[];
   activeWordId: string | null;
   hintLevels: Record<string, number>;
   paused: boolean;
   elapsedMs: number;
   lastTickAt: number | null;
+};
+
+export type RunSummary = {
+  runId: string;
+  title: string;
+  seed: string;
+  mode: PuzzleMode;
+  challenge: ChallengeLevel;
+  style: ThemeStyleId;
+  solvedCount: number;
+  totalWords: number;
+  finished: boolean;
+  createdAt: string;
+  completedAt: string | null;
+};
+
+export type ProgressSnapshot = {
+  streak: number;
+  bestStreak: number;
+  lastDailySeed: string | null;
+  lastCompletedAt: string | null;
+  history: RunSummary[];
 };

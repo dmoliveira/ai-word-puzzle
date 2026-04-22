@@ -1,4 +1,5 @@
 import type { ChallengeLevel, PuzzleWord, TopicId, TopicPack } from "@/lib/game-types";
+import { curatedEnglishLexicon } from "@/lib/lexicon-seeds";
 
 const greekMarks = [
   "alpha",
@@ -238,21 +239,70 @@ function createGeneralWords(level: ChallengeLevel, existingCount: number): Puzzl
     .map((word) => normalizeWord(word))
     .filter((word) => word.length >= 4);
 
-  return words.map((word, index) => ({
-    id: `general-${level}-${index}`,
-    answer: word,
-    normalized: word,
-    topicId: "story",
-    topicLabel: "General English",
-    difficulty: level,
-    length: word.length,
-    prompt: `Think in English wordplay rather than a single subject lane.`,
-    microHint: `A flexible common-word clue. ${word.length} letters long.`,
-    teaser: `A bridge word that keeps the round flowing.`,
-    visuals: [greekMarks[(existingCount + index) % greekMarks.length], `${word.length} letters`, index % 2 === 0 ? "common" : "nimble"],
-    greekMark: greekMarks[(existingCount + index) % greekMarks.length],
-    weight: 1,
-  }));
+  return words.map((word, index) => {
+    const frequencyBand: PuzzleWord["frequencyBand"] = level === "breeze" ? "common" : level === "quest" ? "uncommon" : "rare";
+
+    return {
+      id: `general-${level}-${index}`,
+      answer: word,
+      normalized: word,
+      topicId: "story",
+      topicLabel: "General English",
+      difficulty: level,
+      frequencyBand,
+      length: word.length,
+      prompt: `Think in English wordplay rather than a single subject lane.`,
+      microHint: `A flexible common-word clue. ${word.length} letters long.`,
+      teaser: `A bridge word that keeps the round flowing.`,
+      visuals: [greekMarks[(existingCount + index) % greekMarks.length], `${word.length} letters`, index % 2 === 0 ? "common" : "nimble"],
+      greekMark: greekMarks[(existingCount + index) % greekMarks.length],
+      weight: 1,
+    };
+  });
+}
+
+function getCuratedDifficulty(word: string, band: PuzzleWord["frequencyBand"]): ChallengeLevel {
+  if (band === "rare" || word.length >= 11) {
+    return "mythic";
+  }
+
+  if (band === "uncommon" || word.length >= 8) {
+    return "quest";
+  }
+
+  return "breeze";
+}
+
+function createCuratedLexiconWords(startIndex: number): PuzzleWord[] {
+  const groups = [
+    { band: "common" as const, words: curatedEnglishLexicon.common },
+    { band: "uncommon" as const, words: curatedEnglishLexicon.uncommon },
+    { band: "rare" as const, words: curatedEnglishLexicon.rare },
+  ];
+
+  return groups.flatMap(({ band, words }, bandIndex) =>
+    words.map((rawWord, index) => {
+      const answer = normalizeWord(rawWord);
+      const difficulty = getCuratedDifficulty(answer, band);
+
+      return {
+        id: `curated-${band}-${startIndex + bandIndex * 1000 + index}`,
+        answer,
+        normalized: answer,
+        topicId: "story",
+        topicLabel: "General English",
+        difficulty,
+        frequencyBand: band,
+        length: answer.length,
+        prompt: band === "rare" ? "A rarer English term that raises the clue tension." : band === "uncommon" ? "A richer English term with more texture." : "A familiar English clue lane with cleaner surface meaning.",
+        microHint: `${band} lexicon clue. ${answer.length} letters long.`,
+        teaser: band === "rare" ? "A rarer lexicon pick that sharpens the board." : "A curated English entry that balances the run.",
+        visuals: [greekMarks[(startIndex + bandIndex + index) % greekMarks.length], band, `${answer.length} letters`],
+        greekMark: greekMarks[(startIndex + bandIndex + index) % greekMarks.length],
+        weight: band === "common" ? 1 : band === "uncommon" ? 2 : 3,
+      } satisfies PuzzleWord;
+    })
+  );
 }
 
 function getGeneratedDifficulty(word: string): ChallengeLevel {
@@ -288,6 +338,7 @@ function createGeneratedCompoundWords(): PuzzleWord[] {
             topicId: pack.id,
             topicLabel: pack.label,
             difficulty,
+            frequencyBand: difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare",
             length: answer.length,
             prompt: createPrompt(pack, answer),
             microHint: createMicroHint(pack, answer),
@@ -315,21 +366,26 @@ export const wordBank: PuzzleWord[] = (() => {
       words
         .map((rawWord, index) => normalizeWord(rawWord))
         .filter((word) => word.length >= 3)
-        .map((answer, index) => ({
-          id: `${pack.id}-${difficulty}-${index}`,
-          answer,
-          normalized: answer,
-          topicId: pack.id,
-          topicLabel: pack.label,
-          difficulty,
-          length: answer.length,
-          prompt: createPrompt(pack, answer),
-          microHint: createMicroHint(pack, answer),
-          teaser: createTeaser(pack, answer),
-          visuals: [pack.icons[index % pack.icons.length], pack.scene[groupIndex % pack.scene.length], `${answer.length} letters`],
-          greekMark: greekMarks[(index + groupIndex) % greekMarks.length],
-          weight: difficulty === "breeze" ? 2 : difficulty === "quest" ? 3 : 4,
-        }))
+        .map((answer, index) => {
+          const frequencyBand: PuzzleWord["frequencyBand"] = difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare";
+
+          return {
+            id: `${pack.id}-${difficulty}-${index}`,
+            answer,
+            normalized: answer,
+            topicId: pack.id,
+            topicLabel: pack.label,
+            difficulty,
+            frequencyBand,
+            length: answer.length,
+            prompt: createPrompt(pack, answer),
+            microHint: createMicroHint(pack, answer),
+            teaser: createTeaser(pack, answer),
+            visuals: [pack.icons[index % pack.icons.length], pack.scene[groupIndex % pack.scene.length], `${answer.length} letters`],
+            greekMark: greekMarks[(index + groupIndex) % greekMarks.length],
+            weight: difficulty === "breeze" ? 2 : difficulty === "quest" ? 3 : 4,
+          } satisfies PuzzleWord;
+        })
     );
   });
 
@@ -340,10 +396,11 @@ export const wordBank: PuzzleWord[] = (() => {
   ];
 
   const generated = createGeneratedCompoundWords();
+  const curated = createCuratedLexiconWords(themed.length + general.length + generated.length);
 
   const seen = new Set<string>();
 
-  return [...themed, ...general, ...generated].filter((entry) => {
+  return [...themed, ...general, ...generated, ...curated].filter((entry) => {
     const key = `${entry.topicId}:${entry.normalized}:${entry.difficulty}`;
 
     if (seen.has(key)) {
