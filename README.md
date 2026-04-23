@@ -14,7 +14,7 @@ Configurable English word-puzzle studio built with Next.js.
 - Pause, resume, restart, current-word review, and full-puzzle review
 - Daily streaks, recent-run history, and local daily archive view
 - Switchable presentation themes including Greek-letter flavored styling
-- Server puzzle route at `/api/puzzle`
+- GitHub Pages-ready static export deployment
 - Local persistence so the current run survives reloads
 - Pure TypeScript generator separated from the UI for easy extension
 - Playwright coverage for the main play flow
@@ -23,7 +23,6 @@ Configurable English word-puzzle studio built with Next.js.
 
 - `app/`: Next.js UI
 - `app/components/word-puzzle-studio.tsx`: board play UI, archive, and run controls
-- `app/api/puzzle/route.ts`: server-side puzzle generation endpoint
 - `lib/word-bank.ts`: topic packs and lexicon seed data
 - `lib/lexicon-seeds.ts`: curated English lexicon inputs
 - `lib/puzzle-generator.ts`: weighted puzzle selection, seeded generation, and board placement
@@ -31,6 +30,7 @@ Configurable English word-puzzle studio built with Next.js.
 - `lib/themes.ts`: visual theme tokens
 - `lib/game-types.ts`: shared contracts
 - `tests/e2e/`: Playwright browser coverage
+- `.github/workflows/deploy-pages.yml`: GitHub Pages deployment
 
 ## Quick Start
 
@@ -39,6 +39,13 @@ Configurable English word-puzzle studio built with Next.js.
 3. `npm run test`
 4. `npm run build`
 5. `npm run test:e2e`
+
+## Deployment
+
+- Production deploy target: GitHub Pages
+- Static export output: `out/`
+- Repo base path is applied automatically for Pages builds
+- Workflow deploys on push to `main`
 
 ## Extension Points
 

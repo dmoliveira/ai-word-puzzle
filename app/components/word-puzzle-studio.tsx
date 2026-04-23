@@ -229,27 +229,6 @@ export function WordPuzzleStudio() {
     setOptions((current) => ({ ...current, [key]: value }));
   }
 
-  async function requestPuzzleRun(nextOptions: PuzzleOptions) {
-    const params = new URLSearchParams({
-      mode: nextOptions.mode,
-      challenge: nextOptions.challenge,
-      topics: nextOptions.topics.join(","),
-      puzzleSize: String(nextOptions.puzzleSize),
-      style: nextOptions.style,
-      clueDensity: String(nextOptions.clueDensity),
-      timerEnabled: String(nextOptions.timerEnabled),
-      seed: nextOptions.seed,
-    });
-
-    const response = await fetch(`/api/puzzle?${params.toString()}`);
-    if (!response.ok) {
-      throw new Error(`Puzzle request failed with ${response.status}`);
-    }
-
-    const payload = (await response.json()) as { run: PersistedRunState["run"] };
-    return payload.run;
-  }
-
   function toggleTopic(topicId: TopicId) {
     setOptions((current) => {
       const hasTopic = current.topics.includes(topicId);
@@ -270,7 +249,7 @@ export function WordPuzzleStudio() {
     setRunError(null);
 
     try {
-      const run = await requestPuzzleRun(requestOptions);
+      const run = buildPuzzleRun(requestOptions);
       startTransition(() => {
         const nextState = createStateFromRun(run);
         setOptions(run.options);
@@ -279,7 +258,7 @@ export function WordPuzzleStudio() {
         setReviewMode("none");
       });
     } catch {
-      setRunError("Could not start a new server-backed run.");
+      setRunError("Could not start a new local run.");
     } finally {
       setIsStarting(false);
     }
