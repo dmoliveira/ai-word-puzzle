@@ -1,7 +1,7 @@
 "use client";
 
-import { startTransition, useEffect, useState } from "react";
-import type { PersistedRunState, ProgressSnapshot, PuzzleBoardCell, PuzzlePlacement, PuzzleOptions, PuzzleWord, TopicId } from "@/lib/game-types";
+import { startTransition, useEffect, useRef, useState } from "react";
+import type { PersistedRunState, ProgressSnapshot, PuzzleBoardCell, PuzzlePlacement, PuzzleOptions, PuzzleWord, RunSummary, TopicId } from "@/lib/game-types";
 import { buildPuzzleRun, createHintLadder, getDefaultDailySeed, sanitizeGuess } from "@/lib/puzzle-generator";
 import { buildDailyArchive, createEmptyProgress, readProgressSnapshot, recordRunProgress, writeProgressSnapshot } from "@/lib/progress";
 import { getThemeStyle, themeStyles } from "@/lib/themes";
@@ -108,6 +108,10 @@ function getWordById(state: PersistedRunState, wordId: string) {
   return state.run.words.find((word) => word.id === wordId) ?? null;
 }
 
+function getPlacementByWordId(state: PersistedRunState, wordId: string) {
+  return state.run.board.placements.find((placement) => placement.wordId === wordId) ?? null;
+}
+
 function getWordCells(state: PersistedRunState, placement: PuzzlePlacement) {
   const word = getWordById(state, placement.wordId);
   if (!word) {
@@ -146,6 +150,82 @@ function buildWordGuessMap(state: PersistedRunState) {
   return Object.fromEntries(state.run.words.map((word) => [word.id, deriveGuessFromCells(state, word.id)]));
 }
 
+function getNextWordId(state: PersistedRunState, currentWordId: string | null, step: 1 | -1, preferUnsolved = true) {
+  const placements = preferUnsolved
+    ? state.run.board.placements.filter((placement) => !state.solvedIds.includes(placement.wordId))
+    : state.run.board.placements;
+
+  if (placements.length === 0) {
+    return currentWordId;
+  }
+
+  const currentIndex = placements.findIndex((placement) => placement.wordId === currentWordId);
+  const baseIndex = currentIndex === -1 ? 0 : currentIndex;
+  const nextIndex = (baseIndex + step + placements.length) % placements.length;
+  return placements[nextIndex]?.wordId ?? currentWordId;
+}
+
+function buildStateWithEntries(current: PersistedRunState, nextCellEntries: Record<string, string>, fallbackWordId: string) {
+  const provisional = {
+    ...current,
+    cellEntries: nextCellEntries,
+  };
+  const solvedIds = computeSolvedIds(provisional);
+  const nextActive = current.run.words.find((entry) => !solvedIds.includes(entry.id))?.id ?? fallbackWordId;
+
+  return {
+    ...provisional,
+    guesses: buildWordGuessMap(provisional),
+    solvedIds,
+    activeWordId: nextActive,
+  };
+}
+
+function countFilledLetters(value: string) {
+  return value.replace(/[^a-z]/g, "").length;
+}
+
+function getFirstOpenCellKey(state: PersistedRunState, wordId: string | null) {
+  if (!wordId) {
+    return null;
+  }
+
+  const placement = getPlacementByWordId(state, wordId);
+  if (!placement) {
+    return null;
+  }
+
+  const cells = getWordCells(state, placement);
+  const firstOpen = cells.find((cell) => !(state.cellEntries[getCellKey(cell.row, cell.col)] ?? ""));
+  const target = firstOpen ?? cells[0];
+  return target ? getCellKey(target.row, target.col) : null;
+}
+
+function findNeighborCell(state: PersistedRunState, row: number, col: number, rowStep: number, colStep: number) {
+  let nextRow = row + rowStep;
+  let nextCol = col + colStep;
+
+  while (nextRow >= 0 && nextCol >= 0 && nextRow < state.run.board.size && nextCol < state.run.board.size) {
+    const cell = state.run.board.cells.find((entry) => entry.row === nextRow && entry.col === nextCol);
+    if (cell) {
+      return cell;
+    }
+
+    nextRow += rowStep;
+    nextCol += colStep;
+  }
+
+  return null;
+}
+
+function getPreferredWordIdForCell(state: PersistedRunState, cell: PuzzleBoardCell, preferredWordId: string | null) {
+  if (preferredWordId && cell.wordIds.includes(preferredWordId)) {
+    return preferredWordId;
+  }
+
+  return cell.wordIds.find((wordId) => !state.solvedIds.includes(wordId)) ?? cell.wordIds[0] ?? null;
+}
+
 function getThemeAccentCellClass(style: PuzzleOptions["style"]) {
   switch (style) {
     case "nebula":
@@ -160,12 +240,15 @@ function getThemeAccentCellClass(style: PuzzleOptions["style"]) {
 }
 
 export function WordPuzzleStudio() {
+  const activeAnswerInputRef = useRef<HTMLInputElement | null>(null);
+  const boardCellRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [options, setOptions] = useState<PuzzleOptions>(defaultOptions);
   const [state, setState] = useState<PersistedRunState>(() => createFreshState(defaultOptions));
   const [reviewMode, setReviewMode] = useState<"none" | "word" | "puzzle">("none");
   const [isStarting, setIsStarting] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressSnapshot>(createEmptyProgress());
+  const [focusedCellKey, setFocusedCellKey] = useState<string | null>(null);
   const lexiconSize = wordBank.length;
   const theme = getThemeStyle(state.run.options.style);
 
@@ -216,6 +299,14 @@ export function WordPuzzleStudio() {
     return () => window.clearInterval(interval);
   }, [state.paused, state.run.options.timerEnabled]);
 
+  useEffect(() => {
+    if (state.paused) {
+      return;
+    }
+
+    activeAnswerInputRef.current?.focus();
+  }, [state.activeWordId, state.paused]);
+
   const solvedCount = state.solvedIds.length;
   const activeWord = state.run.words.find((word) => word.id === state.activeWordId) ?? state.run.words[0] ?? null;
   const activePlacement = activeWord ? getWordPlacement(state, activeWord.id) : null;
@@ -224,6 +315,8 @@ export function WordPuzzleStudio() {
   const progressLabel = `${solvedCount}/${state.run.words.length} solved`;
   const cellMap = new Map(state.run.board.cells.map((cell) => [getCellKey(cell.row, cell.col), cell]));
   const archive = buildDailyArchive(progress.history, 10);
+  const activeFilledCount = countFilledLetters(activeGuess);
+  const boardFocusKey = focusedCellKey ?? getFirstOpenCellKey(state, state.activeWordId);
 
   function updateOptions<K extends keyof PuzzleOptions>(key: K, value: PuzzleOptions[K]) {
     setOptions((current) => ({ ...current, [key]: value }));
@@ -254,6 +347,7 @@ export function WordPuzzleStudio() {
         const nextState = createStateFromRun(run);
         setOptions(run.options);
         setState(nextState);
+        setFocusedCellKey(getFirstOpenCellKey(nextState, nextState.activeWordId));
         syncProgress(nextState);
         setReviewMode("none");
       });
@@ -262,6 +356,31 @@ export function WordPuzzleStudio() {
     } finally {
       setIsStarting(false);
     }
+  }
+
+  function replaySavedRun(summary: RunSummary) {
+    const nextOptions = normalizeOptions(summary.options);
+
+    void startNewRun({
+      ...nextOptions,
+      seed: summary.mode === "daily" ? summary.seed.replace(/^daily:/, "") : nextOptions.seed,
+    });
+  }
+
+  function startTodayDailyRun() {
+    void startNewRun({
+      ...options,
+      mode: "daily",
+      seed: getDefaultDailySeed(),
+    });
+  }
+
+  function startRandomCustomRun() {
+    void startNewRun({
+      ...options,
+      mode: "custom",
+      seed: createRuntimeSeed(),
+    });
   }
 
   function togglePause() {
@@ -295,6 +414,199 @@ export function WordPuzzleStudio() {
         ...current,
         activeWordId: wordId,
       };
+      setFocusedCellKey(getFirstOpenCellKey(nextState, wordId));
+      syncProgress(nextState);
+      return nextState;
+    });
+  }
+
+  function focusBoardCellKey(cellKey: string) {
+    setFocusedCellKey(cellKey);
+    window.requestAnimationFrame(() => {
+      boardCellRefs.current[cellKey]?.focus();
+    });
+  }
+
+  function updateBoardCellEntry(cell: PuzzleBoardCell, nextLetter: string, options?: { moveBackward?: boolean }) {
+    const preferredWordId = getPreferredWordIdForCell(state, cell, state.activeWordId);
+    if (!preferredWordId) {
+      return;
+    }
+
+    setState((current) => {
+      const nextCellEntries = { ...current.cellEntries };
+      const cellKey = getCellKey(cell.row, cell.col);
+
+      if (nextLetter) {
+        nextCellEntries[cellKey] = nextLetter;
+      } else {
+        delete nextCellEntries[cellKey];
+      }
+
+      const nextState = buildStateWithEntries(
+        {
+          ...current,
+          activeWordId: preferredWordId,
+        },
+        nextCellEntries,
+        preferredWordId,
+      );
+
+      syncProgress(nextState);
+      return nextState;
+    });
+
+    const placement = getPlacementByWordId(state, preferredWordId);
+    if (!placement) {
+      return;
+    }
+
+    const cells = getWordCells(state, placement);
+    const currentIndex = cells.findIndex((entry) => entry.row === cell.row && entry.col === cell.col);
+    const nextIndex = options?.moveBackward ? currentIndex - 1 : currentIndex + 1;
+    const nextCell = cells[nextIndex];
+
+    if (nextCell) {
+      focusBoardCellKey(getCellKey(nextCell.row, nextCell.col));
+    }
+  }
+
+  function handleBoardCellMove(cell: PuzzleBoardCell, rowStep: number, colStep: number) {
+    const nextCell = findNeighborCell(state, cell.row, cell.col, rowStep, colStep);
+    if (!nextCell) {
+      return;
+    }
+
+    const nextWordId = getPreferredWordIdForCell(state, nextCell, state.activeWordId);
+    if (nextWordId) {
+      selectWord(nextWordId);
+    }
+
+    focusBoardCellKey(getCellKey(nextCell.row, nextCell.col));
+  }
+
+  function handleBoardCellKeyDown(event: React.KeyboardEvent<HTMLButtonElement>, cell: PuzzleBoardCell) {
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      handleBoardCellMove(cell, -1, 0);
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      handleBoardCellMove(cell, 1, 0);
+      return;
+    }
+
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      handleBoardCellMove(cell, 0, -1);
+      return;
+    }
+
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      handleBoardCellMove(cell, 0, 1);
+      return;
+    }
+
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      selectWordFromCell(cell);
+      return;
+    }
+
+    if (event.key === "Backspace" || event.key === "Delete") {
+      event.preventDefault();
+      updateBoardCellEntry(cell, "", { moveBackward: event.key === "Backspace" });
+      return;
+    }
+
+    if (/^[a-zA-Z]$/.test(event.key)) {
+      event.preventDefault();
+      updateBoardCellEntry(cell, event.key.toLowerCase());
+    }
+  }
+
+  function jumpToAdjacentClue(step: 1 | -1) {
+    setState((current) => {
+      const nextWordId = getNextWordId(current, current.activeWordId, step);
+      if (!nextWordId) {
+        return current;
+      }
+
+      const nextState = {
+        ...current,
+        activeWordId: nextWordId,
+      };
+      setFocusedCellKey(getFirstOpenCellKey(nextState, nextWordId));
+      syncProgress(nextState);
+      return nextState;
+    });
+  }
+
+  function clearActiveWord() {
+    if (!activeWord) {
+      return;
+    }
+
+    const placement = getPlacementByWordId(state, activeWord.id);
+    if (!placement) {
+      return;
+    }
+
+    setState((current) => {
+      const nextCellEntries = { ...current.cellEntries };
+      const cells = getWordCells(current, placement);
+
+      for (const cell of cells) {
+        const key = getCellKey(cell.row, cell.col);
+        const hasSolvedNeighbor = cell.wordIds.some((wordId) => wordId !== activeWord.id && current.solvedIds.includes(wordId));
+
+        if (!hasSolvedNeighbor) {
+          delete nextCellEntries[key];
+        }
+      }
+
+      const nextState = buildStateWithEntries(current, nextCellEntries, activeWord.id);
+      syncProgress(nextState);
+      return nextState;
+    });
+  }
+
+  function revealActiveLetter() {
+    if (!activeWord) {
+      return;
+    }
+
+    const placement = getPlacementByWordId(state, activeWord.id);
+    if (!placement) {
+      return;
+    }
+
+    setState((current) => {
+      const nextCellEntries = { ...current.cellEntries };
+      const cells = getWordCells(current, placement);
+      const revealIndex = cells.findIndex((cell, index) => (nextCellEntries[getCellKey(cell.row, cell.col)] ?? "") !== activeWord.answer[index]);
+
+      if (revealIndex === -1) {
+        return current;
+      }
+
+      const revealCell = cells[revealIndex];
+      nextCellEntries[getCellKey(revealCell.row, revealCell.col)] = activeWord.answer[revealIndex];
+
+      const nextState = buildStateWithEntries(
+        {
+          ...current,
+          hintLevels: {
+            ...current.hintLevels,
+            [activeWord.id]: Math.min(3, getHintLevel(activeWord.id, current.hintLevels) + 1),
+          },
+        },
+        nextCellEntries,
+        activeWord.id,
+      );
       syncProgress(nextState);
       return nextState;
     });
@@ -324,19 +636,7 @@ export function WordPuzzleStudio() {
         }
       }
 
-      const provisional = {
-        ...current,
-        cellEntries: nextCellEntries,
-      };
-      const solvedIds = computeSolvedIds(provisional);
-      const nextActive = current.run.words.find((entry) => !solvedIds.includes(entry.id))?.id ?? word.id;
-
-      const nextState = {
-        ...provisional,
-        guesses: buildWordGuessMap(provisional),
-        solvedIds,
-        activeWordId: nextActive,
-      };
+      const nextState = buildStateWithEntries(current, nextCellEntries, word.id);
 
       syncProgress(nextState);
       return nextState;
@@ -344,7 +644,13 @@ export function WordPuzzleStudio() {
   }
 
   function selectWordFromCell(cell: PuzzleBoardCell) {
-    const nextWordId = cell.wordIds.includes(state.activeWordId ?? "") ? cell.wordIds[0] : cell.wordIds[0];
+    if (cell.wordIds.length === 0) {
+      return;
+    }
+
+    const currentIndex = cell.wordIds.findIndex((wordId) => wordId === state.activeWordId);
+    const nextWordId = currentIndex === -1 ? cell.wordIds[0] : cell.wordIds[(currentIndex + 1) % cell.wordIds.length];
+    setFocusedCellKey(getCellKey(cell.row, cell.col));
     selectWord(nextWordId);
   }
 
@@ -485,6 +791,15 @@ export function WordPuzzleStudio() {
                 {isStarting ? "Starting..." : "Start Fresh Run"}
               </button>
 
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                <button type="button" onClick={startTodayDailyRun} className="rounded-2xl border border-white/10 bg-white/4 px-4 py-3 text-sm text-slate-100 transition hover:border-white/20">
+                  Play today&apos;s daily
+                </button>
+                <button type="button" onClick={startRandomCustomRun} className="rounded-2xl border border-white/10 bg-white/4 px-4 py-3 text-sm text-slate-100 transition hover:border-white/20">
+                  Spin random custom
+                </button>
+              </div>
+
               {runError ? <p className="text-sm text-rose-300">{runError}</p> : null}
             </div>
           </aside>
@@ -517,9 +832,9 @@ export function WordPuzzleStudio() {
                 <div className="mb-4 flex items-center justify-between">
                   <div>
                     <h3 className="text-lg font-semibold text-white">Board</h3>
-                    <p className="mt-1 text-sm text-slate-400">Select a clue, then type into the active answer bar to fill the placed grid.</p>
+                    <p className="mt-1 text-sm text-slate-400">Select a clue, then type into the active answer bar to fill the placed grid. Shared cells cycle between crossing clues.</p>
                   </div>
-                  {activePlacement ? <span className="accent-chip rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em]">{activePlacement.clueNumber} {activePlacement.direction}</span> : null}
+                  {activePlacement ? <span data-testid="active-clue-badge" className="accent-chip rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em]">{activePlacement.clueNumber} {activePlacement.direction}</span> : null}
                 </div>
 
                 <div className="overflow-auto pb-2">
@@ -539,9 +854,16 @@ export function WordPuzzleStudio() {
                           return (
                             <button
                               key={key}
+                              ref={(node) => {
+                                boardCellRefs.current[key] = node;
+                              }}
+                              data-testid={`board-cell-${row}-${col}`}
                               type="button"
+                              tabIndex={boardFocusKey === key ? 0 : -1}
                               onClick={() => selectWordFromCell(cell)}
-                              className={`relative size-9 rounded-lg border text-sm font-semibold uppercase transition sm:size-10 ${activeCell ? `bg-gradient-to-br ${getThemeAccentCellClass(state.run.options.style)} border-white/30 text-white` : "border-white/10 bg-white/6 text-slate-100"} ${solvedCell ? "border-emerald-400/30 bg-emerald-500/12 text-emerald-100" : ""}`}
+                              onFocus={() => setFocusedCellKey(key)}
+                              onKeyDown={(event) => handleBoardCellKeyDown(event, cell)}
+                              className={`relative size-9 rounded-lg border text-sm font-semibold uppercase transition sm:size-10 ${activeCell ? `bg-gradient-to-br ${getThemeAccentCellClass(state.run.options.style)} border-white/30 text-white` : "border-white/10 bg-white/6 text-slate-100"} ${solvedCell ? "border-emerald-400/30 bg-emerald-500/12 text-emerald-100" : ""} ${boardFocusKey === key ? "ring-2 ring-white/55" : ""}`}
                             >
                               {cell.clueNumbers[0] ? <span className="absolute left-1 top-0.5 text-[9px] font-medium text-slate-400">{cell.clueNumbers[0]}</span> : null}
                               <span>{(state.cellEntries[key] ?? "").toUpperCase()}</span>
@@ -559,15 +881,45 @@ export function WordPuzzleStudio() {
                       <div>
                         <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Active clue</div>
                         <div className="mt-1 text-lg font-semibold text-white">{activePlacement?.clueNumber}. {activeWord.prompt}</div>
+                        <div className="mt-2 text-xs uppercase tracking-[0.2em] text-slate-400">{activeFilledCount}/{activeWord.length} letters filled</div>
                       </div>
                       <div className={`rounded-full border px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] ${getClueTone(activeWord)}`}>{activeWord.frequencyBand}</div>
                     </div>
 
                     <input
+                      ref={activeAnswerInputRef}
                       data-testid="active-answer-input"
                       aria-label="Active clue answer"
                       value={activeGuess}
                       onChange={(event) => updateWordGuess(activeWord, event.target.value)}
+                      onKeyDown={(event) => {
+                        const target = event.currentTarget;
+                        const cursorAtStart = (target.selectionStart ?? 0) === 0 && (target.selectionEnd ?? 0) === 0;
+                        const cursorAtEnd = (target.selectionStart ?? target.value.length) === target.value.length && (target.selectionEnd ?? target.value.length) === target.value.length;
+
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          jumpToAdjacentClue(event.shiftKey ? -1 : 1);
+                          return;
+                        }
+
+                        if ((event.key === "ArrowRight" || event.key === "ArrowDown") && cursorAtEnd) {
+                          event.preventDefault();
+                          jumpToAdjacentClue(1);
+                          return;
+                        }
+
+                        if ((event.key === "ArrowLeft" || event.key === "ArrowUp") && cursorAtStart) {
+                          event.preventDefault();
+                          jumpToAdjacentClue(-1);
+                          return;
+                        }
+
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          clearActiveWord();
+                        }
+                      }}
                       disabled={state.paused || state.solvedIds.includes(activeWord.id)}
                       placeholder={state.paused ? "Paused" : `${activeWord.length} letters`}
                       className="mt-4 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm uppercase tracking-[0.25em] text-white outline-none placeholder:text-slate-500 disabled:opacity-60"
@@ -587,6 +939,28 @@ export function WordPuzzleStudio() {
                           <div className="relative mt-2 text-sm font-medium capitalize text-white">{visual}</div>
                         </div>
                       ))}
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <span className="rounded-full border border-white/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-slate-300">Enter next</span>
+                      <span className="rounded-full border border-white/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-slate-300">Shift+Enter back</span>
+                      <span className="rounded-full border border-white/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-slate-300">Arrows move clues</span>
+                      <span className="rounded-full border border-white/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-slate-300">Esc clears</span>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button type="button" onClick={() => jumpToAdjacentClue(-1)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100">
+                        Previous clue
+                      </button>
+                      <button type="button" onClick={() => jumpToAdjacentClue(1)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100">
+                        Next clue
+                      </button>
+                      <button type="button" onClick={revealActiveLetter} disabled={state.paused || state.solvedIds.includes(activeWord.id)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
+                        Reveal letter
+                      </button>
+                      <button type="button" onClick={clearActiveWord} disabled={state.paused || state.solvedIds.includes(activeWord.id)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
+                        Clear word
+                      </button>
                     </div>
 
                     <div className="mt-4 flex items-center justify-between gap-3">
@@ -695,12 +1069,13 @@ export function WordPuzzleStudio() {
               <h3 className="text-lg font-semibold text-white">Daily Archive</h3>
               <div className="mt-4 space-y-2">
                 {archive.map((entry) => (
-                  <div key={entry.day} className="rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-sm text-slate-200">
+                  <button key={entry.day} type="button" onClick={() => entry.summary ? replaySavedRun(entry.summary) : startNewRun({ ...options, mode: "daily", seed: entry.day })} className="w-full rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-left text-sm text-slate-200 transition hover:border-white/20">
                     <div className="flex items-center justify-between gap-3">
                       <span>{entry.day}</span>
-                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] ${entry.summary?.finished ? "bg-emerald-500/12 text-emerald-200" : "bg-white/6 text-slate-300"}`}>{entry.summary?.finished ? "cleared" : entry.summary ? "played" : "open"}</span>
+                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] ${entry.summary?.finished ? "bg-emerald-500/12 text-emerald-200" : "bg-white/6 text-slate-300"}`}>{entry.summary?.finished ? "replay" : entry.summary ? "resume" : "open"}</span>
                     </div>
-                  </div>
+                    <div className="mt-2 text-xs uppercase tracking-[0.18em] text-slate-400">{entry.summary ? `${entry.summary.challenge} / ${entry.summary.solvedCount}-${entry.summary.totalWords}` : "Open this daily seed"}</div>
+                  </button>
                 ))}
               </div>
             </div>
@@ -709,15 +1084,16 @@ export function WordPuzzleStudio() {
               <h3 className="text-lg font-semibold text-white">Recent Runs</h3>
               <div className="mt-4 space-y-2">
                 {progress.history.slice(0, 8).map((entry) => (
-                  <div key={entry.runId} className="rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-sm text-slate-200">
+                  <button key={entry.runId} type="button" onClick={() => replaySavedRun(entry)} className="w-full rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-left text-sm text-slate-200 transition hover:border-white/20">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="font-medium text-white">{entry.title}</div>
                         <div className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">{entry.mode} / {entry.challenge} / {entry.solvedCount}-{entry.totalWords}</div>
+                        <div className="mt-2 text-xs text-slate-400">{entry.finished ? "Replay the exact run configuration." : "Resume this seeded setup with the same board mix."}</div>
                       </div>
-                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] ${entry.finished ? "bg-emerald-500/12 text-emerald-200" : "bg-white/6 text-slate-300"}`}>{entry.finished ? "done" : "saved"}</span>
+                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] ${entry.finished ? "bg-emerald-500/12 text-emerald-200" : "bg-white/6 text-slate-300"}`}>{entry.finished ? "replay" : "resume"}</span>
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>

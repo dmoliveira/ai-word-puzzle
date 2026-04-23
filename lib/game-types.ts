@@ -117,6 +117,7 @@ export type RunSummary = {
   runId: string;
   title: string;
   seed: string;
+  options: PuzzleOptions;
   mode: PuzzleMode;
   challenge: ChallengeLevel;
   style: ThemeStyleId;

@@ -40,6 +40,7 @@ function buildRunSummary(state: PersistedRunState): RunSummary {
     runId: state.run.id,
     title: state.run.title,
     seed: state.run.seed,
+    options: state.run.options,
     mode: state.run.options.mode,
     challenge: state.run.options.challenge,
     style: state.run.options.style,
