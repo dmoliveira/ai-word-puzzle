@@ -245,6 +245,7 @@ export function WordPuzzleStudio() {
   const [options, setOptions] = useState<PuzzleOptions>(defaultOptions);
   const [state, setState] = useState<PersistedRunState>(() => createFreshState(defaultOptions));
   const [reviewMode, setReviewMode] = useState<"none" | "word" | "puzzle">("none");
+  const [mobilePanel, setMobilePanel] = useState<"board" | "clues" | "archive">("board");
   const [isStarting, setIsStarting] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressSnapshot>(createEmptyProgress());
@@ -348,6 +349,7 @@ export function WordPuzzleStudio() {
         setOptions(run.options);
         setState(nextState);
         setFocusedCellKey(getFirstOpenCellKey(nextState, nextState.activeWordId));
+        setMobilePanel("board");
         syncProgress(nextState);
         setReviewMode("none");
       });
@@ -415,6 +417,7 @@ export function WordPuzzleStudio() {
         activeWordId: wordId,
       };
       setFocusedCellKey(getFirstOpenCellKey(nextState, wordId));
+      setMobilePanel("board");
       syncProgress(nextState);
       return nextState;
     });
@@ -825,10 +828,27 @@ export function WordPuzzleStudio() {
                   <button type="button" onClick={() => setReviewMode("puzzle")} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">Review Puzzle</button>
                 </div>
               </div>
+
+              <div className="mt-4 flex gap-2 lg:hidden">
+                {([
+                  ["board", "Board"],
+                  ["clues", "Clues"],
+                  ["archive", "Archive"],
+                ] as const).map(([panelId, label]) => (
+                  <button
+                    key={panelId}
+                    type="button"
+                    onClick={() => setMobilePanel(panelId)}
+                    className={`flex-1 rounded-2xl border px-3 py-2 text-sm transition ${mobilePanel === panelId ? "accent-chip" : "border-white/10 bg-white/4 text-slate-200"}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
-              <div className="glass-card rounded-[2rem] p-5 sm:p-6">
+              <div className={`${mobilePanel === "board" ? "block" : "hidden"} glass-card rounded-[2rem] p-4 sm:p-6 lg:block`}>
                 <div className="mb-4 flex items-center justify-between">
                   <div>
                     <h3 className="text-lg font-semibold text-white">Board</h3>
@@ -977,7 +997,7 @@ export function WordPuzzleStudio() {
                 ) : null}
               </div>
 
-              <div className="glass-card rounded-[2rem] p-5 sm:p-6">
+              <div className={`${mobilePanel === "clues" ? "block" : "hidden"} glass-card rounded-[2rem] p-5 sm:p-6 lg:block`}>
                 <h3 className="text-lg font-semibold text-white">Clues</h3>
                 <div className="mt-4 space-y-5">
                   {(["across", "down"] as const).map((direction) => (
@@ -1064,7 +1084,7 @@ export function WordPuzzleStudio() {
             ) : null}
           </section>
 
-          <aside className="space-y-6">
+          <aside className={`${mobilePanel === "archive" ? "block" : "hidden"} space-y-6 xl:block`}>
             <div className="glass-card rounded-[2rem] p-5 sm:p-6">
               <h3 className="text-lg font-semibold text-white">Daily Archive</h3>
               <div className="mt-4 space-y-2">

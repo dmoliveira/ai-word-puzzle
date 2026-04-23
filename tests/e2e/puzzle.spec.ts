@@ -61,3 +61,21 @@ test("player can type and navigate directly on the board grid", async ({ page })
   await page.locator(':focus').press("Enter");
   await expect(page.getByTestId("active-clue-badge")).not.toHaveText(firstBadge);
 });
+
+test("mobile player can switch between board, clues, and archive panels", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+
+  await expect(page.getByRole("button", { name: "Board" })).toBeVisible();
+  await expect(page.getByText("Active clue")).toBeVisible();
+
+  await page.getByRole("button", { name: "Clues" }).click();
+  await expect(page.getByRole("heading", { name: "Clues" })).toBeVisible();
+  await expect(page.getByText("Daily Archive")).not.toBeVisible();
+
+  await page.getByRole("button", { name: "Archive" }).click();
+  await expect(page.getByRole("heading", { name: "Daily Archive" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Board" }).click();
+  await expect(page.getByText("Active clue")).toBeVisible();
+});
