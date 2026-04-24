@@ -135,3 +135,11 @@ test("archive insights panel is visible", async ({ page }) => {
   await expect(page.locator('div').filter({ hasText: /^Last 7 days$/ })).toBeVisible();
   await expect(page.locator('div').filter({ hasText: /^Last 30 days$/ })).toBeVisible();
 });
+
+test("word review exposes vocabulary support for learners", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Review Word" }).click();
+  await expect(page.getByTestId("review-vocabulary-support")).toBeVisible();
+  await expect(page.getByTestId("review-vocabulary-support")).toContainText(/Example idea:/);
+});
