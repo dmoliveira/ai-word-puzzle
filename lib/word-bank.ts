@@ -264,39 +264,86 @@ function getDifficultyScore(level: ChallengeLevel) {
 function createPrompt(pack: TopicPack, answer: string, frequencyBand: PuzzleWord["frequencyBand"]) {
   const scene = pack.scene[answer.length % pack.scene.length];
 
-  if (pack.id === "desert") {
-    return frequencyBand === "rare"
-      ? `Desert clue: picture ${scene} and reach for a more literary or evocative word from that landscape.`
-      : frequencyBand === "uncommon"
-        ? `Desert clue: picture ${scene} and choose a richer word that still feels dry, bright, or windworn.`
-        : `Desert clue: picture ${scene} and choose a clear everyday word from that landscape.`;
-  }
+  const topicPromptTone: Record<TopicPack["id"], { common: string; uncommon: string; rare: string }> = {
+    myth: {
+      common: `Myth clue: picture ${scene} and choose a familiar storybook or legend word.`,
+      uncommon: `Myth clue: picture ${scene} and choose a richer legend word with older flavor.`,
+      rare: `Myth clue: picture ${scene} and reach for a more evocative or ceremonial word from legend.`,
+    },
+    cosmos: {
+      common: `Cosmos clue: picture ${scene} and choose a clear space or sky word.`,
+      uncommon: `Cosmos clue: picture ${scene} and choose a richer space word with more science flavor.`,
+      rare: `Cosmos clue: picture ${scene} and reach for a more technical or poetic space word.`,
+    },
+    ocean: {
+      common: `Ocean clue: picture ${scene} and choose a familiar sea or shore word.`,
+      uncommon: `Ocean clue: picture ${scene} and choose a more textured coastal or sailing word.`,
+      rare: `Ocean clue: picture ${scene} and reach for a sharper maritime or deep-water word.`,
+    },
+    garden: {
+      common: `Garden clue: picture ${scene} and choose a familiar green or growing word.`,
+      uncommon: `Garden clue: picture ${scene} and choose a richer plant or courtyard word.`,
+      rare: `Garden clue: picture ${scene} and reach for a more delicate botanical word.`,
+    },
+    city: {
+      common: `City clue: picture ${scene} and choose a familiar street, building, or travel word.`,
+      uncommon: `City clue: picture ${scene} and choose a more textured urban word.`,
+      rare: `City clue: picture ${scene} and reach for a more atmospheric city-night word.`,
+    },
+    music: {
+      common: `Music clue: think of ${scene} and choose a familiar song or instrument word.`,
+      uncommon: `Music clue: think of ${scene} and choose a richer performance or rhythm word.`,
+      rare: `Music clue: think of ${scene} and reach for a more expressive music word.`,
+    },
+    kitchen: {
+      common: `Kitchen clue: picture ${scene} and choose a familiar food or cooking word.`,
+      uncommon: `Kitchen clue: picture ${scene} and choose a richer kitchen or flavor word.`,
+      rare: `Kitchen clue: picture ${scene} and reach for a more specific culinary word.`,
+    },
+    wild: {
+      common: `Wild clue: picture ${scene} and choose a familiar trail, forest, or mountain word.`,
+      uncommon: `Wild clue: picture ${scene} and choose a more textured landscape word.`,
+      rare: `Wild clue: picture ${scene} and reach for a more atmospheric wilderness word.`,
+    },
+    weather: {
+      common: `Weather clue: picture ${scene} and choose a familiar sky or storm word.`,
+      uncommon: `Weather clue: picture ${scene} and choose a richer weather word with more texture.`,
+      rare: `Weather clue: picture ${scene} and reach for a sharper atmospheric word.`,
+    },
+    desert: {
+      common: `Desert clue: picture ${scene} and choose a clear everyday word from that landscape.`,
+      uncommon: `Desert clue: picture ${scene} and choose a richer word that still feels dry, bright, or windworn.`,
+      rare: `Desert clue: picture ${scene} and reach for a more literary or evocative word from that landscape.`,
+    },
+    festival: {
+      common: `Festival clue: think of ${scene} and pick a familiar word you would expect around a celebration.`,
+      uncommon: `Festival clue: think of ${scene} and find a brighter, slightly richer celebration word.`,
+      rare: `Festival clue: think of ${scene} and reach for a more vivid celebratory word.`,
+    },
+    winter: {
+      common: `Winterlight clue: picture ${scene} and choose a familiar winter word that fits cleanly.`,
+      uncommon: `Winterlight clue: picture ${scene} and choose a textured winter word with a softer mood.`,
+      rare: `Winterlight clue: picture ${scene} and reach for a colder, more poetic English word.`,
+    },
+    invent: {
+      common: `Invention clue: picture ${scene} and choose a familiar machine or workshop word.`,
+      uncommon: `Invention clue: picture ${scene} and choose a more technical making word.`,
+      rare: `Invention clue: picture ${scene} and reach for a sharper engineering or instrument word.`,
+    },
+    story: {
+      common: `Story clue: picture ${scene} and choose a familiar book or tale word.`,
+      uncommon: `Story clue: picture ${scene} and choose a richer narrative word.`,
+      rare: `Story clue: picture ${scene} and reach for a more literary story word.`,
+    },
+    greek: {
+      common: `Greek clue: picture ${scene} and choose a familiar letter or symbol word.`,
+      uncommon: `Greek clue: picture ${scene} and choose a richer notation or symbol word.`,
+      rare: `Greek clue: picture ${scene} and reach for a more academic or symbolic word.`,
+    },
+  };
 
-  if (pack.id === "festival") {
-    return frequencyBand === "rare"
-      ? `Festival clue: think of ${scene} and reach for a more vivid celebratory word.`
-      : frequencyBand === "uncommon"
-        ? `Festival clue: think of ${scene} and find a brighter, slightly richer celebration word.`
-        : `Festival clue: think of ${scene} and pick a familiar word you would expect around a celebration.`;
-  }
-
-  if (pack.id === "winter") {
-    return frequencyBand === "rare"
-      ? `Winterlight clue: picture ${scene} and reach for a colder, more poetic English word.`
-      : frequencyBand === "uncommon"
-        ? `Winterlight clue: picture ${scene} and choose a textured winter word with a softer mood.`
-        : `Winterlight clue: picture ${scene} and choose a familiar winter word that fits cleanly.`;
-  }
-
-  if (frequencyBand === "rare") {
-    return `${pack.label} clue: think of ${scene} and reach for a rarer, more evocative English answer.`;
-  }
-
-  if (frequencyBand === "uncommon") {
-    return `${pack.label} clue: think of ${scene} and find a slightly richer word that still fits the scene cleanly.`;
-  }
-
-  return `${pack.label} clue: think of ${scene} and a familiar word that belongs in that atmosphere.`;
+  const tier = frequencyBand === "rare" ? "rare" : frequencyBand === "uncommon" ? "uncommon" : "common";
+  return topicPromptTone[pack.id][tier];
 }
 
 function createMicroHint(pack: TopicPack, answer: string, frequencyBand: PuzzleWord["frequencyBand"]) {

@@ -86,3 +86,39 @@ body::before {
   color: var(--accent);
   border: 1px solid var(--accent-strong);
 }
+
+.completion-burst::before,
+.completion-burst::after {
+  position: absolute;
+  inset: auto;
+  width: 12rem;
+  height: 12rem;
+  border-radius: 9999px;
+  background: radial-gradient(circle, rgb(125 211 252 / 0.18), transparent 65%);
+  content: "";
+  pointer-events: none;
+  animation: completion-float 6s ease-in-out infinite;
+}
+
+.completion-burst::before {
+  top: -2rem;
+  left: -2rem;
+}
+
+.completion-burst::after {
+  right: -2rem;
+  bottom: -3rem;
+  animation-delay: 1.2s;
+}
+
+@keyframes completion-float {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 0.7;
+  }
+  50% {
+    transform: translateY(-8px) scale(1.05);
+    opacity: 1;
+  }
+}

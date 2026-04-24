@@ -26,6 +26,7 @@ const defaultOptions: PuzzleOptions = {
   style: "alpha",
   clueDensity: 2,
   timerEnabled: true,
+  learningMode: false,
   seed: "",
 };
 
@@ -38,6 +39,7 @@ function normalizeOptions(input?: Partial<PuzzleOptions>): PuzzleOptions {
     style: input?.style ?? defaultOptions.style,
     clueDensity: input?.clueDensity ?? defaultOptions.clueDensity,
     timerEnabled: input?.timerEnabled ?? defaultOptions.timerEnabled,
+    learningMode: input?.learningMode ?? defaultOptions.learningMode,
     seed: input?.seed ?? (input?.mode === "daily" ? getDefaultDailySeed() : defaultOptions.seed),
   };
 }
@@ -68,6 +70,7 @@ function readSharedOptionsFromUrl() {
     clueDensity: Number(params.get("clueDensity") ?? "") as 1 | 2 | 3,
     puzzleSize: Number(params.get("puzzleSize") ?? "") || undefined,
     timerEnabled: params.get("timerEnabled") ? params.get("timerEnabled") === "true" : undefined,
+    learningMode: params.get("learningMode") ? params.get("learningMode") === "true" : undefined,
     topics,
   });
 }
@@ -84,6 +87,7 @@ function buildShareUrl(options: PuzzleOptions) {
   url.searchParams.set("puzzleSize", String(options.puzzleSize));
   url.searchParams.set("clueDensity", String(options.clueDensity));
   url.searchParams.set("timerEnabled", String(options.timerEnabled));
+  url.searchParams.set("learningMode", String(options.learningMode));
   url.searchParams.set("topics", options.topics.join(","));
   return url.toString();
 }
@@ -447,6 +451,23 @@ export function WordPuzzleStudio() {
 
   function updateOptions<K extends keyof PuzzleOptions>(key: K, value: PuzzleOptions[K]) {
     setOptions((current) => ({ ...current, [key]: value }));
+
+    if (key === "learningMode") {
+      setState((current) => {
+        const nextState = {
+          ...current,
+          run: {
+            ...current.run,
+            options: {
+              ...current.run.options,
+              learningMode: value as boolean,
+            },
+          },
+        };
+        syncProgress(nextState);
+        return nextState;
+      });
+    }
   }
 
   function toggleTopic(topicId: TopicId) {
@@ -988,6 +1009,11 @@ export function WordPuzzleStudio() {
                   <input type="checkbox" checked={options.timerEnabled} onChange={(event) => updateOptions("timerEnabled", event.target.checked)} className="size-4 rounded border-white/20 bg-slate-950" />
                   Timer enabled
                 </label>
+
+                <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/4 px-4 py-3 text-sm text-slate-200">
+                  <input type="checkbox" checked={options.learningMode} onChange={(event) => updateOptions("learningMode", event.target.checked)} className="size-4 rounded border-white/20 bg-slate-950" />
+                  Learning mode
+                </label>
               </div>
 
               <button type="button" onClick={() => startNewRun()} disabled={isStarting} className="accent-chip w-full rounded-2xl px-4 py-3 text-sm font-semibold disabled:opacity-60">
@@ -1162,32 +1188,38 @@ export function WordPuzzleStudio() {
                       ))}
                     </div>
 
-                    <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_16rem]">
-                      <div className="rounded-2xl border border-white/10 bg-slate-950/45 p-4">
-                        <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Vocabulary help</div>
-                        <div className="mt-3 space-y-3 text-sm text-slate-200">
-                          <div>
-                            <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Meaning cue</div>
-                            <p className="mt-1 text-slate-200">{activeWord.learningNote}</p>
-                          </div>
-                          <div>
-                            <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Use it like this</div>
-                            <p className="mt-1 text-slate-200">{activeWord.usageExample}</p>
+                    {state.run.options.learningMode ? (
+                      <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_16rem]">
+                        <div className="rounded-2xl border border-white/10 bg-slate-950/45 p-4">
+                          <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Vocabulary help</div>
+                          <div className="mt-3 space-y-3 text-sm text-slate-200">
+                            <div>
+                              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Meaning cue</div>
+                              <p className="mt-1 text-slate-200">{activeWord.learningNote}</p>
+                            </div>
+                            <div>
+                              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Use it like this</div>
+                              <p className="mt-1 text-slate-200">{activeWord.usageExample}</p>
+                            </div>
+                            <div>
+                              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Extra cue</div>
+                              <p className="mt-1 text-slate-300">{activeWord.microHint}</p>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                      <div className="rounded-2xl border border-white/10 bg-slate-950/45 p-4">
-                        <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Nearby words</div>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {activeWord.relatedWords.map((related) => (
-                            <span key={related} className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] capitalize text-slate-200">
-                              {related}
-                            </span>
-                          ))}
+                        <div className="rounded-2xl border border-white/10 bg-slate-950/45 p-4">
+                          <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Nearby words</div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {activeWord.relatedWords.map((related) => (
+                              <span key={related} className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] capitalize text-slate-200">
+                                {related}
+                              </span>
+                            ))}
+                          </div>
+                          <p className="mt-3 text-xs leading-5 text-slate-400">Use the theme, these nearby ideas, and the first letter to build stronger English vocabulary while you play.</p>
                         </div>
-                        <p className="mt-3 text-xs leading-5 text-slate-400">Use the theme, these nearby ideas, and the first letter to build stronger English vocabulary while you play.</p>
                       </div>
-                    </div>
+                    ) : null}
 
                     <div className="mt-4 flex flex-wrap gap-2">
                       <span className="rounded-full border border-white/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-slate-300">Enter next</span>
@@ -1270,18 +1302,21 @@ export function WordPuzzleStudio() {
                       <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Current answer</div>
                       <div data-testid="review-word-answer" className="mt-2 text-3xl font-semibold uppercase tracking-[0.16em] text-white">{activeWord.answer}</div>
                       <p className="mt-3 text-sm text-slate-300">{activeWord.prompt}</p>
-                      <div data-testid="review-vocabulary-support" className="mt-4 rounded-2xl border border-white/10 bg-slate-950/40 p-4 text-left">
-                        <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Vocabulary support</div>
-                        <p className="mt-2 text-sm text-slate-200">{activeWord.learningNote}</p>
-                        <p className="mt-3 text-sm text-slate-300">{activeWord.usageExample}</p>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {activeWord.relatedWords.map((related) => (
-                            <span key={related} className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] capitalize text-slate-200">
-                              {related}
-                            </span>
-                          ))}
+                      {state.run.options.learningMode ? (
+                        <div data-testid="review-vocabulary-support" className="mt-4 rounded-2xl border border-white/10 bg-slate-950/40 p-4 text-left">
+                          <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Vocabulary support</div>
+                          <p className="mt-2 text-sm text-slate-200">{activeWord.learningNote}</p>
+                          <p className="mt-3 text-sm text-slate-300">{activeWord.usageExample}</p>
+                          <p className="mt-3 text-sm text-slate-400">{activeWord.microHint}</p>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {activeWord.relatedWords.map((related) => (
+                              <span key={related} className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] capitalize text-slate-200">
+                                {related}
+                              </span>
+                            ))}
+                          </div>
                         </div>
-                      </div>
+                      ) : null}
                     </div>
                     <div className="rounded-3xl border border-white/10 bg-white/4 p-5">
                       <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Hint ladder</div>
@@ -1316,8 +1351,13 @@ export function WordPuzzleStudio() {
             ) : null}
 
             {finished ? (
-              <div data-testid="completion-card" className="glass-card relative overflow-hidden rounded-[2rem] p-6 text-center">
+              <div data-testid="completion-card" className="completion-burst glass-card relative overflow-hidden rounded-[2rem] p-6 text-center">
                 <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top,_rgba(125,211,252,0.24),_transparent_55%),radial-gradient(circle_at_20%_20%,_rgba(250,204,21,0.16),_transparent_35%),radial-gradient(circle_at_80%_10%,_rgba(192,132,252,0.18),_transparent_40%)]" />
+                <div className="pointer-events-none absolute inset-x-0 top-12 flex justify-center gap-3 opacity-70">
+                  <span className="h-2 w-2 rounded-full bg-sky-300 animate-pulse" />
+                  <span className="h-2 w-2 rounded-full bg-violet-300 animate-pulse [animation-delay:180ms]" />
+                  <span className="h-2 w-2 rounded-full bg-amber-300 animate-pulse [animation-delay:360ms]" />
+                </div>
                 <div className="text-xs uppercase tracking-[0.28em] text-slate-400">Run complete</div>
                 <h3 className="mt-2 text-3xl font-semibold text-white">Puzzle cleared.</h3>
                 <p className="mt-3 text-sm text-slate-300">Your archive and streaks have been updated. Replay the same seed, jump into review, or copy the result for later.</p>
