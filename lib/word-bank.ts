@@ -219,18 +219,38 @@ function getDifficultyScore(level: ChallengeLevel) {
   }
 }
 
-function createPrompt(pack: TopicPack, answer: string) {
+function createPrompt(pack: TopicPack, answer: string, frequencyBand: PuzzleWord["frequencyBand"]) {
   const scene = pack.scene[answer.length % pack.scene.length];
-  return `${pack.label} clue: think of ${scene} and a word that belongs in that atmosphere.`;
+
+  if (frequencyBand === "rare") {
+    return `${pack.label} clue: think of ${scene} and reach for a rarer, more evocative English answer.`;
+  }
+
+  if (frequencyBand === "uncommon") {
+    return `${pack.label} clue: think of ${scene} and find a slightly richer word that still fits the scene cleanly.`;
+  }
+
+  return `${pack.label} clue: think of ${scene} and a familiar word that belongs in that atmosphere.`;
 }
 
-function createMicroHint(pack: TopicPack, answer: string) {
+function createMicroHint(pack: TopicPack, answer: string, frequencyBand: PuzzleWord["frequencyBand"]) {
   const opening = answer[0]?.toUpperCase() ?? "?";
-  return `Starts with ${opening}, runs ${answer.length} letters, and leans toward ${pack.mood.toLowerCase()}`;
+
+  if (frequencyBand === "rare") {
+    return `Starts with ${opening}, runs ${answer.length} letters, leans toward ${pack.mood.toLowerCase()}, and sits in the sharper end of the lexicon.`;
+  }
+
+  if (frequencyBand === "uncommon") {
+    return `Starts with ${opening}, runs ${answer.length} letters, and leans toward ${pack.mood.toLowerCase()} with a little extra texture.`;
+  }
+
+  return `Starts with ${opening}, runs ${answer.length} letters, and leans toward ${pack.mood.toLowerCase()}.`;
 }
 
-function createTeaser(pack: TopicPack, answer: string) {
-  return `${pack.label} energy with ${answer.length <= 6 ? "a quick strike" : answer.length <= 9 ? "a steady build" : "a longer reveal"}.`;
+function createTeaser(pack: TopicPack, answer: string, frequencyBand: PuzzleWord["frequencyBand"]) {
+  const pace = answer.length <= 6 ? "a quick strike" : answer.length <= 9 ? "a steady build" : "a longer reveal";
+  const tone = frequencyBand === "rare" ? "Expect a less obvious finish." : frequencyBand === "uncommon" ? "There is a little extra texture here." : "This one should read cleanly once it clicks.";
+  return `${pack.label} energy with ${pace}. ${tone}`;
 }
 
 function createGeneralWords(level: ChallengeLevel, existingCount: number): PuzzleWord[] {
@@ -294,7 +314,7 @@ function createCuratedLexiconWords(startIndex: number): PuzzleWord[] {
         difficulty,
         frequencyBand: band,
         length: answer.length,
-        prompt: band === "rare" ? "A rarer English term that raises the clue tension." : band === "uncommon" ? "A richer English term with more texture." : "A familiar English clue lane with cleaner surface meaning.",
+        prompt: band === "rare" ? "A rarer English term. Think a little wider than the first obvious answer." : band === "uncommon" ? "A richer English term with more texture than the easiest lane." : "A familiar English clue lane with cleaner surface meaning.",
         microHint: `${band} lexicon clue. ${answer.length} letters long.`,
         teaser: band === "rare" ? "A rarer lexicon pick that sharpens the board." : "A curated English entry that balances the run.",
         visuals: [greekMarks[(startIndex + bandIndex + index) % greekMarks.length], band, `${answer.length} letters`],
@@ -340,9 +360,9 @@ function createGeneratedCompoundWords(): PuzzleWord[] {
             difficulty,
             frequencyBand: difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare",
             length: answer.length,
-            prompt: createPrompt(pack, answer),
-            microHint: createMicroHint(pack, answer),
-            teaser: `${pack.label} energy remixed into a fresh compound clue.`,
+            prompt: createPrompt(pack, answer, difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare"),
+            microHint: createMicroHint(pack, answer, difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare"),
+            teaser: createTeaser(pack, answer, difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare"),
             visuals: [pack.icons[(prefixIndex + index) % pack.icons.length], pack.scene[suffixIndex % pack.scene.length], `${answer.length} letters`],
             greekMark: greekMarks[(prefixIndex + suffixIndex) % greekMarks.length],
             weight: difficulty === "breeze" ? 5 : difficulty === "quest" ? 6 : 7,
@@ -378,9 +398,9 @@ export const wordBank: PuzzleWord[] = (() => {
             difficulty,
             frequencyBand,
             length: answer.length,
-            prompt: createPrompt(pack, answer),
-            microHint: createMicroHint(pack, answer),
-            teaser: createTeaser(pack, answer),
+            prompt: createPrompt(pack, answer, frequencyBand),
+            microHint: createMicroHint(pack, answer, frequencyBand),
+            teaser: createTeaser(pack, answer, frequencyBand),
             visuals: [pack.icons[index % pack.icons.length], pack.scene[groupIndex % pack.scene.length], `${answer.length} letters`],
             greekMark: greekMarks[(index + groupIndex) % greekMarks.length],
             weight: difficulty === "breeze" ? 2 : difficulty === "quest" ? 3 : 4,

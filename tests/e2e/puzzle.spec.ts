@@ -79,3 +79,17 @@ test("mobile player can switch between board, clues, and archive panels", async 
   await page.getByRole("button", { name: "Board" }).click();
   await expect(page.getByText("Active clue")).toBeVisible();
 });
+
+test("player sees completion stats after clearing the full puzzle", async ({ page }) => {
+  await page.goto("/");
+
+  for (let index = 0; index < 7; index += 1) {
+    await page.getByRole("button", { name: "Review Word" }).click();
+    const answer = ((await page.getByTestId("review-word-answer").textContent()) ?? "").trim();
+    await page.getByRole("button", { name: "Close" }).click();
+    await page.getByTestId("active-answer-input").fill(answer);
+  }
+
+  await expect(page.getByTestId("completion-card")).toBeVisible();
+  await expect(page.getByText("Copy result")).toBeVisible();
+});
