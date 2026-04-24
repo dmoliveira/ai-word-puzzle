@@ -142,5 +142,6 @@ test("word review exposes vocabulary support for learners", async ({ page }) => 
   await page.getByLabel("Learning mode").check();
   await page.getByRole("button", { name: "Review Word" }).click();
   await expect(page.getByTestId("review-vocabulary-support")).toBeVisible();
-  await expect(page.getByTestId("review-vocabulary-support")).toContainText(/Example idea:/);
+  await expect(page.getByTestId("review-vocabulary-support")).toContainText(/Example:/);
+  await expect(page.getByTestId("review-vocabulary-support")).toContainText(/Plain meaning:/);
 });

@@ -1198,6 +1198,10 @@ export function WordPuzzleStudio() {
                               <p className="mt-1 text-slate-200">{activeWord.learningNote}</p>
                             </div>
                             <div>
+                              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Plain meaning</div>
+                              <p className="mt-1 text-slate-200">{activeWord.plainMeaning}</p>
+                            </div>
+                            <div>
                               <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Use it like this</div>
                               <p className="mt-1 text-slate-200">{activeWord.usageExample}</p>
                             </div>
@@ -1216,7 +1220,7 @@ export function WordPuzzleStudio() {
                               </span>
                             ))}
                           </div>
-                          <p className="mt-3 text-xs leading-5 text-slate-400">Use the theme, these nearby ideas, and the first letter to build stronger English vocabulary while you play.</p>
+                          <p className="mt-3 text-xs leading-5 text-slate-400">{activeWord.translationAid}</p>
                         </div>
                       </div>
                     ) : null}
@@ -1306,8 +1310,10 @@ export function WordPuzzleStudio() {
                         <div data-testid="review-vocabulary-support" className="mt-4 rounded-2xl border border-white/10 bg-slate-950/40 p-4 text-left">
                           <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Vocabulary support</div>
                           <p className="mt-2 text-sm text-slate-200">{activeWord.learningNote}</p>
+                          <p className="mt-3 text-sm text-slate-200">{activeWord.plainMeaning}</p>
                           <p className="mt-3 text-sm text-slate-300">{activeWord.usageExample}</p>
                           <p className="mt-3 text-sm text-slate-400">{activeWord.microHint}</p>
+                          <p className="mt-3 text-sm text-slate-400">{activeWord.translationAid}</p>
                           <div className="mt-3 flex flex-wrap gap-2">
                             {activeWord.relatedWords.map((related) => (
                               <span key={related} className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] capitalize text-slate-200">
