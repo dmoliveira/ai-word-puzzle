@@ -37,6 +37,48 @@ function createRuntimeSeed() {
   return `custom-${Date.now()}`;
 }
 
+function readSharedOptionsFromUrl() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const mode = params.get("mode");
+  const seed = params.get("seed");
+  const topics = params.get("topics")?.split(",").filter(Boolean) as TopicId[] | undefined;
+
+  if (!mode && !seed && !topics?.length) {
+    return null;
+  }
+
+  return normalizeOptions({
+    mode: mode === "daily" ? "daily" : "custom",
+    seed: seed ?? "",
+    challenge: (params.get("challenge") as PuzzleOptions["challenge"] | null) ?? undefined,
+    style: (params.get("style") as PuzzleOptions["style"] | null) ?? undefined,
+    clueDensity: Number(params.get("clueDensity") ?? "") as 1 | 2 | 3,
+    puzzleSize: Number(params.get("puzzleSize") ?? "") || undefined,
+    timerEnabled: params.get("timerEnabled") ? params.get("timerEnabled") === "true" : undefined,
+    topics,
+  });
+}
+
+function buildShareUrl(options: PuzzleOptions) {
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.hash = "";
+  const shareSeed = options.mode === "daily" ? options.seed.replace(/^daily:/, "") : options.seed;
+  url.searchParams.set("mode", options.mode);
+  url.searchParams.set("seed", shareSeed);
+  url.searchParams.set("challenge", options.challenge);
+  url.searchParams.set("style", options.style);
+  url.searchParams.set("puzzleSize", String(options.puzzleSize));
+  url.searchParams.set("clueDensity", String(options.clueDensity));
+  url.searchParams.set("timerEnabled", String(options.timerEnabled));
+  url.searchParams.set("topics", options.topics.join(","));
+  return url.toString();
+}
+
 function createStateFromRun(run: PersistedRunState["run"]): PersistedRunState {
   return {
     run,
@@ -257,11 +299,19 @@ export function WordPuzzleStudio() {
   useEffect(() => {
     const handle = window.setTimeout(() => {
       const stored = readStoredState();
+      const shared = readSharedOptionsFromUrl();
       const snapshot = readProgressSnapshot();
 
       setProgress(snapshot);
 
-      if (stored) {
+      if (shared) {
+        const nextState = createFreshState(shared);
+        startTransition(() => {
+          setOptions(shared);
+          setState(nextState);
+          setFocusedCellKey(getFirstOpenCellKey(nextState, nextState.activeWordId));
+        });
+      } else if (stored) {
         startTransition(() => {
           setOptions(stored.options);
           setState(stored.state);
@@ -404,6 +454,29 @@ export function WordPuzzleStudio() {
       setCompletionToast("Run summary copied.");
     } catch {
       setCompletionToast("Clipboard unavailable on this device.");
+    }
+
+    window.setTimeout(() => setCompletionToast(null), 1800);
+  }
+
+  async function shareCurrentRunLink() {
+    const shareUrl = buildShareUrl(state.run.options);
+    const sharePayload = {
+      title: state.run.title,
+      text: `${state.run.title} on Astra Lexa`,
+      url: shareUrl,
+    };
+
+    try {
+      if (navigator.share) {
+        await navigator.share(sharePayload);
+        setCompletionToast("Run link shared.");
+      } else {
+        await navigator.clipboard.writeText(shareUrl);
+        setCompletionToast("Run link copied.");
+      }
+    } catch {
+      setCompletionToast("Share cancelled.");
     }
 
     window.setTimeout(() => setCompletionToast(null), 1800);
@@ -1131,8 +1204,11 @@ export function WordPuzzleStudio() {
                   <button type="button" onClick={() => setReviewMode("puzzle")} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">
                     Review full puzzle
                   </button>
+                  <button type="button" onClick={shareCurrentRunLink} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">
+                    Share run link
+                  </button>
                   <button type="button" onClick={copyCompletionSummary} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">
-                    Copy result
+                    Copy result text
                   </button>
                   <button type="button" onClick={startTodayDailyRun} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">
                     Play daily
