@@ -264,6 +264,30 @@ function getDifficultyScore(level: ChallengeLevel) {
 function createPrompt(pack: TopicPack, answer: string, frequencyBand: PuzzleWord["frequencyBand"]) {
   const scene = pack.scene[answer.length % pack.scene.length];
 
+  if (pack.id === "desert") {
+    return frequencyBand === "rare"
+      ? `Desert clue: picture ${scene} and reach for a more literary or evocative word from that landscape.`
+      : frequencyBand === "uncommon"
+        ? `Desert clue: picture ${scene} and choose a richer word that still feels dry, bright, or windworn.`
+        : `Desert clue: picture ${scene} and choose a clear everyday word from that landscape.`;
+  }
+
+  if (pack.id === "festival") {
+    return frequencyBand === "rare"
+      ? `Festival clue: think of ${scene} and reach for a more vivid celebratory word.`
+      : frequencyBand === "uncommon"
+        ? `Festival clue: think of ${scene} and find a brighter, slightly richer celebration word.`
+        : `Festival clue: think of ${scene} and pick a familiar word you would expect around a celebration.`;
+  }
+
+  if (pack.id === "winter") {
+    return frequencyBand === "rare"
+      ? `Winterlight clue: picture ${scene} and reach for a colder, more poetic English word.`
+      : frequencyBand === "uncommon"
+        ? `Winterlight clue: picture ${scene} and choose a textured winter word with a softer mood.`
+        : `Winterlight clue: picture ${scene} and choose a familiar winter word that fits cleanly.`;
+  }
+
   if (frequencyBand === "rare") {
     return `${pack.label} clue: think of ${scene} and reach for a rarer, more evocative English answer.`;
   }
@@ -295,6 +319,24 @@ function createTeaser(pack: TopicPack, answer: string, frequencyBand: PuzzleWord
   return `${pack.label} energy with ${pace}. ${tone}`;
 }
 
+function createLearningNote(pack: TopicPack, answer: string, frequencyBand: PuzzleWord["frequencyBand"]) {
+  const part = answer.length <= 5 ? "short everyday vocabulary" : answer.length <= 8 ? "mid-length descriptive vocabulary" : "longer expressive vocabulary";
+  const difficultyTone = frequencyBand === "rare" ? "It is less frequent, so use the scene and tone together." : frequencyBand === "uncommon" ? "It is not the first word every learner reaches for, so lean on the mood." : "It is fairly common, so connect it to the scene first.";
+  return `${pack.label} language cue: this answer behaves like ${part}. ${difficultyTone}`;
+}
+
+function createUsageExample(pack: TopicPack, answer: string) {
+  return `Example idea: "The ${answer} fits a ${pack.mood.toLowerCase()} scene."`;
+}
+
+function createRelatedWords(pack: TopicPack, answer: string) {
+  const related = [pack.icons[answer.length % pack.icons.length], pack.scene[0], pack.label.toLowerCase()]
+    .map((item) => item.replace(/[^a-z ]/gi, "").trim())
+    .filter(Boolean);
+
+  return [...new Set(related)].slice(0, 3);
+}
+
 function createGeneralWords(level: ChallengeLevel, existingCount: number): PuzzleWord[] {
   const words = generalWordPools[level]
     .split(/\s+/)
@@ -316,6 +358,9 @@ function createGeneralWords(level: ChallengeLevel, existingCount: number): Puzzl
       prompt: `Think in English wordplay rather than a single subject lane.`,
       microHint: `A flexible common-word clue. ${word.length} letters long.`,
       teaser: `A bridge word that keeps the round flowing.`,
+      learningNote: `General English cue: try to connect the letters to a broad everyday meaning before chasing a niche topic word.`,
+      usageExample: `Example idea: "The word ${word} can appear in many simple English situations."`,
+      relatedWords: ["general", `${word.length} letters`, frequencyBand],
       visuals: [greekMarks[(existingCount + index) % greekMarks.length], `${word.length} letters`, index % 2 === 0 ? "common" : "nimble"],
       greekMark: greekMarks[(existingCount + index) % greekMarks.length],
       weight: 1,
@@ -359,6 +404,9 @@ function createCuratedLexiconWords(startIndex: number): PuzzleWord[] {
         prompt: band === "rare" ? "A rarer English term. Think a little wider than the first obvious answer." : band === "uncommon" ? "A richer English term with more texture than the easiest lane." : "A familiar English clue lane with cleaner surface meaning.",
         microHint: `${band} lexicon clue. ${answer.length} letters long.`,
         teaser: band === "rare" ? "A rarer lexicon pick that sharpens the board." : "A curated English entry that balances the run.",
+        learningNote: band === "rare" ? "Vocabulary cue: this is a lower-frequency English word, so use length, first letter, and theme together." : band === "uncommon" ? "Vocabulary cue: this word is useful intermediate vocabulary with a stronger flavor than the most common option." : "Vocabulary cue: this is common English vocabulary that should become easier with repetition.",
+        usageExample: `Example idea: "The word ${answer} can fit a clear English sentence once you know its tone."`,
+        relatedWords: [band, `${answer.length} letters`, "english"],
         visuals: [greekMarks[(startIndex + bandIndex + index) % greekMarks.length], band, `${answer.length} letters`],
         greekMark: greekMarks[(startIndex + bandIndex + index) % greekMarks.length],
         weight: band === "common" ? 1 : band === "uncommon" ? 2 : 3,
@@ -405,6 +453,9 @@ function createGeneratedCompoundWords(): PuzzleWord[] {
             prompt: createPrompt(pack, answer, difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare"),
             microHint: createMicroHint(pack, answer, difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare"),
             teaser: createTeaser(pack, answer, difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare"),
+            learningNote: createLearningNote(pack, answer, difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare"),
+            usageExample: createUsageExample(pack, answer),
+            relatedWords: createRelatedWords(pack, answer),
             visuals: [pack.icons[(prefixIndex + index) % pack.icons.length], pack.scene[suffixIndex % pack.scene.length], `${answer.length} letters`],
             greekMark: greekMarks[(prefixIndex + suffixIndex) % greekMarks.length],
             weight: difficulty === "breeze" ? 5 : difficulty === "quest" ? 6 : 7,
@@ -443,6 +494,9 @@ export const wordBank: PuzzleWord[] = (() => {
             prompt: createPrompt(pack, answer, frequencyBand),
             microHint: createMicroHint(pack, answer, frequencyBand),
             teaser: createTeaser(pack, answer, frequencyBand),
+            learningNote: createLearningNote(pack, answer, frequencyBand),
+            usageExample: createUsageExample(pack, answer),
+            relatedWords: createRelatedWords(pack, answer),
             visuals: [pack.icons[index % pack.icons.length], pack.scene[groupIndex % pack.scene.length], `${answer.length} letters`],
             greekMark: greekMarks[(index + groupIndex) % greekMarks.length],
             weight: difficulty === "breeze" ? 2 : difficulty === "quest" ? 3 : 4,

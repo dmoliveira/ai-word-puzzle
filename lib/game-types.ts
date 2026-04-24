@@ -33,6 +33,9 @@ export type PuzzleWord = {
   prompt: string;
   microHint: string;
   teaser: string;
+  learningNote: string;
+  usageExample: string;
+  relatedWords: string[];
   visuals: string[];
   greekMark: string;
   weight: number;

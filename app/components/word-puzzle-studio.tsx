@@ -870,7 +870,7 @@ export function WordPuzzleStudio() {
 
   return (
     <main className={`scroll-shell ${theme.className} min-h-screen px-4 py-6 sm:px-6 lg:px-8`}>
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
+      <div className="mx-auto flex w-full max-w-[96rem] flex-col gap-6">
         <section className="glass-card overflow-hidden rounded-[2rem] p-6 sm:p-8">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
               <div className="max-w-3xl space-y-4">
@@ -913,7 +913,7 @@ export function WordPuzzleStudio() {
           </div>
         </section>
 
-        <div className="grid gap-6 xl:grid-cols-[22rem_minmax(0,1fr)_20rem]">
+        <div className="grid gap-6 xl:grid-cols-[18rem_minmax(0,1.55fr)_17rem]">
           <aside className="glass-card rounded-[2rem] p-5 sm:p-6">
             <div className="mb-5">
               <h2 className="text-lg font-semibold text-white">Run Builder</h2>
@@ -1047,7 +1047,7 @@ export function WordPuzzleStudio() {
               </div>
             </div>
 
-            <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,1.45fr)_19rem]">
               <div className={`${mobilePanel === "board" ? "block" : "hidden"} glass-card rounded-[2rem] p-4 sm:p-6 lg:block`}>
                 <div className="mb-4 flex items-center justify-between">
                   <div>
@@ -1162,6 +1162,33 @@ export function WordPuzzleStudio() {
                       ))}
                     </div>
 
+                    <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_16rem]">
+                      <div className="rounded-2xl border border-white/10 bg-slate-950/45 p-4">
+                        <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Vocabulary help</div>
+                        <div className="mt-3 space-y-3 text-sm text-slate-200">
+                          <div>
+                            <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Meaning cue</div>
+                            <p className="mt-1 text-slate-200">{activeWord.learningNote}</p>
+                          </div>
+                          <div>
+                            <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Use it like this</div>
+                            <p className="mt-1 text-slate-200">{activeWord.usageExample}</p>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="rounded-2xl border border-white/10 bg-slate-950/45 p-4">
+                        <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Nearby words</div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {activeWord.relatedWords.map((related) => (
+                            <span key={related} className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] capitalize text-slate-200">
+                              {related}
+                            </span>
+                          ))}
+                        </div>
+                        <p className="mt-3 text-xs leading-5 text-slate-400">Use the theme, these nearby ideas, and the first letter to build stronger English vocabulary while you play.</p>
+                      </div>
+                    </div>
+
                     <div className="mt-4 flex flex-wrap gap-2">
                       <span className="rounded-full border border-white/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-slate-300">Enter next</span>
                       <span className="rounded-full border border-white/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-slate-300">Shift+Enter back</span>
@@ -1243,6 +1270,18 @@ export function WordPuzzleStudio() {
                       <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Current answer</div>
                       <div data-testid="review-word-answer" className="mt-2 text-3xl font-semibold uppercase tracking-[0.16em] text-white">{activeWord.answer}</div>
                       <p className="mt-3 text-sm text-slate-300">{activeWord.prompt}</p>
+                      <div data-testid="review-vocabulary-support" className="mt-4 rounded-2xl border border-white/10 bg-slate-950/40 p-4 text-left">
+                        <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Vocabulary support</div>
+                        <p className="mt-2 text-sm text-slate-200">{activeWord.learningNote}</p>
+                        <p className="mt-3 text-sm text-slate-300">{activeWord.usageExample}</p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {activeWord.relatedWords.map((related) => (
+                            <span key={related} className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] capitalize text-slate-200">
+                              {related}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                     <div className="rounded-3xl border border-white/10 bg-white/4 p-5">
                       <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Hint ladder</div>
