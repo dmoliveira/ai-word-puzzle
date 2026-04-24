@@ -70,3 +70,23 @@ test("new topic packs participate in generation", () => {
 
   assert.ok(run.words.some((word) => word.topicId === "desert" || word.topicId === "festival" || word.topicId === "winter"));
 });
+
+test("breeze runs avoid rare entries", () => {
+  const run = buildPuzzleRun({
+    challenge: "breeze",
+    topics: ["myth", "cosmos", "winter"],
+    puzzleSize: 8,
+  });
+
+  assert.equal(run.words.some((word) => word.frequencyBand === "rare"), false);
+});
+
+test("quest runs keep rare entries limited", () => {
+  const run = buildPuzzleRun({
+    challenge: "quest",
+    topics: ["myth", "cosmos", "desert"],
+    puzzleSize: 8,
+  });
+
+  assert.ok(run.words.filter((word) => word.frequencyBand === "rare").length <= 1);
+});

@@ -75,8 +75,24 @@ function scoreEntry(entry: PuzzleWord, options: PuzzleOptions, chosen: PuzzleWor
   const topicVarietyBonus = chosen.every((word) => word.topicId !== entry.topicId) ? 3 : 0;
 
   const frequencyBonus = entry.frequencyBand === "common" ? 2 : entry.frequencyBand === "uncommon" ? 1 : -1;
+  const rareCount = chosen.filter((word) => word.frequencyBand === "rare").length;
+  const uncommonCount = chosen.filter((word) => word.frequencyBand === "uncommon").length;
+  const fairnessPenalty =
+    options.challenge === "breeze"
+      ? entry.frequencyBand === "rare"
+        ? -24
+        : entry.frequencyBand === "uncommon" && uncommonCount >= Math.max(1, Math.floor(options.puzzleSize / 3))
+          ? -6
+          : 0
+      : options.challenge === "quest"
+        ? entry.frequencyBand === "rare" && rareCount >= 1
+          ? -12
+          : entry.frequencyBand === "uncommon" && uncommonCount >= Math.ceil(options.puzzleSize / 2)
+            ? -4
+            : 0
+        : 0;
 
-  return inRange + exactDifficulty + nearDifficulty + topicBonus + repeatedInitialPenalty + repeatedLengthPenalty + suffixPenalty + topicVarietyBonus + frequencyBonus - entry.weight;
+  return inRange + exactDifficulty + nearDifficulty + topicBonus + repeatedInitialPenalty + repeatedLengthPenalty + suffixPenalty + topicVarietyBonus + frequencyBonus + fairnessPenalty - entry.weight;
 }
 
 function getBoardSize(words: PuzzleWord[]) {
