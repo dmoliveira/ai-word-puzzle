@@ -73,6 +73,7 @@ export type PuzzleOptions = {
   style: ThemeStyleId;
   clueDensity: 1 | 2 | 3;
   timerEnabled: boolean;
+  learningMode: boolean;
   seed: string;
 };
 

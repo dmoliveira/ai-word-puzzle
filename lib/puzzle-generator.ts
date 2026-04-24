@@ -313,6 +313,7 @@ export function buildPuzzleRun(input: Partial<PuzzleOptions> = {}): PuzzleRun {
     style: input.style ?? "alpha",
     clueDensity: input.clueDensity ?? 2,
     timerEnabled: input.timerEnabled ?? true,
+    learningMode: input.learningMode ?? false,
     seed: input.seed ?? "",
   };
 
