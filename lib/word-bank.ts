@@ -372,8 +372,54 @@ function createLearningNote(pack: TopicPack, answer: string, frequencyBand: Puzz
   return `${pack.label} language cue: this answer behaves like ${part}. ${difficultyTone}`;
 }
 
+function createPlainMeaning(pack: TopicPack, frequencyBand: PuzzleWord["frequencyBand"]) {
+  const base =
+    pack.id === "myth" ? "a legend or old-story idea" :
+    pack.id === "cosmos" ? "a space or sky idea" :
+    pack.id === "ocean" ? "a sea, shore, or water idea" :
+    pack.id === "garden" ? "a plant, flower, or growing idea" :
+    pack.id === "city" ? "a street, building, or urban idea" :
+    pack.id === "music" ? "a sound, song, or instrument idea" :
+    pack.id === "kitchen" ? "a food, flavor, or cooking idea" :
+    pack.id === "wild" ? "a trail, animal, or landscape idea" :
+    pack.id === "weather" ? "a sky, wind, rain, or storm idea" :
+    pack.id === "desert" ? "a dry, sandy, sunlit landscape idea" :
+    pack.id === "festival" ? "a celebration, parade, or bright-crowd idea" :
+    pack.id === "winter" ? "a cold, snowy, or hearthside idea" :
+    pack.id === "invent" ? "a machine, tool, or workshop idea" :
+    pack.id === "story" ? "a book, tale, or narrative idea" :
+    "a symbol, letter, or coded idea";
+
+  return frequencyBand === "rare"
+    ? `Plain meaning: think of ${base}, but in a less common or more literary way.`
+    : frequencyBand === "uncommon"
+      ? `Plain meaning: think of ${base}, but with a slightly richer word than the first beginner option.`
+      : `Plain meaning: think of ${base} in a clear everyday way.`;
+}
+
+function createTranslationAid(pack: TopicPack, answer: string) {
+  return `Translation aid: if you do not know ${answer} yet, first picture ${pack.scene[0]}, then connect it to ${pack.label.toLowerCase()} vocabulary instead of translating word by word.`;
+}
+
 function createUsageExample(pack: TopicPack, answer: string) {
-  return `Example idea: "The ${answer} fits a ${pack.mood.toLowerCase()} scene."`;
+  const sentenceStem =
+    pack.id === "myth" ? `In the old tale, the ${answer} appeared near the temple steps.` :
+    pack.id === "cosmos" ? `The crew watched the ${answer} drift across the dark sky.` :
+    pack.id === "ocean" ? `From the harbor wall, the ${answer} stood out above the tide.` :
+    pack.id === "garden" ? `By the gate, the ${answer} added color to the quiet garden.` :
+    pack.id === "city" ? `At the corner, the ${answer} gave the street its evening rhythm.` :
+    pack.id === "music" ? `When the lights dimmed, the ${answer} carried the song forward.` :
+    pack.id === "kitchen" ? `In the warm kitchen, the ${answer} changed the whole flavor.` :
+    pack.id === "wild" ? `Along the ridge, the ${answer} made the landscape feel alive.` :
+    pack.id === "weather" ? `By afternoon, the ${answer} had changed the air completely.` :
+    pack.id === "desert" ? `Across the dunes, the ${answer} broke the long line of sand.` :
+    pack.id === "festival" ? `At midnight, the ${answer} gave the square even more energy.` :
+    pack.id === "winter" ? `Outside the window, the ${answer} made the night feel quieter.` :
+    pack.id === "invent" ? `In the workshop, the ${answer} made the design finally work.` :
+    pack.id === "story" ? `By the last page, the ${answer} changed how the reader saw the scene.` :
+    `In the notes, the ${answer} made the symbol easier to remember.`;
+
+  return `Example: "${sentenceStem}"`;
 }
 
 function createRelatedWords(pack: TopicPack, answer: string) {
@@ -406,7 +452,9 @@ function createGeneralWords(level: ChallengeLevel, existingCount: number): Puzzl
       microHint: `A flexible common-word clue. ${word.length} letters long.`,
       teaser: `A bridge word that keeps the round flowing.`,
       learningNote: `General English cue: try to connect the letters to a broad everyday meaning before chasing a niche topic word.`,
-      usageExample: `Example idea: "The word ${word} can appear in many simple English situations."`,
+      plainMeaning: `Plain meaning: think of a common everyday English idea rather than a niche topic term.`,
+      usageExample: `Example: "The word ${word} can appear in many simple English situations."`,
+      translationAid: `Translation aid: connect ${word} to a simple daily situation first, then map it into your own language if needed.`,
       relatedWords: ["general", `${word.length} letters`, frequencyBand],
       visuals: [greekMarks[(existingCount + index) % greekMarks.length], `${word.length} letters`, index % 2 === 0 ? "common" : "nimble"],
       greekMark: greekMarks[(existingCount + index) % greekMarks.length],
@@ -452,7 +500,9 @@ function createCuratedLexiconWords(startIndex: number): PuzzleWord[] {
         microHint: `${band} lexicon clue. ${answer.length} letters long.`,
         teaser: band === "rare" ? "A rarer lexicon pick that sharpens the board." : "A curated English entry that balances the run.",
         learningNote: band === "rare" ? "Vocabulary cue: this is a lower-frequency English word, so use length, first letter, and theme together." : band === "uncommon" ? "Vocabulary cue: this word is useful intermediate vocabulary with a stronger flavor than the most common option." : "Vocabulary cue: this is common English vocabulary that should become easier with repetition.",
-        usageExample: `Example idea: "The word ${answer} can fit a clear English sentence once you know its tone."`,
+        plainMeaning: band === "rare" ? "Plain meaning: look for a less common English word that still matches the clue idea." : band === "uncommon" ? "Plain meaning: look for an intermediate English word with a bit more flavor." : "Plain meaning: look for a simple everyday English word.",
+        usageExample: `Example: "The word ${answer} can fit a clear English sentence once you know its tone."`,
+        translationAid: `Translation aid: connect ${answer} to the clue idea first, then translate the idea, not each separate word.`,
         relatedWords: [band, `${answer.length} letters`, "english"],
         visuals: [greekMarks[(startIndex + bandIndex + index) % greekMarks.length], band, `${answer.length} letters`],
         greekMark: greekMarks[(startIndex + bandIndex + index) % greekMarks.length],
@@ -501,7 +551,9 @@ function createGeneratedCompoundWords(): PuzzleWord[] {
             microHint: createMicroHint(pack, answer, difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare"),
             teaser: createTeaser(pack, answer, difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare"),
             learningNote: createLearningNote(pack, answer, difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare"),
+            plainMeaning: createPlainMeaning(pack, difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare"),
             usageExample: createUsageExample(pack, answer),
+            translationAid: createTranslationAid(pack, answer),
             relatedWords: createRelatedWords(pack, answer),
             visuals: [pack.icons[(prefixIndex + index) % pack.icons.length], pack.scene[suffixIndex % pack.scene.length], `${answer.length} letters`],
             greekMark: greekMarks[(prefixIndex + suffixIndex) % greekMarks.length],
@@ -542,7 +594,9 @@ export const wordBank: PuzzleWord[] = (() => {
             microHint: createMicroHint(pack, answer, frequencyBand),
             teaser: createTeaser(pack, answer, frequencyBand),
             learningNote: createLearningNote(pack, answer, frequencyBand),
+            plainMeaning: createPlainMeaning(pack, frequencyBand),
             usageExample: createUsageExample(pack, answer),
+            translationAid: createTranslationAid(pack, answer),
             relatedWords: createRelatedWords(pack, answer),
             visuals: [pack.icons[index % pack.icons.length], pack.scene[groupIndex % pack.scene.length], `${answer.length} letters`],
             greekMark: greekMarks[(index + groupIndex) % greekMarks.length],
