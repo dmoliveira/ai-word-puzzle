@@ -15,6 +15,8 @@ type ToastState = {
 } | null;
 
 type ToastTone = NonNullable<ToastState>["tone"];
+type HistoryFilterMode = "all" | "daily" | "custom";
+type HistoryFilterStatus = "all" | "finished" | "active";
 
 const defaultOptions: PuzzleOptions = {
   mode: "custom",
@@ -298,6 +300,8 @@ export function WordPuzzleStudio() {
   const [isStarting, setIsStarting] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState>(null);
+  const [historyModeFilter, setHistoryModeFilter] = useState<HistoryFilterMode>("all");
+  const [historyStatusFilter, setHistoryStatusFilter] = useState<HistoryFilterStatus>("all");
   const [progress, setProgress] = useState<ProgressSnapshot>(createEmptyProgress());
   const [focusedCellKey, setFocusedCellKey] = useState<string | null>(null);
   const lexiconSize = wordBank.length;
@@ -380,6 +384,9 @@ export function WordPuzzleStudio() {
   const rareSolvedCount = state.run.words.filter((word) => word.frequencyBand === "rare").length;
   const uncommonSolvedCount = state.run.words.filter((word) => word.frequencyBand === "uncommon").length;
   const commonSolvedCount = state.run.words.filter((word) => word.frequencyBand === "common").length;
+  const filteredHistory = progress.history
+    .filter((entry) => (historyModeFilter === "all" ? true : entry.mode === historyModeFilter))
+    .filter((entry) => (historyStatusFilter === "all" ? true : historyStatusFilter === "finished" ? entry.finished : !entry.finished));
 
   function showToast(message: string, tone: ToastTone = "success") {
     setToast({ message, tone });
@@ -1217,7 +1224,8 @@ export function WordPuzzleStudio() {
             ) : null}
 
             {finished ? (
-              <div data-testid="completion-card" className="glass-card rounded-[2rem] p-6 text-center">
+              <div data-testid="completion-card" className="glass-card relative overflow-hidden rounded-[2rem] p-6 text-center">
+                <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top,_rgba(125,211,252,0.24),_transparent_55%),radial-gradient(circle_at_20%_20%,_rgba(250,204,21,0.16),_transparent_35%),radial-gradient(circle_at_80%_10%,_rgba(192,132,252,0.18),_transparent_40%)]" />
                 <div className="text-xs uppercase tracking-[0.28em] text-slate-400">Run complete</div>
                 <h3 className="mt-2 text-3xl font-semibold text-white">Puzzle cleared.</h3>
                 <p className="mt-3 text-sm text-slate-300">Your archive and streaks have been updated. Replay the same seed, jump into review, or copy the result for later.</p>
@@ -1272,12 +1280,15 @@ export function WordPuzzleStudio() {
               <h3 className="text-lg font-semibold text-white">Daily Archive</h3>
               <div className="mt-4 space-y-2">
                 {archive.map((entry) => (
-                  <button key={entry.day} type="button" onClick={() => entry.summary ? replaySavedRun(entry.summary) : startNewRun({ ...options, mode: "daily", seed: entry.day })} className="w-full rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-left text-sm text-slate-200 transition hover:border-white/20">
+                  <button key={entry.day} type="button" onClick={() => entry.summary ? replaySavedRun(entry.summary) : startNewRun({ ...options, mode: "daily", seed: entry.day })} className={`w-full rounded-2xl border px-3 py-3 text-left text-sm text-slate-200 transition hover:border-white/20 ${entry.day === getDefaultDailySeed() ? "border-sky-400/30 bg-sky-500/10" : "border-white/10 bg-white/4"}`}>
                     <div className="flex items-center justify-between gap-3">
                       <span>{entry.day}</span>
                       <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] ${entry.summary?.finished ? "bg-emerald-500/12 text-emerald-200" : "bg-white/6 text-slate-300"}`}>{entry.summary?.finished ? "replay" : entry.summary ? "resume" : "open"}</span>
                     </div>
-                    <div className="mt-2 text-xs uppercase tracking-[0.18em] text-slate-400">{entry.summary ? `${entry.summary.challenge} / ${entry.summary.solvedCount}-${entry.summary.totalWords}` : "Open this daily seed"}</div>
+                    <div className="mt-2 flex items-center justify-between gap-2 text-xs uppercase tracking-[0.18em] text-slate-400">
+                      <span>{entry.summary ? `${entry.summary.challenge} / ${entry.summary.solvedCount}-${entry.summary.totalWords}` : "Open this daily seed"}</span>
+                      {entry.day === getDefaultDailySeed() ? <span className="text-sky-200">today</span> : null}
+                    </div>
                   </button>
                 ))}
               </div>
@@ -1285,19 +1296,43 @@ export function WordPuzzleStudio() {
 
             <div className="glass-card rounded-[2rem] p-5 sm:p-6">
               <h3 className="text-lg font-semibold text-white">Recent Runs</h3>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {([
+                  ["all", "All"],
+                  ["daily", "Daily"],
+                  ["custom", "Custom"],
+                ] as const).map(([value, label]) => (
+                  <button key={value} data-testid={`history-mode-${value}`} type="button" onClick={() => setHistoryModeFilter(value)} className={`rounded-full border px-3 py-1 text-xs transition ${historyModeFilter === value ? "accent-chip" : "border-white/10 bg-white/4 text-slate-300"}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {([
+                  ["all", "Any state"],
+                  ["finished", "Finished"],
+                  ["active", "In progress"],
+                ] as const).map(([value, label]) => (
+                  <button key={value} data-testid={`history-status-${value}`} type="button" onClick={() => setHistoryStatusFilter(value)} className={`rounded-full border px-3 py-1 text-xs transition ${historyStatusFilter === value ? "accent-chip" : "border-white/10 bg-white/4 text-slate-300"}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
               <div className="mt-4 space-y-2">
-                {progress.history.slice(0, 8).map((entry) => (
-                  <button key={entry.runId} type="button" onClick={() => replaySavedRun(entry)} className="w-full rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-left text-sm text-slate-200 transition hover:border-white/20">
+                {filteredHistory.slice(0, 8).map((entry) => (
+                  <button key={entry.runId} data-testid="recent-run-card" type="button" onClick={() => replaySavedRun(entry)} className="w-full rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-left text-sm text-slate-200 transition hover:border-white/20">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="font-medium text-white">{entry.title}</div>
                         <div className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">{entry.mode} / {entry.challenge} / {entry.solvedCount}-{entry.totalWords}</div>
                         <div className="mt-2 text-xs text-slate-400">{entry.finished ? "Replay the exact run configuration." : "Resume this seeded setup with the same board mix."}</div>
+                        <div className="mt-2 text-[11px] uppercase tracking-[0.18em] text-slate-500">seed {entry.seed.replace(/^daily:/, "")}</div>
                       </div>
                       <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] ${entry.finished ? "bg-emerald-500/12 text-emerald-200" : "bg-white/6 text-slate-300"}`}>{entry.finished ? "replay" : "resume"}</span>
                     </div>
                   </button>
                 ))}
+                {filteredHistory.length === 0 ? <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-4 text-sm text-slate-400">No runs match the current filters yet.</div> : null}
               </div>
             </div>
           </aside>

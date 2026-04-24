@@ -115,3 +115,14 @@ test("daily run completion exposes the daily share action", async ({ page }) => 
   await expect(page.getByTestId("completion-card")).toBeVisible();
   await expect(page.getByText("Share daily result")).toBeVisible();
 });
+
+test("history filters narrow the recent runs list", async ({ page }) => {
+  await page.goto("/?mode=daily&seed=2026-04-24&topics=myth,greek&challenge=quest&style=alpha&puzzleSize=7&clueDensity=2&timerEnabled=true");
+
+  await page.getByRole("button", { name: "Start Fresh Run" }).click();
+  await page.getByRole("button", { name: "Spin random custom" }).click();
+  await page.getByTestId("history-mode-daily").click();
+  await expect(page.getByText("No runs match the current filters yet.")).not.toBeVisible();
+  await page.getByTestId("history-mode-custom").click();
+  await expect(page.getByTestId("recent-run-card").first()).toContainText(/seed custom-/i);
+});
