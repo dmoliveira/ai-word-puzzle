@@ -317,6 +317,25 @@ function getClueArtLabel(index: number) {
   return ["signal", "scene", "texture"][index] ?? "cue";
 }
 
+function countFinishedRunsSince(history: ProgressSnapshot["history"], days: number, mode?: RunSummary["mode"]) {
+  const now = new Date();
+  const cutoff = new Date(now);
+  cutoff.setDate(now.getDate() - (days - 1));
+  cutoff.setHours(0, 0, 0, 0);
+
+  return history.filter((entry) => {
+    if (!entry.finished || !entry.completedAt) {
+      return false;
+    }
+
+    if (mode && entry.mode !== mode) {
+      return false;
+    }
+
+    return new Date(entry.completedAt) >= cutoff;
+  }).length;
+}
+
 export function WordPuzzleStudio() {
   const activeAnswerInputRef = useRef<HTMLInputElement | null>(null);
   const boardCellRefs = useRef<Record<string, HTMLButtonElement | null>>({});
@@ -414,6 +433,9 @@ export function WordPuzzleStudio() {
   const finishedHistoryCount = progress.history.filter((entry) => entry.finished).length;
   const activeHistoryCount = progress.history.filter((entry) => !entry.finished).length;
   const dailyClearCount = progress.history.filter((entry) => entry.mode === "daily" && entry.finished).length;
+  const weeklyDailyClearCount = countFinishedRunsSince(progress.history, 7, "daily");
+  const monthlyDailyClearCount = countFinishedRunsSince(progress.history, 30, "daily");
+  const weeklyFinishedRunCount = countFinishedRunsSince(progress.history, 7);
   const filteredHistory = progress.history
     .filter((entry) => (historyModeFilter === "all" ? true : entry.mode === historyModeFilter))
     .filter((entry) => (historyStatusFilter === "all" ? true : historyStatusFilter === "finished" ? entry.finished : !entry.finished));
@@ -1309,7 +1331,7 @@ export function WordPuzzleStudio() {
           <aside className={`${mobilePanel === "archive" ? "block" : "hidden"} space-y-6 xl:block`}>
             <div className="glass-card rounded-[2rem] p-5 sm:p-6">
               <h3 className="text-lg font-semibold text-white">Archive Insights</h3>
-              <div className="mt-4 grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
                 <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
                   <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Daily clears</div>
                   <div className="mt-2 text-2xl font-semibold text-white">{dailyClearCount}</div>
@@ -1321,6 +1343,21 @@ export function WordPuzzleStudio() {
                 <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
                   <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Saved runs</div>
                   <div className="mt-2 text-2xl font-semibold text-white">{activeHistoryCount}</div>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
+                  <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Last 7 days</div>
+                  <div className="mt-2 text-2xl font-semibold text-white">{weeklyDailyClearCount}</div>
+                  <div className="mt-1 text-xs text-slate-400">daily clears</div>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
+                  <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Last 30 days</div>
+                  <div className="mt-2 text-2xl font-semibold text-white">{monthlyDailyClearCount}</div>
+                  <div className="mt-1 text-xs text-slate-400">daily clears</div>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/4 p-4 sm:col-span-2 xl:col-span-1">
+                  <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Weekly finish pace</div>
+                  <div className="mt-2 text-2xl font-semibold text-white">{weeklyFinishedRunCount}</div>
+                  <div className="mt-1 text-xs text-slate-400">finished runs in the last 7 days</div>
                 </div>
               </div>
             </div>
