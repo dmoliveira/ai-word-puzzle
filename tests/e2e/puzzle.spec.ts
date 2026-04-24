@@ -131,5 +131,7 @@ test("archive insights panel is visible", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "Archive Insights" })).toBeVisible();
-  await expect(page.getByText("Finished runs")).toBeVisible();
+  await expect(page.locator('div').filter({ hasText: /^Finished runs$/ })).toBeVisible();
+  await expect(page.locator('div').filter({ hasText: /^Last 7 days$/ })).toBeVisible();
+  await expect(page.locator('div').filter({ hasText: /^Last 30 days$/ })).toBeVisible();
 });
