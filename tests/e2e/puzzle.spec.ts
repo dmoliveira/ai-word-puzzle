@@ -91,5 +91,13 @@ test("player sees completion stats after clearing the full puzzle", async ({ pag
   }
 
   await expect(page.getByTestId("completion-card")).toBeVisible();
-  await expect(page.getByText("Copy result")).toBeVisible();
+  await expect(page.getByText("Share run link")).toBeVisible();
+  await expect(page.getByText("Copy result text")).toBeVisible();
+});
+
+test("shared daily link reopens the requested seeded run", async ({ page }) => {
+  await page.goto("/?mode=daily&seed=2026-04-24&topics=myth,greek&challenge=quest&style=alpha&puzzleSize=7&clueDensity=2&timerEnabled=true");
+
+  await expect(page.getByText("seed 2026-04-24")).toBeVisible();
+  await expect(page.locator('span').filter({ hasText: /^daily$/ })).toBeVisible();
 });
