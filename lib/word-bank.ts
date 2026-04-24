@@ -108,6 +108,36 @@ const topicPacks: TopicPack[] = [
     hard: "barometric atmospheric thunderhead torrential luminescent nocturnal solarwind".split(" "),
   },
   {
+    id: "desert",
+    label: "Desert",
+    mood: "Heat shimmer, dune silence, and bright mineral light.",
+    scene: ["mirage line", "sunstone dust", "dune shadow"],
+    icons: ["dune", "sun", "cactus", "stone"],
+    easy: "dune cactus oasis amber mesa canyon lizard sandstone mirage lantern trail nomad caravan saddle drywind sundial jackal campfire".split(" "),
+    medium: "sandstorm windcarved moonbasin saltplain dusttrail waystation sunbaked torchline ridgeglass caravanserai".split(" "),
+    hard: "horizonless argentine sunscorched echoing glasssand aridlands weatherstone sandstonekeep".split(" "),
+  },
+  {
+    id: "festival",
+    label: "Festival",
+    mood: "Lantern glow, moving color, and crowded midnight joy.",
+    scene: ["lantern parade", "confetti drift", "midnight square"],
+    icons: ["lantern", "ribbon", "mask", "drum"],
+    easy: "parade lantern ribbon confetti banner costume drummer ticket stage sparkle carnival chorus firework market dancer trumpet".split(" "),
+    medium: "procession moonstage celebratory afterglow paperlight headliner streamers spotlight fairground".split(" "),
+    hard: "pageantry masquerade illuminations soundscape wonderlight revelatory".split(" "),
+  },
+  {
+    id: "winter",
+    label: "Winterlight",
+    mood: "Cold air, silver quiet, and windows full of warmth.",
+    scene: ["snowglass pane", "frost lantern", "midnight snowfall"],
+    icons: ["snow", "frost", "pines", "hearth"],
+    easy: "winter frost icicle snowfall pinewood blanket firelight cocoa mitten sled lantern chimney snowfall moonfrost scarf".split(" "),
+    medium: "snowdrift hearthlight northwind moonsnow silverpine windowglow fireside weatherglass".split(" "),
+    hard: "crystalline everfrost glimmersnow hushlight wintertide frostbound".split(" "),
+  },
+  {
     id: "invent",
     label: "Invention",
     mood: "Workshop sparks and ideas with moving parts.",
@@ -175,6 +205,18 @@ const topicCompoundSpecs: Record<TopicId, { prefixes: string[]; suffixes: string
   weather: {
     prefixes: ["aurora", "breeze", "cloud", "frost", "gust", "hail", "lightning", "mist", "moon", "rain", "storm", "sun"],
     suffixes: ["bank", "bound", "break", "drift", "fall", "glow", "line", "mark", "path", "rise", "song", "watch"],
+  },
+  desert: {
+    prefixes: ["amber", "cactus", "desert", "dune", "mesa", "mirage", "nomad", "oasis", "sand", "stone", "sun", "torch"],
+    suffixes: ["bloom", "bound", "drift", "glass", "line", "mark", "path", "ridge", "song", "spark", "stone", "trail"],
+  },
+  festival: {
+    prefixes: ["banner", "carnival", "chorus", "confetti", "drum", "fair", "festival", "lantern", "mask", "parade", "ribbon", "spark"],
+    suffixes: ["beam", "bound", "dance", "drift", "glow", "light", "line", "march", "song", "spark", "stage", "wave"],
+  },
+  winter: {
+    prefixes: ["blanket", "frost", "glacier", "hearth", "icicle", "midnight", "moon", "pine", "silver", "snow", "winter", "wool"],
+    suffixes: ["bound", "drift", "fall", "fire", "glow", "glass", "light", "mark", "song", "spark", "trail", "watch"],
   },
   invent: {
     prefixes: ["battery", "blueprint", "circuit", "copper", "engine", "gear", "lantern", "lever", "magnet", "piston", "rotor", "signal"],

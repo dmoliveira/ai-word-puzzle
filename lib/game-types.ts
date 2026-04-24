@@ -14,6 +14,9 @@ export type TopicId =
   | "kitchen"
   | "wild"
   | "weather"
+  | "desert"
+  | "festival"
+  | "winter"
   | "invent"
   | "story"
   | "greek";

@@ -60,3 +60,13 @@ test("lexicon scales into the thousands", async () => {
   const { wordBank } = await import("@/lib/word-bank");
   assert.ok(wordBank.length >= 2500);
 });
+
+test("new topic packs participate in generation", () => {
+  const run = buildPuzzleRun({
+    topics: ["desert", "festival", "winter"],
+    puzzleSize: 7,
+    challenge: "quest",
+  });
+
+  assert.ok(run.words.some((word) => word.topicId === "desert" || word.topicId === "festival" || word.topicId === "winter"));
+});
