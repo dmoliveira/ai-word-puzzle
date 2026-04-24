@@ -126,3 +126,10 @@ test("history filters narrow the recent runs list", async ({ page }) => {
   await page.getByTestId("history-mode-custom").click();
   await expect(page.getByTestId("recent-run-card").first()).toContainText(/seed custom-/i);
 });
+
+test("archive insights panel is visible", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "Archive Insights" })).toBeVisible();
+  await expect(page.getByText("Finished runs")).toBeVisible();
+});

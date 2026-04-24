@@ -290,6 +290,33 @@ function getThemeAccentCellClass(style: PuzzleOptions["style"]) {
   }
 }
 
+function getClueArtTone(topicId: TopicId, frequencyBand: PuzzleWord["frequencyBand"]) {
+  const baseTone =
+    topicId === "myth" ? "from-amber-500/18 via-orange-500/10 to-transparent" :
+    topicId === "cosmos" ? "from-sky-500/18 via-violet-500/10 to-transparent" :
+    topicId === "ocean" ? "from-cyan-500/18 via-blue-500/10 to-transparent" :
+    topicId === "garden" ? "from-emerald-500/18 via-lime-500/10 to-transparent" :
+    topicId === "city" ? "from-fuchsia-500/18 via-slate-500/10 to-transparent" :
+    topicId === "music" ? "from-pink-500/18 via-violet-500/10 to-transparent" :
+    topicId === "kitchen" ? "from-orange-500/18 via-amber-500/10 to-transparent" :
+    topicId === "wild" ? "from-lime-500/18 via-emerald-500/10 to-transparent" :
+    topicId === "weather" ? "from-sky-500/18 via-slate-400/10 to-transparent" :
+    topicId === "invent" ? "from-cyan-500/18 via-slate-500/10 to-transparent" :
+    topicId === "story" ? "from-amber-500/18 via-rose-500/10 to-transparent" :
+    "from-violet-500/18 via-sky-500/10 to-transparent";
+
+  const rarityTone =
+    frequencyBand === "rare" ? "border-fuchsia-400/25" :
+    frequencyBand === "uncommon" ? "border-sky-400/20" :
+    "border-white/10";
+
+  return { baseTone, rarityTone };
+}
+
+function getClueArtLabel(index: number) {
+  return ["signal", "scene", "texture"][index] ?? "cue";
+}
+
 export function WordPuzzleStudio() {
   const activeAnswerInputRef = useRef<HTMLInputElement | null>(null);
   const boardCellRefs = useRef<Record<string, HTMLButtonElement | null>>({});
@@ -384,6 +411,9 @@ export function WordPuzzleStudio() {
   const rareSolvedCount = state.run.words.filter((word) => word.frequencyBand === "rare").length;
   const uncommonSolvedCount = state.run.words.filter((word) => word.frequencyBand === "uncommon").length;
   const commonSolvedCount = state.run.words.filter((word) => word.frequencyBand === "common").length;
+  const finishedHistoryCount = progress.history.filter((entry) => entry.finished).length;
+  const activeHistoryCount = progress.history.filter((entry) => !entry.finished).length;
+  const dailyClearCount = progress.history.filter((entry) => entry.mode === "daily" && entry.finished).length;
   const filteredHistory = progress.history
     .filter((entry) => (historyModeFilter === "all" ? true : entry.mode === historyModeFilter))
     .filter((entry) => (historyStatusFilter === "all" ? true : historyStatusFilter === "finished" ? entry.finished : !entry.finished));
@@ -1101,9 +1131,10 @@ export function WordPuzzleStudio() {
 
                     <div className="mt-4 grid gap-3 sm:grid-cols-3">
                       {activeWord.visuals.slice(0, 3).map((visual, index) => (
-                        <div key={visual} className="relative overflow-hidden rounded-2xl border border-white/10 bg-slate-950/50 px-3 py-4 text-center">
-                          <div className="absolute inset-0 bg-gradient-to-br from-white/8 to-transparent" />
-                          <div className="relative text-[10px] uppercase tracking-[0.28em] text-slate-500">clue art {index + 1}</div>
+                        <div key={visual} className={`relative overflow-hidden rounded-2xl border bg-slate-950/50 px-3 py-4 text-center ${getClueArtTone(activeWord.topicId, activeWord.frequencyBand).rarityTone}`}>
+                          <div className={`absolute inset-0 bg-gradient-to-br ${getClueArtTone(activeWord.topicId, activeWord.frequencyBand).baseTone}`} />
+                          <div className="absolute inset-x-0 top-0 h-px bg-white/10" />
+                          <div className="relative text-[10px] uppercase tracking-[0.28em] text-slate-500">{getClueArtLabel(index)}</div>
                           <div className="relative mt-2 text-sm font-medium capitalize text-white">{visual}</div>
                         </div>
                       ))}
@@ -1276,6 +1307,24 @@ export function WordPuzzleStudio() {
           </section>
 
           <aside className={`${mobilePanel === "archive" ? "block" : "hidden"} space-y-6 xl:block`}>
+            <div className="glass-card rounded-[2rem] p-5 sm:p-6">
+              <h3 className="text-lg font-semibold text-white">Archive Insights</h3>
+              <div className="mt-4 grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+                <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
+                  <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Daily clears</div>
+                  <div className="mt-2 text-2xl font-semibold text-white">{dailyClearCount}</div>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
+                  <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Finished runs</div>
+                  <div className="mt-2 text-2xl font-semibold text-white">{finishedHistoryCount}</div>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
+                  <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Saved runs</div>
+                  <div className="mt-2 text-2xl font-semibold text-white">{activeHistoryCount}</div>
+                </div>
+              </div>
+            </div>
+
             <div className="glass-card rounded-[2rem] p-5 sm:p-6">
               <h3 className="text-lg font-semibold text-white">Daily Archive</h3>
               <div className="mt-4 space-y-2">
