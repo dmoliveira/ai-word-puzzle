@@ -101,3 +101,17 @@ test("shared daily link reopens the requested seeded run", async ({ page }) => {
   await expect(page.getByText("seed 2026-04-24")).toBeVisible();
   await expect(page.locator('span').filter({ hasText: /^daily$/ })).toBeVisible();
 });
+
+test("daily run completion exposes the daily share action", async ({ page }) => {
+  await page.goto("/?mode=daily&seed=2026-04-24&topics=myth,greek&challenge=quest&style=alpha&puzzleSize=7&clueDensity=2&timerEnabled=true");
+
+  for (let index = 0; index < 7; index += 1) {
+    await page.getByRole("button", { name: "Review Word" }).click();
+    const answer = ((await page.getByTestId("review-word-answer").textContent()) ?? "").trim();
+    await page.getByRole("button", { name: "Close" }).click();
+    await page.getByTestId("active-answer-input").fill(answer);
+  }
+
+  await expect(page.getByTestId("completion-card")).toBeVisible();
+  await expect(page.getByText("Share daily result")).toBeVisible();
+});
