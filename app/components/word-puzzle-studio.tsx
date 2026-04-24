@@ -248,6 +248,7 @@ export function WordPuzzleStudio() {
   const [mobilePanel, setMobilePanel] = useState<"board" | "clues" | "archive">("board");
   const [isStarting, setIsStarting] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
+  const [completionToast, setCompletionToast] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressSnapshot>(createEmptyProgress());
   const [focusedCellKey, setFocusedCellKey] = useState<string | null>(null);
   const lexiconSize = wordBank.length;
@@ -318,6 +319,10 @@ export function WordPuzzleStudio() {
   const archive = buildDailyArchive(progress.history, 10);
   const activeFilledCount = countFilledLetters(activeGuess);
   const boardFocusKey = focusedCellKey ?? getFirstOpenCellKey(state, state.activeWordId);
+  const hintsUsed = Object.values(state.hintLevels).reduce((total, level) => total + level, 0);
+  const rareSolvedCount = state.run.words.filter((word) => word.frequencyBand === "rare").length;
+  const uncommonSolvedCount = state.run.words.filter((word) => word.frequencyBand === "uncommon").length;
+  const commonSolvedCount = state.run.words.filter((word) => word.frequencyBand === "common").length;
 
   function updateOptions<K extends keyof PuzzleOptions>(key: K, value: PuzzleOptions[K]) {
     setOptions((current) => ({ ...current, [key]: value }));
@@ -383,6 +388,25 @@ export function WordPuzzleStudio() {
       mode: "custom",
       seed: createRuntimeSeed(),
     });
+  }
+
+  async function copyCompletionSummary() {
+    const summary = [
+      `Astra Lexa`,
+      `${state.run.title}`,
+      `${state.run.words.length} words cleared in ${formatElapsed(state.elapsedMs)}`,
+      `${hintsUsed} hints used`,
+      `seed ${state.run.seed.replace(/^daily:/, "")}`,
+    ].join(" | ");
+
+    try {
+      await navigator.clipboard.writeText(summary);
+      setCompletionToast("Run summary copied.");
+    } catch {
+      setCompletionToast("Clipboard unavailable on this device.");
+    }
+
+    window.setTimeout(() => setCompletionToast(null), 1800);
   }
 
   function togglePause() {
@@ -1063,7 +1087,7 @@ export function WordPuzzleStudio() {
                       return (
                         <article key={word.id} className="rounded-3xl border border-white/10 bg-white/4 p-4">
                           <div className="flex items-center justify-between gap-3">
-                            <div className="text-lg font-semibold uppercase tracking-[0.14em] text-white">{word.answer}</div>
+                            <div data-testid="review-puzzle-answer" className="text-lg font-semibold uppercase tracking-[0.14em] text-white">{word.answer}</div>
                             <span className="accent-chip rounded-full px-2.5 py-1 text-[11px] capitalize">{placement.clueNumber} {placement.direction}</span>
                           </div>
                           <p className="mt-2 text-sm text-slate-300">{word.prompt}</p>
@@ -1076,10 +1100,46 @@ export function WordPuzzleStudio() {
             ) : null}
 
             {finished ? (
-              <div className="glass-card rounded-[2rem] p-6 text-center">
+              <div data-testid="completion-card" className="glass-card rounded-[2rem] p-6 text-center">
                 <div className="text-xs uppercase tracking-[0.28em] text-slate-400">Run complete</div>
                 <h3 className="mt-2 text-3xl font-semibold text-white">Puzzle cleared.</h3>
-                <p className="mt-3 text-sm text-slate-300">Your archive and streaks have been updated. Restart the same seed or launch a fresh constellation.</p>
+                <p className="mt-3 text-sm text-slate-300">Your archive and streaks have been updated. Replay the same seed, jump into review, or copy the result for later.</p>
+
+                <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-3xl border border-white/10 bg-white/4 p-4 text-left">
+                    <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Finish time</div>
+                    <div className="mt-2 text-2xl font-semibold text-white">{formatElapsed(state.elapsedMs)}</div>
+                  </div>
+                  <div className="rounded-3xl border border-white/10 bg-white/4 p-4 text-left">
+                    <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Hints used</div>
+                    <div className="mt-2 text-2xl font-semibold text-white">{hintsUsed}</div>
+                  </div>
+                  <div className="rounded-3xl border border-white/10 bg-white/4 p-4 text-left">
+                    <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Word mix</div>
+                    <div className="mt-2 text-sm font-medium text-white">{commonSolvedCount} common / {uncommonSolvedCount} uncommon / {rareSolvedCount} rare</div>
+                  </div>
+                  <div className="rounded-3xl border border-white/10 bg-white/4 p-4 text-left">
+                    <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Seed</div>
+                    <div className="mt-2 text-sm font-medium text-white">{state.run.seed.replace(/^daily:/, "")}</div>
+                  </div>
+                </div>
+
+                <div className="mt-5 flex flex-wrap justify-center gap-2">
+                  <button type="button" onClick={() => startNewRun(state.run.options)} className="accent-chip rounded-full px-4 py-2 text-sm font-semibold">
+                    Replay run
+                  </button>
+                  <button type="button" onClick={() => setReviewMode("puzzle")} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">
+                    Review full puzzle
+                  </button>
+                  <button type="button" onClick={copyCompletionSummary} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">
+                    Copy result
+                  </button>
+                  <button type="button" onClick={startTodayDailyRun} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">
+                    Play daily
+                  </button>
+                </div>
+
+                {completionToast ? <div className="mt-3 text-sm text-emerald-200">{completionToast}</div> : null}
               </div>
             ) : null}
           </section>
