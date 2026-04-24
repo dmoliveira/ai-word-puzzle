@@ -401,6 +401,22 @@ function createTranslationAid(pack: TopicPack, answer: string) {
   return `Translation aid: if you do not know ${answer} yet, first picture ${pack.scene[0]}, then connect it to ${pack.label.toLowerCase()} vocabulary instead of translating word by word.`;
 }
 
+function createPronunciationHint(answer: string) {
+  const lower = answer.toLowerCase();
+  const syllables = lower
+    .replace(/tion/g, "-tion")
+    .replace(/ing/g, "-ing")
+    .replace(/ous/g, "-ous")
+    .replace(/([aeiouy]{1,2})([^aeiouy]|$)/g, "$1-$2")
+    .replace(/--+/g, "-")
+    .replace(/^-|-$/g, "")
+    .split("-")
+    .filter(Boolean)
+    .join("-");
+
+  return `Pronunciation: ${syllables || lower}`;
+}
+
 function createUsageExample(pack: TopicPack, answer: string) {
   const sentenceStem =
     pack.id === "myth" ? `In the old tale, the ${answer} appeared near the temple steps.` :
@@ -453,6 +469,7 @@ function createGeneralWords(level: ChallengeLevel, existingCount: number): Puzzl
       teaser: `A bridge word that keeps the round flowing.`,
       learningNote: `General English cue: try to connect the letters to a broad everyday meaning before chasing a niche topic word.`,
       plainMeaning: `Plain meaning: think of a common everyday English idea rather than a niche topic term.`,
+      pronunciationHint: createPronunciationHint(word),
       usageExample: `Example: "The word ${word} can appear in many simple English situations."`,
       translationAid: `Translation aid: connect ${word} to a simple daily situation first, then map it into your own language if needed.`,
       relatedWords: ["general", `${word.length} letters`, frequencyBand],
@@ -501,6 +518,7 @@ function createCuratedLexiconWords(startIndex: number): PuzzleWord[] {
         teaser: band === "rare" ? "A rarer lexicon pick that sharpens the board." : "A curated English entry that balances the run.",
         learningNote: band === "rare" ? "Vocabulary cue: this is a lower-frequency English word, so use length, first letter, and theme together." : band === "uncommon" ? "Vocabulary cue: this word is useful intermediate vocabulary with a stronger flavor than the most common option." : "Vocabulary cue: this is common English vocabulary that should become easier with repetition.",
         plainMeaning: band === "rare" ? "Plain meaning: look for a less common English word that still matches the clue idea." : band === "uncommon" ? "Plain meaning: look for an intermediate English word with a bit more flavor." : "Plain meaning: look for a simple everyday English word.",
+        pronunciationHint: createPronunciationHint(answer),
         usageExample: `Example: "The word ${answer} can fit a clear English sentence once you know its tone."`,
         translationAid: `Translation aid: connect ${answer} to the clue idea first, then translate the idea, not each separate word.`,
         relatedWords: [band, `${answer.length} letters`, "english"],
@@ -552,6 +570,7 @@ function createGeneratedCompoundWords(): PuzzleWord[] {
             teaser: createTeaser(pack, answer, difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare"),
             learningNote: createLearningNote(pack, answer, difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare"),
             plainMeaning: createPlainMeaning(pack, difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare"),
+            pronunciationHint: createPronunciationHint(answer),
             usageExample: createUsageExample(pack, answer),
             translationAid: createTranslationAid(pack, answer),
             relatedWords: createRelatedWords(pack, answer),
@@ -595,6 +614,7 @@ export const wordBank: PuzzleWord[] = (() => {
             teaser: createTeaser(pack, answer, frequencyBand),
             learningNote: createLearningNote(pack, answer, frequencyBand),
             plainMeaning: createPlainMeaning(pack, frequencyBand),
+            pronunciationHint: createPronunciationHint(answer),
             usageExample: createUsageExample(pack, answer),
             translationAid: createTranslationAid(pack, answer),
             relatedWords: createRelatedWords(pack, answer),

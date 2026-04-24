@@ -449,6 +449,20 @@ export function WordPuzzleStudio() {
     window.setTimeout(() => setToast(null), 1800);
   }
 
+  function speakWord(word: string) {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      showToast("Speech is unavailable on this device.", "muted");
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(word);
+    utterance.lang = "en-US";
+    utterance.rate = 0.9;
+    window.speechSynthesis.speak(utterance);
+    showToast("Pronunciation played.");
+  }
+
   function updateOptions<K extends keyof PuzzleOptions>(key: K, value: PuzzleOptions[K]) {
     setOptions((current) => ({ ...current, [key]: value }));
 
@@ -1206,6 +1220,15 @@ export function WordPuzzleStudio() {
                               <p className="mt-1 text-slate-200">{activeWord.usageExample}</p>
                             </div>
                             <div>
+                              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Pronunciation</div>
+                              <div className="mt-1 flex items-center gap-2">
+                                <p className="text-slate-200">{activeWord.pronunciationHint}</p>
+                                <button type="button" onClick={() => speakWord(activeWord.answer)} className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] text-slate-100">
+                                  Speak
+                                </button>
+                              </div>
+                            </div>
+                            <div>
                               <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Extra cue</div>
                               <p className="mt-1 text-slate-300">{activeWord.microHint}</p>
                             </div>
@@ -1312,6 +1335,12 @@ export function WordPuzzleStudio() {
                           <p className="mt-2 text-sm text-slate-200">{activeWord.learningNote}</p>
                           <p className="mt-3 text-sm text-slate-200">{activeWord.plainMeaning}</p>
                           <p className="mt-3 text-sm text-slate-300">{activeWord.usageExample}</p>
+                          <div className="mt-3 flex items-center gap-2">
+                            <p className="text-sm text-slate-300">{activeWord.pronunciationHint}</p>
+                            <button type="button" onClick={() => speakWord(activeWord.answer)} className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] text-slate-100">
+                              Speak
+                            </button>
+                          </div>
                           <p className="mt-3 text-sm text-slate-400">{activeWord.microHint}</p>
                           <p className="mt-3 text-sm text-slate-400">{activeWord.translationAid}</p>
                           <div className="mt-3 flex flex-wrap gap-2">

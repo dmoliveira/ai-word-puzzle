@@ -35,6 +35,7 @@ export type PuzzleWord = {
   teaser: string;
   learningNote: string;
   plainMeaning: string;
+  pronunciationHint: string;
   usageExample: string;
   translationAid: string;
   relatedWords: string[];
