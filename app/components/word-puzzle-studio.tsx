@@ -9,6 +9,13 @@ import { topicCatalog, wordBank } from "@/lib/word-bank";
 
 const storageKey = "astra-lexa-session";
 
+type ToastState = {
+  tone: "success" | "muted";
+  message: string;
+} | null;
+
+type ToastTone = NonNullable<ToastState>["tone"];
+
 const defaultOptions: PuzzleOptions = {
   mode: "custom",
   challenge: "quest",
@@ -290,7 +297,7 @@ export function WordPuzzleStudio() {
   const [mobilePanel, setMobilePanel] = useState<"board" | "clues" | "archive">("board");
   const [isStarting, setIsStarting] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
-  const [completionToast, setCompletionToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<ToastState>(null);
   const [progress, setProgress] = useState<ProgressSnapshot>(createEmptyProgress());
   const [focusedCellKey, setFocusedCellKey] = useState<string | null>(null);
   const lexiconSize = wordBank.length;
@@ -374,6 +381,11 @@ export function WordPuzzleStudio() {
   const uncommonSolvedCount = state.run.words.filter((word) => word.frequencyBand === "uncommon").length;
   const commonSolvedCount = state.run.words.filter((word) => word.frequencyBand === "common").length;
 
+  function showToast(message: string, tone: ToastTone = "success") {
+    setToast({ message, tone });
+    window.setTimeout(() => setToast(null), 1800);
+  }
+
   function updateOptions<K extends keyof PuzzleOptions>(key: K, value: PuzzleOptions[K]) {
     setOptions((current) => ({ ...current, [key]: value }));
   }
@@ -451,12 +463,21 @@ export function WordPuzzleStudio() {
 
     try {
       await navigator.clipboard.writeText(summary);
-      setCompletionToast("Run summary copied.");
+      showToast("Run summary copied.");
     } catch {
-      setCompletionToast("Clipboard unavailable on this device.");
+      showToast("Clipboard unavailable on this device.", "muted");
     }
+  }
 
-    window.setTimeout(() => setCompletionToast(null), 1800);
+  function buildDailyResultShareText() {
+    const dailySeed = state.run.seed.replace(/^daily:/, "");
+    return [
+      `Astra Lexa Daily ${dailySeed}`,
+      `${state.run.words.length} words`,
+      `${formatElapsed(state.elapsedMs)}`,
+      `${hintsUsed} hints`,
+      `${commonSolvedCount}/${uncommonSolvedCount}/${rareSolvedCount} mix`,
+    ].join(" | ");
   }
 
   async function shareCurrentRunLink() {
@@ -470,16 +491,39 @@ export function WordPuzzleStudio() {
     try {
       if (navigator.share) {
         await navigator.share(sharePayload);
-        setCompletionToast("Run link shared.");
+        showToast("Run link shared.");
       } else {
         await navigator.clipboard.writeText(shareUrl);
-        setCompletionToast("Run link copied.");
+        showToast("Run link copied.");
       }
     } catch {
-      setCompletionToast("Share cancelled.");
+      showToast("Share cancelled.", "muted");
     }
+  }
 
-    window.setTimeout(() => setCompletionToast(null), 1800);
+  async function shareDailyResult() {
+    const shareUrl = buildShareUrl({
+      ...state.run.options,
+      mode: "daily",
+      seed: state.run.seed.replace(/^daily:/, ""),
+    });
+    const text = buildDailyResultShareText();
+
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: `Astra Lexa Daily ${state.run.seed.replace(/^daily:/, "")}`,
+          text,
+          url: shareUrl,
+        });
+        showToast("Daily result shared.");
+      } else {
+        await navigator.clipboard.writeText(`${text} | ${shareUrl}`);
+        showToast("Daily result copied.");
+      }
+    } catch {
+      showToast("Share cancelled.", "muted");
+    }
   }
 
   function togglePause() {
@@ -1207,6 +1251,11 @@ export function WordPuzzleStudio() {
                   <button type="button" onClick={shareCurrentRunLink} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">
                     Share run link
                   </button>
+                  {state.run.options.mode === "daily" ? (
+                    <button type="button" onClick={shareDailyResult} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">
+                      Share daily result
+                    </button>
+                  ) : null}
                   <button type="button" onClick={copyCompletionSummary} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">
                     Copy result text
                   </button>
@@ -1214,8 +1263,6 @@ export function WordPuzzleStudio() {
                     Play daily
                   </button>
                 </div>
-
-                {completionToast ? <div className="mt-3 text-sm text-emerald-200">{completionToast}</div> : null}
               </div>
             ) : null}
           </section>
@@ -1255,6 +1302,14 @@ export function WordPuzzleStudio() {
             </div>
           </aside>
         </div>
+
+        {toast ? (
+          <div className="pointer-events-none fixed inset-x-4 bottom-4 z-50 flex justify-center">
+            <div className={`rounded-full border px-4 py-2 text-sm shadow-lg backdrop-blur ${toast.tone === "success" ? "border-emerald-400/30 bg-emerald-500/18 text-emerald-100" : "border-white/15 bg-slate-950/85 text-slate-100"}`}>
+              {toast.message}
+            </div>
+          </div>
+        ) : null}
       </div>
     </main>
   );
