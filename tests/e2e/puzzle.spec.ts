@@ -106,7 +106,7 @@ test("player sees completion stats after clearing the full puzzle", async ({ pag
 test("shared daily link reopens the requested seeded run", async ({ page }) => {
   await page.goto("/?mode=daily&seed=2026-04-24&topics=myth,greek&challenge=quest&style=alpha&puzzleSize=7&clueDensity=2&timerEnabled=true");
 
-  await expect(page.getByText("seed 2026-04-24")).toBeVisible();
+  await expect(page.locator('span').filter({ hasText: /^seed 2026-04-24$/ }).first()).toBeVisible();
   await expect(page.locator('span').filter({ hasText: /^daily$/ }).first()).toBeVisible();
 });
 
