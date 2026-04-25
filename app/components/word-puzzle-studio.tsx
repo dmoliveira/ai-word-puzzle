@@ -1643,7 +1643,7 @@ function getTargetChipClass(word: PuzzleWord, solved: boolean, active: boolean) 
               </div>
             ) : null}
 
-            <div className="glass-card rounded-[2rem] p-5 sm:p-6">
+            <div className="glass-card rounded-[2rem] p-5 sm:p-6 bg-[linear-gradient(180deg,rgba(15,23,42,0.92),rgba(9,14,26,0.88))]">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <h3 className="text-lg font-semibold text-white">Word Targets</h3>
                 <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300">{state.run.words.length - solvedCount} left</span>
@@ -1652,7 +1652,8 @@ function getTargetChipClass(word: PuzzleWord, solved: boolean, active: boolean) 
                 {state.run.words.map((word) => {
                   const solved = state.solvedIds.includes(word.id);
                   return (
-                    <button key={word.id} type="button" onClick={() => selectWord(word.id)} className={`rounded-2xl border px-4 py-3 text-left transition ${getTargetChipClass(word, solved, state.activeWordId === word.id)}`}>
+                    <button key={word.id} type="button" onClick={() => selectWord(word.id)} className={`relative overflow-hidden rounded-2xl border px-4 py-3 text-left transition ${getTargetChipClass(word, solved, state.activeWordId === word.id)}`}>
+                      <div className="absolute inset-y-0 left-0 w-1 bg-white/12" />
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-sm font-medium uppercase tracking-[0.12em]">{word.answer.length} letters</span>
                         <span className="text-[11px] uppercase tracking-[0.18em]">{solved ? "✓ done" : getFrequencyLabel(word.frequencyBand)}</span>
@@ -1668,13 +1669,16 @@ function getTargetChipClass(word: PuzzleWord, solved: boolean, active: boolean) 
             </div>
 
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
-              <div className="glass-card rounded-[2rem] p-5 sm:p-6">
+              <div className="glass-card rounded-[2rem] p-5 sm:p-6 bg-[linear-gradient(135deg,rgba(96,165,250,0.16),rgba(15,23,42,0.16))]">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <h3 className="text-lg font-semibold text-white">Quest Progress</h3>
-                    <p className="mt-1 text-sm text-slate-400">Keep the streak alive and clear words steadily.</p>
+                    <p className="mt-1 text-sm text-slate-300">Keep the streak alive and clear words steadily.</p>
                   </div>
-                  <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300">{solvedCount}/{state.run.words.length}</span>
+                  <div className="grid size-16 place-items-center rounded-full border border-white/10 bg-white/6 text-white">
+                    <div className="text-lg font-semibold">{solvedCount}</div>
+                    <div className="text-[10px] uppercase tracking-[0.18em] text-slate-300">found</div>
+                  </div>
                 </div>
                 <div className="mt-4 h-3 overflow-hidden rounded-full bg-white/8">
                   <div className="h-full rounded-full bg-[linear-gradient(90deg,#a855f7,#60a5fa)]" style={{ width: `${state.run.words.length === 0 ? 0 : (solvedCount / state.run.words.length) * 100}%` }} />
@@ -1710,7 +1714,7 @@ function getTargetChipClass(word: PuzzleWord, solved: boolean, active: boolean) 
               </button>
             </div>
             <div className={`${mobilePanel === "archive" ? "space-y-6" : "hidden"} ${rightSidebarOpen ? "xl:space-y-6 xl:block" : "xl:hidden"}`}>
-            <div className="glass-card rounded-[2rem] p-5 sm:p-6 opacity-85">
+            <div className="glass-card rounded-[2rem] p-5 sm:p-6 opacity-75 xl:opacity-80">
               <h3 className="text-lg font-semibold text-white">Archive Insights</h3>
               <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
                 <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
@@ -1743,7 +1747,7 @@ function getTargetChipClass(word: PuzzleWord, solved: boolean, active: boolean) 
               </div>
             </div>
 
-            <div className="glass-card rounded-[2rem] p-5 sm:p-6 opacity-85">
+            <div className="glass-card rounded-[2rem] p-5 sm:p-6 opacity-75 xl:opacity-80">
               <h3 className="text-lg font-semibold text-white">Daily Archive</h3>
               <div className="mt-4 space-y-2">
                 {archive.map((entry) => (
@@ -1761,7 +1765,7 @@ function getTargetChipClass(word: PuzzleWord, solved: boolean, active: boolean) 
               </div>
             </div>
 
-            <div className="glass-card rounded-[2rem] p-5 sm:p-6 opacity-80">
+            <div className="glass-card rounded-[2rem] p-5 sm:p-6 opacity-70 xl:opacity-75">
               <h3 className="text-lg font-semibold text-white">Recent Runs</h3>
               <div className="mt-4 flex flex-wrap gap-2">
                 {([
