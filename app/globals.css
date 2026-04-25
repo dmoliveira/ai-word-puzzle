@@ -104,6 +104,14 @@ body::before {
   border: 1px solid var(--accent-strong);
 }
 
+.quest-logo {
+  background: linear-gradient(135deg, #e0f2fe 0%, #c084fc 55%, #60a5fa 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 0 18px rgb(96 165 250 / 0.18);
+}
+
 .completion-burst::before,
 .completion-burst::after {
   position: absolute;

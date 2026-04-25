@@ -1047,8 +1047,9 @@ function getTargetChipClass(word: PuzzleWord, solved: boolean, active: boolean) 
         <aside className="hidden xl:flex xl:flex-col xl:items-center xl:gap-4">
           <div className="glass-card flex w-full flex-col items-center gap-4 rounded-[2rem] px-3 py-4">
             <div className="text-center">
-              <div className="text-2xl">👑</div>
-              <div className="mt-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-200">Quest</div>
+              <div className="text-xl">👑</div>
+              <div className="quest-logo mt-2 text-lg font-black uppercase tracking-[0.12em]">Word</div>
+              <div className="quest-logo text-lg font-black uppercase tracking-[0.12em]">Quest</div>
             </div>
             {[
               ["🎮", "Play"],
@@ -1069,10 +1070,10 @@ function getTargetChipClass(word: PuzzleWord, solved: boolean, active: boolean) 
         <section className="glass-card overflow-hidden rounded-[2rem] px-5 py-4 sm:px-6">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-start gap-4">
-              <div className="hidden rounded-[1.75rem] border border-white/10 bg-white/4 px-4 py-3 text-center xl:block">
-                <div className="text-3xl">🔠</div>
-                <div className="mt-2 text-sm font-semibold text-white">Astra</div>
-                <div className="text-sm font-semibold text-violet-300">Lexa</div>
+              <div className="hidden rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(125,211,252,0.12),rgba(168,85,247,0.12))] px-4 py-3 text-center xl:block">
+                <div className="text-2xl">👑</div>
+                <div className="quest-logo mt-2 text-2xl font-black uppercase tracking-[0.08em] leading-none">Word</div>
+                <div className="quest-logo text-2xl font-black uppercase tracking-[0.08em] leading-none">Quest</div>
               </div>
               <div className="space-y-2">
                 <div className="text-sm font-semibold text-fuchsia-300">Today&apos;s Quest</div>
