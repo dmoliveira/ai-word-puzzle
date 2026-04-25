@@ -8,7 +8,7 @@ async function openWordReview(page: import("@playwright/test").Page) {
 test("player can reveal a review answer and solve the active clue", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.getByText(/Astra Lexa/i).first()).toBeVisible();
+  await expect(page.getByText(/Today's Quest/i)).toBeVisible();
   await expect(page.getByRole("button", { name: "Start Fresh Run" })).toBeVisible();
   await expect(page.getByTestId("progress-label")).toContainText("0/");
 

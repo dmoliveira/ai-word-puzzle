@@ -1022,31 +1022,40 @@ export function WordPuzzleStudio() {
     <main className={`scroll-shell ${theme.className} min-h-screen px-4 py-6 sm:px-6 lg:px-8`}>
       <div className="mx-auto flex w-full max-w-[96rem] flex-col gap-6">
         <section className="glass-card overflow-hidden rounded-[2rem] px-5 py-4 sm:px-6">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="accent-chip inline-flex rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.28em]">Astra Lexa</span>
-                <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300">{state.run.title}</span>
-                <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300">{state.run.board.size}x{state.run.board.size}</span>
-                <span className="rounded-full border border-white/10 px-3 py-1 text-xs uppercase tracking-[0.18em] text-slate-300">{state.run.options.mode}</span>
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-start gap-4">
+              <div className="hidden rounded-[1.75rem] border border-white/10 bg-white/4 px-4 py-3 text-center xl:block">
+                <div className="text-3xl">🔠</div>
+                <div className="mt-2 text-sm font-semibold text-white">Astra</div>
+                <div className="text-sm font-semibold text-violet-300">Lexa</div>
               </div>
-              <p className="max-w-3xl text-sm leading-6 text-slate-300">{state.run.blurb}</p>
+              <div className="space-y-2">
+                <div className="text-sm font-semibold text-fuchsia-300">Today&apos;s Quest</div>
+                <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">Find {state.run.words.length} hidden words</h1>
+                <div className="flex flex-wrap gap-2 text-sm text-slate-300">
+                  <span>Theme: {state.run.words[0]?.topicLabel ?? "Mixed"}</span>
+                  <span>•</span>
+                  <span>Grid: {state.run.board.size}x{state.run.board.size}</span>
+                  <span>•</span>
+                  <span>Mode: {state.run.options.mode === "daily" ? "Daily Spark" : "Custom Run"}</span>
+                </div>
+              </div>
             </div>
-            <div className="grid gap-2 text-sm text-slate-200 sm:grid-cols-4 lg:min-w-[26rem]">
+            <div className="grid gap-2 text-sm text-slate-200 sm:grid-cols-4 lg:min-w-[30rem]">
               <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2">
-                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Progress</div>
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">⭐ Progress</div>
                 <div className="mt-1 text-lg font-semibold text-white">{progressLabel}</div>
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2">
-                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Timer</div>
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">⏱ Timer</div>
                 <div className="mt-1 text-lg font-semibold text-white">{formatElapsed(state.elapsedMs)}</div>
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2">
-                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Streak</div>
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">🔥 Streak</div>
                 <div className="mt-1 text-lg font-semibold text-white">{progress.streak}</div>
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2">
-                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">State</div>
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">🛡 State</div>
                 <div className="mt-1 text-lg font-semibold text-white">{finished ? "Done" : state.paused ? "Paused" : "Live"}</div>
               </div>
             </div>
