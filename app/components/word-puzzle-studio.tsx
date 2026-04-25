@@ -1020,7 +1020,29 @@ export function WordPuzzleStudio() {
 
   return (
     <main className={`scroll-shell ${theme.className} min-h-screen px-4 py-6 sm:px-6 lg:px-8`}>
-      <div className="mx-auto flex w-full max-w-[96rem] flex-col gap-6">
+      <div className="mx-auto grid w-full max-w-[96rem] gap-6 xl:grid-cols-[4.5rem_minmax(0,1fr)]">
+        <aside className="hidden xl:flex xl:flex-col xl:items-center xl:gap-4">
+          <div className="glass-card flex w-full flex-col items-center gap-4 rounded-[2rem] px-3 py-4">
+            <div className="text-center">
+              <div className="text-2xl">👑</div>
+              <div className="mt-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-200">Quest</div>
+            </div>
+            {[
+              ["🎮", "Play"],
+              ["🧭", "Quests"],
+              ["📈", "Stats"],
+              ["🏆", "Badges"],
+              ["⚙️", "Settings"],
+            ].map(([icon, label], index) => (
+              <button key={label} type="button" onClick={() => setMobilePanel(index === 0 ? "board" : index === 1 ? "clues" : "archive")} className={`flex w-full flex-col items-center gap-2 rounded-2xl border px-2 py-3 text-xs transition ${index === 0 ? "accent-chip" : "border-white/10 bg-white/4 text-slate-300"}`}>
+                <span className="text-lg">{icon}</span>
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
+        </aside>
+
+        <div className="flex flex-col gap-6">
         <section className="glass-card overflow-hidden rounded-[2rem] px-5 py-4 sm:px-6">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-start gap-4">
@@ -1586,6 +1608,27 @@ export function WordPuzzleStudio() {
                 </div>
               </div>
             ) : null}
+
+            <div className="glass-card rounded-[2rem] p-5 sm:p-6">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <h3 className="text-lg font-semibold text-white">Word Targets</h3>
+                <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300">{state.run.words.length - solvedCount} left</span>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {state.run.words.map((word) => {
+                  const solved = state.solvedIds.includes(word.id);
+                  return (
+                    <button key={word.id} type="button" onClick={() => selectWord(word.id)} className={`rounded-2xl border px-4 py-3 text-left transition ${solved ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-100" : state.activeWordId === word.id ? "accent-ring bg-white/6 text-white" : "border-white/10 bg-white/4 text-slate-200"}`}>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-medium uppercase tracking-[0.12em]">{word.answer.length} letters</span>
+                        <span className="text-[11px] uppercase tracking-[0.18em]">{solved ? "done" : getFrequencyLabel(word.frequencyBand)}</span>
+                      </div>
+                      <div className="mt-2 text-sm text-slate-300">{word.topicLabel}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </section>
 
           <aside className={`${mobilePanel === "archive" ? "block" : "hidden"} space-y-6 xl:block ${archiveRailClass}`}>
@@ -1689,6 +1732,7 @@ export function WordPuzzleStudio() {
             </div>
             </div>
           </aside>
+        </div>
         </div>
 
         {revealConfirm !== "none" ? (
