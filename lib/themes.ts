@@ -33,6 +33,14 @@ export const themeStyles: ThemeStyle[] = [
     greekConstellation: ["kappa", "lambda", "mu"],
     motif: "pixel grove",
   },
+  {
+    id: "classic",
+    label: "Classic Ledger",
+    strapline: "Quiet paper tones and puzzle-first contrast inspired by traditional crossword pages.",
+    className: "style-classic",
+    greekConstellation: ["nu", "xi", "omicron"],
+    motif: "ink grid",
+  },
 ];
 
 export function getThemeStyle(styleId: ThemeStyle["id"]) {

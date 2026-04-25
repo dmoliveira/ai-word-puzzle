@@ -17,6 +17,7 @@ type ToastState = {
 type ToastTone = NonNullable<ToastState>["tone"];
 type HistoryFilterMode = "all" | "daily" | "custom";
 type HistoryFilterStatus = "all" | "finished" | "active";
+type RevealConfirmState = "none" | "word" | "puzzle";
 
 const defaultOptions: PuzzleOptions = {
   mode: "custom",
@@ -318,7 +319,28 @@ function getClueArtTone(topicId: TopicId, frequencyBand: PuzzleWord["frequencyBa
 }
 
 function getClueArtLabel(index: number) {
-  return ["signal", "scene", "texture"][index] ?? "cue";
+  return ["theme", "mood", "length"][index] ?? "cue";
+}
+
+function getFrequencyLabel(frequencyBand: PuzzleWord["frequencyBand"]) {
+  switch (frequencyBand) {
+    case "common":
+      return "familiar";
+    case "uncommon":
+      return "stretch";
+    case "rare":
+      return "advanced";
+  }
+}
+
+function buildAnagram(answer: string) {
+  if (answer.length < 4) {
+    return answer.toUpperCase();
+  }
+
+  const chars = answer.toUpperCase().split("");
+  const rotated = [...chars.slice(1), chars[0]].join("");
+  return rotated === answer.toUpperCase() ? chars.reverse().join("") : rotated;
 }
 
 function countFinishedRunsSince(history: ProgressSnapshot["history"], days: number, mode?: RunSummary["mode"]) {
@@ -347,6 +369,10 @@ export function WordPuzzleStudio() {
   const [state, setState] = useState<PersistedRunState>(() => createFreshState(defaultOptions));
   const [reviewMode, setReviewMode] = useState<"none" | "word" | "puzzle">("none");
   const [mobilePanel, setMobilePanel] = useState<"board" | "clues" | "archive">("board");
+  const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
+  const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
+  const [revealConfirm, setRevealConfirm] = useState<RevealConfirmState>("none");
+  const [shownAnagrams, setShownAnagrams] = useState<Record<string, string>>({});
   const [isStarting, setIsStarting] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState>(null);
@@ -511,6 +537,8 @@ export function WordPuzzleStudio() {
         setState(nextState);
         setFocusedCellKey(getFirstOpenCellKey(nextState, nextState.activeWordId));
         setMobilePanel("board");
+        setRevealConfirm("none");
+        setShownAnagrams({});
         syncProgress(nextState);
         setReviewMode("none");
       });
@@ -643,6 +671,21 @@ export function WordPuzzleStudio() {
       syncProgress(nextState);
       return nextState;
     });
+  }
+
+  function revealAnagram(word: PuzzleWord) {
+    setShownAnagrams((current) => ({
+      ...current,
+      [word.id]: buildAnagram(word.answer),
+    }));
+  }
+
+  function confirmRevealWord() {
+    setRevealConfirm("word");
+  }
+
+  function confirmRevealPuzzle() {
+    setRevealConfirm("puzzle");
   }
 
   function selectWord(wordId: string) {
@@ -903,6 +946,14 @@ export function WordPuzzleStudio() {
     }
   }
 
+  const desktopLayoutClass = leftSidebarOpen
+    ? rightSidebarOpen
+      ? "xl:grid-cols-[16rem_minmax(0,1.85fr)_16rem]"
+      : "xl:grid-cols-[16rem_minmax(0,2fr)_4rem]"
+    : rightSidebarOpen
+      ? "xl:grid-cols-[4rem_minmax(0,2fr)_16rem]"
+      : "xl:grid-cols-[4rem_minmax(0,2.15fr)_4rem]";
+
   return (
     <main className={`scroll-shell ${theme.className} min-h-screen px-4 py-6 sm:px-6 lg:px-8`}>
       <div className="mx-auto flex w-full max-w-[96rem] flex-col gap-6">
@@ -948,14 +999,18 @@ export function WordPuzzleStudio() {
           </div>
         </section>
 
-        <div className="grid gap-6 xl:grid-cols-[18rem_minmax(0,1.55fr)_17rem]">
-          <aside className="glass-card rounded-[2rem] p-5 sm:p-6">
-            <div className="mb-5">
-              <h2 className="text-lg font-semibold text-white">Run Builder</h2>
-              <p className="mt-1 text-sm text-slate-400">Tune mode, challenge, topics, board density, and style.</p>
+        <div className={`grid gap-6 ${desktopLayoutClass}`}>
+          <aside className="glass-card rounded-[2rem] p-4 sm:p-5">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div className={`${leftSidebarOpen ? "block" : "hidden xl:block"}`}>
+                <h2 className="text-lg font-semibold text-white">Run Builder</h2>
+                <p className="mt-1 text-sm text-slate-400">Tune mode, challenge, topics, board density, and style.</p>
+              </div>
+              <button type="button" onClick={() => setLeftSidebarOpen((current) => !current)} className="hidden rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs text-slate-200 xl:inline-flex">
+                {leftSidebarOpen ? "Hide" : "Show"}
+              </button>
             </div>
-
-            <div className="space-y-5">
+            <div className={leftSidebarOpen ? "space-y-5" : "hidden xl:block"}>
               <div className="space-y-2">
                 <label className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Mode</label>
                 <div className="grid grid-cols-2 gap-2">
@@ -1064,8 +1119,8 @@ export function WordPuzzleStudio() {
                 <div className="flex flex-wrap gap-2">
                   <button type="button" onClick={togglePause} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">{state.paused ? "Resume" : "Pause"}</button>
                   <button type="button" onClick={() => startNewRun(state.run.options)} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">Restart</button>
-                  <button type="button" onClick={() => setReviewMode("word")} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">Review Word</button>
-                  <button type="button" onClick={() => setReviewMode("puzzle")} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">Review Puzzle</button>
+                  <button type="button" onClick={confirmRevealWord} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">Review Word</button>
+                  <button type="button" onClick={confirmRevealPuzzle} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">Review Puzzle</button>
                 </div>
               </div>
 
@@ -1143,7 +1198,7 @@ export function WordPuzzleStudio() {
                         <div className="mt-1 text-lg font-semibold text-white">{activePlacement?.clueNumber}. {activeWord.prompt}</div>
                         <div className="mt-2 text-xs uppercase tracking-[0.2em] text-slate-400">{activeFilledCount}/{activeWord.length} letters filled</div>
                       </div>
-                      <div className={`rounded-full border px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] ${getClueTone(activeWord)}`}>{activeWord.frequencyBand}</div>
+                      <div className={`rounded-full border px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] ${getClueTone(activeWord)}`}>{getFrequencyLabel(activeWord.frequencyBand)}</div>
                     </div>
 
                     <input
@@ -1184,12 +1239,6 @@ export function WordPuzzleStudio() {
                       placeholder={state.paused ? "Paused" : `${activeWord.length} letters`}
                       className="mt-4 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm uppercase tracking-[0.25em] text-white outline-none placeholder:text-slate-500 disabled:opacity-60"
                     />
-
-                    <div className="mt-4 flex flex-wrap items-center gap-2">
-                      {activeWord.visuals.slice(0, state.run.options.clueDensity + 1).map((visual) => (
-                        <span key={visual} className="accent-chip rounded-full px-2.5 py-1 text-[11px] capitalize">{visual}</span>
-                      ))}
-                    </div>
 
                     <div className="mt-4 grid gap-3 sm:grid-cols-3">
                       {activeWord.visuals.slice(0, 3).map((visual, index) => (
@@ -1268,7 +1317,12 @@ export function WordPuzzleStudio() {
                       <button type="button" onClick={clearActiveWord} disabled={state.paused || state.solvedIds.includes(activeWord.id)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
                         Clear word
                       </button>
+                      <button type="button" onClick={() => revealAnagram(activeWord)} disabled={state.paused || state.solvedIds.includes(activeWord.id)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
+                        Show scramble
+                      </button>
                     </div>
+
+                    {shownAnagrams[activeWord.id] ? <div className="mt-3 rounded-2xl border border-dashed border-white/12 bg-slate-950/45 px-3 py-2 text-sm uppercase tracking-[0.25em] text-slate-200">Scramble: {shownAnagrams[activeWord.id]}</div> : null}
 
                     <div className="mt-4 flex items-center justify-between gap-3">
                       <button type="button" onClick={() => revealHint(activeWord.id)} disabled={state.paused || getHintLevel(activeWord.id, state.hintLevels) >= 3} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
@@ -1304,7 +1358,7 @@ export function WordPuzzleStudio() {
                                   <div className="text-xs uppercase tracking-[0.22em] text-slate-400">{placement.clueNumber} / {word.length} letters</div>
                                   <div className="mt-1 text-sm text-slate-100">{word.prompt}</div>
                                 </div>
-                                <span className={`rounded-full border px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] ${getClueTone(word)}`}>{word.frequencyBand}</span>
+                                <span className={`rounded-full border px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] ${getClueTone(word)}`}>{getFrequencyLabel(word.frequencyBand)}</span>
                               </div>
                             </button>
                           );
@@ -1443,6 +1497,12 @@ export function WordPuzzleStudio() {
           </section>
 
           <aside className={`${mobilePanel === "archive" ? "block" : "hidden"} space-y-6 xl:block`}>
+            <div className="hidden xl:flex justify-end">
+              <button type="button" onClick={() => setRightSidebarOpen((current) => !current)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs text-slate-200">
+                {rightSidebarOpen ? "Hide" : "Show"}
+              </button>
+            </div>
+            <div className={rightSidebarOpen ? "space-y-6" : "hidden xl:block"}>
             <div className="glass-card rounded-[2rem] p-5 sm:p-6">
               <h3 className="text-lg font-semibold text-white">Archive Insights</h3>
               <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
@@ -1535,8 +1595,23 @@ export function WordPuzzleStudio() {
                 {filteredHistory.length === 0 ? <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-4 text-sm text-slate-400">No runs match the current filters yet.</div> : null}
               </div>
             </div>
+            </div>
           </aside>
         </div>
+
+        {revealConfirm !== "none" ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/72 px-4">
+            <div className="glass-card w-full max-w-md rounded-[2rem] p-6">
+              <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Confirm reveal</div>
+              <h3 className="mt-2 text-2xl font-semibold text-white">{revealConfirm === "word" ? "Reveal this word?" : "Reveal the full puzzle?"}</h3>
+              <p className="mt-3 text-sm text-slate-300">{revealConfirm === "word" ? "This will show the current answer in review mode." : "This will open the full puzzle review with every answer visible."}</p>
+              <div className="mt-5 flex flex-wrap justify-end gap-2">
+                <button type="button" onClick={() => setRevealConfirm("none")} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">Cancel</button>
+                <button type="button" onClick={() => { setReviewMode(revealConfirm === "word" ? "word" : "puzzle"); setRevealConfirm("none"); }} className="accent-chip rounded-full px-4 py-2 text-sm font-semibold">{revealConfirm === "word" ? "Reveal word" : "Reveal puzzle"}</button>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {toast ? (
           <div className="pointer-events-none fixed inset-x-4 bottom-4 z-50 flex justify-center">
