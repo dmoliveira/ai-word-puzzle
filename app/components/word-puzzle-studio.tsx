@@ -999,7 +999,7 @@ export function WordPuzzleStudio() {
     selectWord(nextWordId);
   }
 
-  function getClueTone(word: PuzzleWord) {
+function getClueTone(word: PuzzleWord) {
     switch (word.frequencyBand) {
       case "common":
         return "border-emerald-400/20 bg-emerald-500/8 text-emerald-100";
@@ -1007,8 +1007,31 @@ export function WordPuzzleStudio() {
         return "border-fuchsia-400/20 bg-fuchsia-500/8 text-fuchsia-100";
       default:
         return "border-white/10 bg-white/4 text-slate-100";
-    }
   }
+}
+
+function getTargetChipClass(word: PuzzleWord, solved: boolean, active: boolean) {
+  if (solved) {
+    return "border-emerald-400/35 bg-emerald-500/12 text-emerald-100";
+  }
+
+  if (active) {
+    return "accent-ring bg-white/6 text-white";
+  }
+
+  switch (word.topicId) {
+    case "cosmos":
+      return "border-sky-400/20 bg-sky-500/8 text-sky-100";
+    case "myth":
+      return "border-amber-400/20 bg-amber-500/8 text-amber-100";
+    case "festival":
+      return "border-fuchsia-400/20 bg-fuchsia-500/8 text-fuchsia-100";
+    case "winter":
+      return "border-cyan-400/20 bg-cyan-500/8 text-cyan-100";
+    default:
+      return "border-white/10 bg-white/4 text-slate-200";
+  }
+}
 
   const desktopLayoutClass = leftSidebarOpen
     ? rightSidebarOpen
@@ -1629,12 +1652,15 @@ export function WordPuzzleStudio() {
                 {state.run.words.map((word) => {
                   const solved = state.solvedIds.includes(word.id);
                   return (
-                    <button key={word.id} type="button" onClick={() => selectWord(word.id)} className={`rounded-2xl border px-4 py-3 text-left transition ${solved ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-100" : state.activeWordId === word.id ? "accent-ring bg-white/6 text-white" : "border-white/10 bg-white/4 text-slate-200"}`}>
+                    <button key={word.id} type="button" onClick={() => selectWord(word.id)} className={`rounded-2xl border px-4 py-3 text-left transition ${getTargetChipClass(word, solved, state.activeWordId === word.id)}`}>
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-sm font-medium uppercase tracking-[0.12em]">{word.answer.length} letters</span>
-                        <span className="text-[11px] uppercase tracking-[0.18em]">{solved ? "done" : getFrequencyLabel(word.frequencyBand)}</span>
+                        <span className="text-[11px] uppercase tracking-[0.18em]">{solved ? "✓ done" : getFrequencyLabel(word.frequencyBand)}</span>
                       </div>
-                      <div className="mt-2 text-sm text-slate-300">{word.topicLabel}</div>
+                      <div className="mt-2 flex items-center justify-between gap-2 text-sm">
+                        <span className="text-slate-300">{word.topicLabel}</span>
+                        <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em]">{word.answer[0]?.toUpperCase()}</span>
+                      </div>
                     </button>
                   );
                 })}
@@ -1684,7 +1710,7 @@ export function WordPuzzleStudio() {
               </button>
             </div>
             <div className={`${mobilePanel === "archive" ? "space-y-6" : "hidden"} ${rightSidebarOpen ? "xl:space-y-6 xl:block" : "xl:hidden"}`}>
-            <div className="glass-card rounded-[2rem] p-5 sm:p-6">
+            <div className="glass-card rounded-[2rem] p-5 sm:p-6 opacity-85">
               <h3 className="text-lg font-semibold text-white">Archive Insights</h3>
               <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
                 <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
@@ -1717,7 +1743,7 @@ export function WordPuzzleStudio() {
               </div>
             </div>
 
-            <div className="glass-card rounded-[2rem] p-5 sm:p-6">
+            <div className="glass-card rounded-[2rem] p-5 sm:p-6 opacity-85">
               <h3 className="text-lg font-semibold text-white">Daily Archive</h3>
               <div className="mt-4 space-y-2">
                 {archive.map((entry) => (
@@ -1735,7 +1761,7 @@ export function WordPuzzleStudio() {
               </div>
             </div>
 
-            <div className="glass-card rounded-[2rem] p-5 sm:p-6">
+            <div className="glass-card rounded-[2rem] p-5 sm:p-6 opacity-80">
               <h3 className="text-lg font-semibold text-white">Recent Runs</h3>
               <div className="mt-4 flex flex-wrap gap-2">
                 {([
