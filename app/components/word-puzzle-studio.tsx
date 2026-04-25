@@ -334,6 +334,10 @@ function getFrequencyLabel(frequencyBand: PuzzleWord["frequencyBand"]) {
   }
 }
 
+function getActiveClueSummary(word: PuzzleWord) {
+  return `${word.topicLabel} word · ${word.length} letters · starts with ${word.answer[0]?.toUpperCase() ?? "?"}`;
+}
+
 function getClueCardValue(word: PuzzleWord, index: number) {
   if (index === 0) {
     return word.topicLabel;
@@ -481,6 +485,9 @@ export function WordPuzzleStudio() {
   const monthlyDailyClearCount = countFinishedRunsSince(progress.history, 30, "daily");
   const weeklyFinishedRunCount = countFinishedRunsSince(progress.history, 7);
   const classicBoardCellClass = state.run.options.style === "classic" ? "border-slate-300/18 bg-slate-50/8 text-slate-50" : "border-white/10 bg-white/6 text-slate-100";
+  const classicEmptyCellClass = state.run.options.style === "classic" ? "bg-slate-950/90 border border-slate-700/60" : "bg-transparent";
+  const classicBoardShellClass = state.run.options.style === "classic" ? "border-slate-300/18 bg-[#111827]/90 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]" : "border-white/10 bg-slate-950/30 p-3";
+  const archiveRailClass = rightSidebarOpen ? "opacity-85 xl:opacity-90" : "opacity-100";
   const filteredHistory = progress.history
     .filter((entry) => (historyModeFilter === "all" ? true : entry.mode === historyModeFilter))
     .filter((entry) => (historyStatusFilter === "all" ? true : historyStatusFilter === "finished" ? entry.finished : !entry.finished));
@@ -1222,13 +1229,13 @@ export function WordPuzzleStudio() {
                 <div className="mb-4 flex items-center justify-between">
                   <div>
                     <h3 className="text-lg font-semibold text-white">Board</h3>
-                    <p className="mt-1 text-sm text-slate-400">Select a clue, then type into the active answer bar to fill the placed grid. Shared cells cycle between crossing clues.</p>
+                    <p className="mt-1 text-sm text-slate-400">Select a clue and fill the board. Crossing cells can switch between clue directions.</p>
                   </div>
                   {activePlacement ? <span data-testid="active-clue-badge" className="accent-chip rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em]">{activePlacement.clueNumber} {activePlacement.direction}</span> : null}
                 </div>
 
                 <div className="overflow-auto pb-2">
-                  <div className="mx-auto grid w-max gap-1 rounded-[1.5rem] border border-white/10 bg-slate-950/30 p-3">
+                  <div className={`mx-auto grid w-max gap-1 rounded-[1.5rem] border ${classicBoardShellClass}`}>
                     {Array.from({ length: state.run.board.size }, (_, row) => (
                       <div key={row} className="flex gap-1">
                         {Array.from({ length: state.run.board.size }, (_, col) => {
@@ -1238,7 +1245,7 @@ export function WordPuzzleStudio() {
                           const solvedCell = cell ? cell.wordIds.every((wordId) => state.solvedIds.includes(wordId)) : false;
 
                           if (!cell) {
-                            return <div key={key} className="size-9 rounded-lg bg-transparent sm:size-10" />;
+                            return <div key={key} className={`size-9 rounded-md sm:size-10 ${classicEmptyCellClass}`} />;
                           }
 
                           return (
@@ -1253,7 +1260,7 @@ export function WordPuzzleStudio() {
                               onClick={() => selectWordFromCell(cell)}
                               onFocus={() => setFocusedCellKey(key)}
                               onKeyDown={(event) => handleBoardCellKeyDown(event, cell)}
-                              className={`relative size-9 rounded-lg border text-sm font-semibold uppercase transition sm:size-10 ${activeCell ? `bg-gradient-to-br ${getThemeAccentCellClass(state.run.options.style)} border-white/30 text-white` : classicBoardCellClass} ${solvedCell ? "border-emerald-400/30 bg-emerald-500/12 text-emerald-100" : ""} ${boardFocusKey === key ? "ring-2 ring-white/55" : ""}`}
+                              className={`relative size-9 rounded-md border text-sm font-semibold uppercase transition sm:size-10 ${activeCell ? `bg-gradient-to-br ${getThemeAccentCellClass(state.run.options.style)} border-white/30 text-white` : classicBoardCellClass} ${solvedCell ? "border-emerald-400/30 bg-emerald-500/12 text-emerald-100" : ""} ${boardFocusKey === key ? "ring-2 ring-white/55" : ""}`}
                             >
                               {cell.clueNumbers[0] ? <span className="absolute left-1 top-0.5 text-[9px] font-medium text-slate-400">{cell.clueNumbers[0]}</span> : null}
                               <span>{(state.cellEntries[key] ?? "").toUpperCase()}</span>
@@ -1269,8 +1276,9 @@ export function WordPuzzleStudio() {
                   <div className="mt-5 rounded-[1.5rem] border border-white/10 bg-white/4 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Active clue</div>
-                        <div className="mt-1 text-lg font-semibold text-white">{activePlacement?.clueNumber}. {activeWord.prompt}</div>
+                        <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Clue</div>
+                        <div className="mt-1 text-lg font-semibold text-white">{activePlacement?.clueNumber}. {getActiveClueSummary(activeWord)}</div>
+                        <div className="mt-2 text-sm text-slate-300">{activeWord.prompt}</div>
                         <div className="mt-2 text-xs uppercase tracking-[0.2em] text-slate-400">{activeFilledCount}/{activeWord.length} letters filled</div>
                       </div>
                       <div className={`rounded-full border px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] ${getClueTone(activeWord)}`}>{getFrequencyLabel(activeWord.frequencyBand)}</div>
@@ -1571,7 +1579,7 @@ export function WordPuzzleStudio() {
             ) : null}
           </section>
 
-          <aside className={`${mobilePanel === "archive" ? "block" : "hidden"} space-y-6 xl:block`}>
+          <aside className={`${mobilePanel === "archive" ? "block" : "hidden"} space-y-6 xl:block ${archiveRailClass}`}>
             <div className="hidden xl:flex justify-end">
               <button data-testid="toggle-right-panel" type="button" onClick={() => setRightSidebarOpen((current) => !current)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs text-slate-200">
                 {rightSidebarOpen ? "Hide" : "Show"}

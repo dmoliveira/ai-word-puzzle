@@ -75,7 +75,7 @@ test("mobile player can switch between board, clues, and archive panels", async 
   await page.goto("/");
 
   await expect(page.getByRole("button", { name: "Board" })).toBeVisible();
-  await expect(page.getByText("Active clue")).toBeVisible();
+  await expect(page.getByText("Clue", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Clues" }).click();
   await expect(page.getByRole("heading", { name: "Clues" })).toBeVisible();
@@ -85,7 +85,7 @@ test("mobile player can switch between board, clues, and archive panels", async 
   await expect(page.getByRole("heading", { name: "Daily Archive" })).toBeVisible();
 
   await page.getByRole("button", { name: "Board" }).click();
-  await expect(page.getByText("Active clue")).toBeVisible();
+  await expect(page.getByText("Clue", { exact: true })).toBeVisible();
 });
 
 test("player sees completion stats after clearing the full puzzle", async ({ page }) => {
