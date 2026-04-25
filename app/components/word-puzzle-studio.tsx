@@ -1088,14 +1088,24 @@ export function WordPuzzleStudio() {
           <aside className="glass-card rounded-[2rem] p-4 sm:p-5">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div className={`${leftSidebarOpen ? "block" : "hidden xl:block"}`}>
-                <h2 className="text-lg font-semibold text-white">Run Builder</h2>
-                <p className="mt-1 text-sm text-slate-400">Tune mode, challenge, topics, board density, and style.</p>
+                <h2 className="text-lg font-semibold text-white">Setup Your Quest</h2>
+                <p className="mt-1 text-sm text-slate-400">Choose a quick run style, then fine-tune only if you want extra control.</p>
               </div>
               <button data-testid="toggle-left-panel" type="button" onClick={() => setLeftSidebarOpen((current) => !current)} className="hidden rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs text-slate-200 xl:inline-flex">
                 {leftSidebarOpen ? "Hide" : "Show"}
               </button>
             </div>
             <div className={leftSidebarOpen ? "space-y-5" : "hidden xl:block"}>
+              <div className="overflow-hidden rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(91,33,182,0.18),rgba(15,23,42,0.18))] p-4">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-2xl border border-white/10 bg-white/6 px-3 py-2 text-3xl">🧙</div>
+                  <div>
+                    <div className="text-xl font-semibold text-white">Setup Your Quest</div>
+                    <p className="mt-1 text-sm text-slate-300">Pick a theme, choose a quick preset, and start hunting words.</p>
+                  </div>
+                </div>
+              </div>
+
               <div className="space-y-2">
                 <label className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Mode</label>
                 <div className="grid grid-cols-2 gap-2">
@@ -1116,8 +1126,9 @@ export function WordPuzzleStudio() {
                     ["study", "Study / Extra help"],
                     ["deep", "Deep challenge"],
                   ] as const).map(([preset, label]) => (
-                    <button key={preset} type="button" onClick={() => applyPreset(preset)} className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2 text-left text-sm text-slate-200 transition hover:border-white/20">
-                      {label}
+                    <button key={preset} type="button" onClick={() => applyPreset(preset)} className="rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-left text-sm text-slate-200 transition hover:border-white/20">
+                      <div className="font-medium text-white">{label}</div>
+                      <div className="mt-1 text-xs text-slate-400">{preset === "gentle" ? "Friendly start" : preset === "balanced" ? "Default flow" : preset === "study" ? "More help" : "Harder mix"}</div>
                     </button>
                   ))}
                 </div>
@@ -1627,6 +1638,41 @@ export function WordPuzzleStudio() {
                     </button>
                   );
                 })}
+              </div>
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
+              <div className="glass-card rounded-[2rem] p-5 sm:p-6">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-semibold text-white">Quest Progress</h3>
+                    <p className="mt-1 text-sm text-slate-400">Keep the streak alive and clear words steadily.</p>
+                  </div>
+                  <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300">{solvedCount}/{state.run.words.length}</span>
+                </div>
+                <div className="mt-4 h-3 overflow-hidden rounded-full bg-white/8">
+                  <div className="h-full rounded-full bg-[linear-gradient(90deg,#a855f7,#60a5fa)]" style={{ width: `${state.run.words.length === 0 ? 0 : (solvedCount / state.run.words.length) * 100}%` }} />
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-300">
+                  <span className="rounded-full border border-white/10 px-3 py-1">Streak {progress.streak}</span>
+                  <span className="rounded-full border border-white/10 px-3 py-1">Best {progress.bestStreak}</span>
+                  <span className="rounded-full border border-white/10 px-3 py-1">Hints {hintsUsed}</span>
+                </div>
+              </div>
+
+              <div className="glass-card rounded-[2rem] p-5 sm:p-6 bg-[linear-gradient(135deg,rgba(168,85,247,0.22),rgba(15,23,42,0.2))]">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-semibold text-white">Keep the streak alive!</h3>
+                    <p className="mt-1 text-sm text-slate-300">Play tomorrow for another clean run and more confident vocabulary recall.</p>
+                  </div>
+                  <div className="text-4xl">🎁</div>
+                </div>
+                <div className="mt-5 flex items-center gap-2">
+                  {[0, 1, 2, 3, 4].map((index) => (
+                    <div key={index} className={`h-2 flex-1 rounded-full ${index < Math.max(1, Math.min(5, progress.streak || 1)) ? "bg-cyan-300" : "bg-white/10"}`} />
+                  ))}
+                </div>
               </div>
             </div>
           </section>
