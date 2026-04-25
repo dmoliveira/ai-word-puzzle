@@ -1670,7 +1670,8 @@ function getTargetChipClass(word: PuzzleWord, solved: boolean, active: boolean) 
             </div>
 
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
-              <div className="glass-card rounded-[2rem] p-5 sm:p-6 bg-[linear-gradient(135deg,rgba(96,165,250,0.16),rgba(15,23,42,0.16))]">
+              <div className="glass-card relative overflow-hidden rounded-[2rem] p-5 sm:p-6 bg-[linear-gradient(135deg,rgba(96,165,250,0.16),rgba(15,23,42,0.16))]">
+                <div className="pointer-events-none absolute right-4 top-4 text-5xl opacity-15">🧭</div>
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <h3 className="text-lg font-semibold text-white">Quest Progress</h3>
@@ -1689,9 +1690,24 @@ function getTargetChipClass(word: PuzzleWord, solved: boolean, active: boolean) 
                   <span className="rounded-full border border-white/10 px-3 py-1">Best {progress.bestStreak}</span>
                   <span className="rounded-full border border-white/10 px-3 py-1">Hints {hintsUsed}</span>
                 </div>
+                <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs text-slate-300">
+                  <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2">
+                    <div className="text-lg">⭐</div>
+                    <div className="mt-1">Progress</div>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2">
+                    <div className="text-lg">🔥</div>
+                    <div className="mt-1">Streak</div>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2">
+                    <div className="text-lg">💡</div>
+                    <div className="mt-1">Hints</div>
+                  </div>
+                </div>
               </div>
 
-              <div className="glass-card rounded-[2rem] p-5 sm:p-6 bg-[linear-gradient(135deg,rgba(168,85,247,0.22),rgba(15,23,42,0.2))]">
+              <div className="glass-card relative overflow-hidden rounded-[2rem] p-5 sm:p-6 bg-[linear-gradient(135deg,rgba(168,85,247,0.22),rgba(15,23,42,0.2))]">
+                <div className="pointer-events-none absolute -right-2 -bottom-2 text-8xl opacity-12">💎</div>
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h3 className="text-lg font-semibold text-white">Keep the streak alive!</h3>
@@ -1703,6 +1719,10 @@ function getTargetChipClass(word: PuzzleWord, solved: boolean, active: boolean) 
                   {[0, 1, 2, 3, 4].map((index) => (
                     <div key={index} className={`h-2 flex-1 rounded-full ${index < Math.max(1, Math.min(5, progress.streak || 1)) ? "bg-cyan-300" : "bg-white/10"}`} />
                   ))}
+                </div>
+                <div className="mt-4 flex items-center justify-between gap-2 text-xs text-slate-200">
+                  <span className="rounded-full border border-white/10 px-3 py-1">Daily reward</span>
+                  <span className="rounded-full border border-white/10 px-3 py-1">Quest chest</span>
                 </div>
               </div>
             </div>
