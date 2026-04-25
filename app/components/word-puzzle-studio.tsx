@@ -1063,6 +1063,12 @@ function getTargetChipClass(word: PuzzleWord, solved: boolean, active: boolean) 
                 <span>{label}</span>
               </button>
             ))}
+
+            <div className="mt-4 w-full rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-center">
+              <div className="text-2xl">🧑‍🚀</div>
+              <div className="mt-2 text-xs font-semibold text-white">Hunter</div>
+              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Lv. {Math.max(1, progress.bestStreak + 1)}</div>
+            </div>
           </div>
         </aside>
 
@@ -1105,6 +1111,29 @@ function getTargetChipClass(word: PuzzleWord, solved: boolean, active: boolean) 
                 <div className="mt-1 text-lg font-semibold text-white">{finished ? "Done" : state.paused ? "Paused" : "Live"}</div>
               </div>
             </div>
+          </div>
+        </section>
+
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="glass-card rounded-[2rem] p-4">
+            <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Preset</div>
+            <div className="mt-3 text-lg font-semibold text-white capitalize">{options.challenge}</div>
+            <div className="mt-1 text-sm text-slate-300">{options.learningMode ? "Learning-friendly" : "Standard quest"}</div>
+          </div>
+          <div className="glass-card rounded-[2rem] p-4">
+            <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Theme</div>
+            <div className="mt-3 text-lg font-semibold text-white">{state.run.words[0]?.topicLabel ?? "Mixed"}</div>
+            <div className="mt-1 text-sm text-slate-300">Focused word lane</div>
+          </div>
+          <div className="glass-card rounded-[2rem] p-4">
+            <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Rules</div>
+            <div className="mt-3 text-lg font-semibold text-white">Across + Down</div>
+            <div className="mt-1 text-sm text-slate-300">Classic crossword style</div>
+          </div>
+          <div className="glass-card rounded-[2rem] p-4">
+            <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Mode</div>
+            <div className="mt-3 text-lg font-semibold text-white">{options.mode === "daily" ? "Daily Spark" : "Custom Run"}</div>
+            <div className="mt-1 text-sm text-slate-300">Seed {state.run.seed.replace(/^daily:/, "")}</div>
           </div>
         </section>
 
