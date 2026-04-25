@@ -319,7 +319,7 @@ function getClueArtTone(topicId: TopicId, frequencyBand: PuzzleWord["frequencyBa
 }
 
 function getClueArtLabel(index: number) {
-  return ["theme", "mood", "length"][index] ?? "cue";
+  return ["topic", "starter", "length"][index] ?? "cue";
 }
 
 function getFrequencyLabel(frequencyBand: PuzzleWord["frequencyBand"]) {
@@ -331,6 +331,18 @@ function getFrequencyLabel(frequencyBand: PuzzleWord["frequencyBand"]) {
     case "rare":
       return "advanced";
   }
+}
+
+function getClueCardValue(word: PuzzleWord, index: number) {
+  if (index === 0) {
+    return word.topicLabel;
+  }
+
+  if (index === 1) {
+    return `${word.answer[0]?.toUpperCase() ?? "?"} starter`;
+  }
+
+  return `${word.length} letters`;
 }
 
 function buildAnagram(answer: string) {
@@ -369,8 +381,8 @@ export function WordPuzzleStudio() {
   const [state, setState] = useState<PersistedRunState>(() => createFreshState(defaultOptions));
   const [reviewMode, setReviewMode] = useState<"none" | "word" | "puzzle">("none");
   const [mobilePanel, setMobilePanel] = useState<"board" | "clues" | "archive">("board");
-  const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
-  const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
+  const [leftSidebarOpen, setLeftSidebarOpen] = useState(false);
+  const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
   const [revealConfirm, setRevealConfirm] = useState<RevealConfirmState>("none");
   const [shownAnagrams, setShownAnagrams] = useState<Record<string, string>>({});
   const [isStarting, setIsStarting] = useState(false);
@@ -466,6 +478,7 @@ export function WordPuzzleStudio() {
   const weeklyDailyClearCount = countFinishedRunsSince(progress.history, 7, "daily");
   const monthlyDailyClearCount = countFinishedRunsSince(progress.history, 30, "daily");
   const weeklyFinishedRunCount = countFinishedRunsSince(progress.history, 7);
+  const classicBoardCellClass = state.run.options.style === "classic" ? "border-slate-300/18 bg-slate-50/8 text-slate-50" : "border-white/10 bg-white/6 text-slate-100";
   const filteredHistory = progress.history
     .filter((entry) => (historyModeFilter === "all" ? true : entry.mode === historyModeFilter))
     .filter((entry) => (historyStatusFilter === "all" ? true : historyStatusFilter === "finished" ? entry.finished : !entry.finished));
@@ -957,43 +970,33 @@ export function WordPuzzleStudio() {
   return (
     <main className={`scroll-shell ${theme.className} min-h-screen px-4 py-6 sm:px-6 lg:px-8`}>
       <div className="mx-auto flex w-full max-w-[96rem] flex-col gap-6">
-        <section className="glass-card overflow-hidden rounded-[2rem] p-6 sm:p-8">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-              <div className="max-w-3xl space-y-4">
-              <span className="accent-chip inline-flex rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.28em]">Astra Lexa</span>
-              <div className="space-y-3">
-                <h1 className="text-4xl font-semibold tracking-tight text-white sm:text-5xl">Crossword-style English puzzle runs with theme, history, and daily streaks.</h1>
-                <p className="max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
-                  Real placed boards, deterministic seeded runs, visual clue tokens, optional hint ladders, and a lexicon designed to keep expanding.
-                </p>
+        <section className="glass-card overflow-hidden rounded-[2rem] px-5 py-4 sm:px-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="accent-chip inline-flex rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.28em]">Astra Lexa</span>
+                <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300">{state.run.title}</span>
+                <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300">{state.run.board.size}x{state.run.board.size}</span>
+                <span className="rounded-full border border-white/10 px-3 py-1 text-xs uppercase tracking-[0.18em] text-slate-300">{state.run.options.mode}</span>
               </div>
-              <div className="flex flex-wrap gap-2 text-xs text-slate-300">
-                {theme.greekConstellation.map((item) => (
-                  <span key={item} className="accent-chip rounded-full px-3 py-1 font-medium capitalize">{item}</span>
-                ))}
-                <span className="rounded-full border border-white/10 px-3 py-1 font-medium capitalize text-slate-300">{theme.motif}</span>
-              </div>
+              <p className="max-w-3xl text-sm leading-6 text-slate-300">{state.run.blurb}</p>
             </div>
-            <div className="grid gap-3 text-sm text-slate-200 sm:grid-cols-4 lg:min-w-[30rem]">
-              <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
-                <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Lexicon</div>
-                <div className="mt-2 text-2xl font-semibold text-white">{lexiconSize}</div>
-                <div className="mt-1 text-xs text-slate-400">Curated and generated English entries</div>
+            <div className="grid gap-2 text-sm text-slate-200 sm:grid-cols-4 lg:min-w-[26rem]">
+              <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Progress</div>
+                <div className="mt-1 text-lg font-semibold text-white">{progressLabel}</div>
               </div>
-              <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
-                <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Board</div>
-                <div className="mt-2 text-2xl font-semibold text-white">{state.run.board.size}x{state.run.board.size}</div>
-                <div className="mt-1 text-xs text-slate-400">Placed clue grid with overlaps</div>
+              <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Timer</div>
+                <div className="mt-1 text-lg font-semibold text-white">{formatElapsed(state.elapsedMs)}</div>
               </div>
-              <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
-                <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Streak</div>
-                <div className="mt-2 text-2xl font-semibold text-white">{progress.streak}</div>
-                <div className="mt-1 text-xs text-slate-400">Best {progress.bestStreak}</div>
+              <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Streak</div>
+                <div className="mt-1 text-lg font-semibold text-white">{progress.streak}</div>
               </div>
-              <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
-                <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Run State</div>
-                <div className="mt-2 text-2xl font-semibold text-white">{finished ? "Done" : state.paused ? "Paused" : "Live"}</div>
-                <div className="mt-1 text-xs text-slate-400">Review, restart, archive, and daily tracking</div>
+              <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">State</div>
+                <div className="mt-1 text-lg font-semibold text-white">{finished ? "Done" : state.paused ? "Paused" : "Live"}</div>
               </div>
             </div>
           </div>
@@ -1006,7 +1009,7 @@ export function WordPuzzleStudio() {
                 <h2 className="text-lg font-semibold text-white">Run Builder</h2>
                 <p className="mt-1 text-sm text-slate-400">Tune mode, challenge, topics, board density, and style.</p>
               </div>
-              <button type="button" onClick={() => setLeftSidebarOpen((current) => !current)} className="hidden rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs text-slate-200 xl:inline-flex">
+              <button data-testid="toggle-left-panel" type="button" onClick={() => setLeftSidebarOpen((current) => !current)} className="hidden rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs text-slate-200 xl:inline-flex">
                 {leftSidebarOpen ? "Hide" : "Show"}
               </button>
             </div>
@@ -1178,7 +1181,7 @@ export function WordPuzzleStudio() {
                               onClick={() => selectWordFromCell(cell)}
                               onFocus={() => setFocusedCellKey(key)}
                               onKeyDown={(event) => handleBoardCellKeyDown(event, cell)}
-                              className={`relative size-9 rounded-lg border text-sm font-semibold uppercase transition sm:size-10 ${activeCell ? `bg-gradient-to-br ${getThemeAccentCellClass(state.run.options.style)} border-white/30 text-white` : "border-white/10 bg-white/6 text-slate-100"} ${solvedCell ? "border-emerald-400/30 bg-emerald-500/12 text-emerald-100" : ""} ${boardFocusKey === key ? "ring-2 ring-white/55" : ""}`}
+                              className={`relative size-9 rounded-lg border text-sm font-semibold uppercase transition sm:size-10 ${activeCell ? `bg-gradient-to-br ${getThemeAccentCellClass(state.run.options.style)} border-white/30 text-white` : classicBoardCellClass} ${solvedCell ? "border-emerald-400/30 bg-emerald-500/12 text-emerald-100" : ""} ${boardFocusKey === key ? "ring-2 ring-white/55" : ""}`}
                             >
                               {cell.clueNumbers[0] ? <span className="absolute left-1 top-0.5 text-[9px] font-medium text-slate-400">{cell.clueNumbers[0]}</span> : null}
                               <span>{(state.cellEntries[key] ?? "").toUpperCase()}</span>
@@ -1246,7 +1249,7 @@ export function WordPuzzleStudio() {
                           <div className={`absolute inset-0 bg-gradient-to-br ${getClueArtTone(activeWord.topicId, activeWord.frequencyBand).baseTone}`} />
                           <div className="absolute inset-x-0 top-0 h-px bg-white/10" />
                           <div className="relative text-[10px] uppercase tracking-[0.28em] text-slate-500">{getClueArtLabel(index)}</div>
-                          <div className="relative mt-2 text-sm font-medium capitalize text-white">{visual}</div>
+                          <div className="relative mt-2 text-sm font-medium capitalize text-white">{getClueCardValue(activeWord, index)}</div>
                         </div>
                       ))}
                     </div>
@@ -1498,11 +1501,11 @@ export function WordPuzzleStudio() {
 
           <aside className={`${mobilePanel === "archive" ? "block" : "hidden"} space-y-6 xl:block`}>
             <div className="hidden xl:flex justify-end">
-              <button type="button" onClick={() => setRightSidebarOpen((current) => !current)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs text-slate-200">
+              <button data-testid="toggle-right-panel" type="button" onClick={() => setRightSidebarOpen((current) => !current)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs text-slate-200">
                 {rightSidebarOpen ? "Hide" : "Show"}
               </button>
             </div>
-            <div className={rightSidebarOpen ? "space-y-6" : "hidden xl:block"}>
+            <div className={`${mobilePanel === "archive" ? "space-y-6" : "hidden"} ${rightSidebarOpen ? "xl:space-y-6 xl:block" : "xl:hidden"}`}>
             <div className="glass-card rounded-[2rem] p-5 sm:p-6">
               <h3 className="text-lg font-semibold text-white">Archive Insights</h3>
               <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">

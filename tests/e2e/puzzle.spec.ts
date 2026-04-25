@@ -8,7 +8,7 @@ async function openWordReview(page: import("@playwright/test").Page) {
 test("player can reveal a review answer and solve the active clue", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.getByText(/crossword-style english puzzle runs/i)).toBeVisible();
+  await expect(page.getByText(/Astra Lexa/i).first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Start Fresh Run" })).toBeVisible();
   await expect(page.getByTestId("progress-label")).toContainText("0/");
 
@@ -18,6 +18,7 @@ test("player can reveal a review answer and solve the active clue", async ({ pag
 
   await page.getByTestId("active-answer-input").fill(cleanedAnswer);
   await expect(page.getByTestId("progress-label")).not.toContainText("0/");
+  await page.getByTestId("toggle-right-panel").click();
   await expect(page.getByText("Daily Archive")).toBeVisible();
 });
 
@@ -106,7 +107,7 @@ test("shared daily link reopens the requested seeded run", async ({ page }) => {
   await page.goto("/?mode=daily&seed=2026-04-24&topics=myth,greek&challenge=quest&style=alpha&puzzleSize=7&clueDensity=2&timerEnabled=true");
 
   await expect(page.getByText("seed 2026-04-24")).toBeVisible();
-  await expect(page.locator('span').filter({ hasText: /^daily$/ })).toBeVisible();
+  await expect(page.locator('span').filter({ hasText: /^daily$/ }).first()).toBeVisible();
 });
 
 test("daily run completion exposes the daily share action", async ({ page }) => {
@@ -128,6 +129,7 @@ test("history filters narrow the recent runs list", async ({ page }) => {
 
   await page.getByRole("button", { name: "Start Fresh Run" }).click();
   await page.getByRole("button", { name: "Spin random custom" }).click();
+  await page.getByTestId("toggle-right-panel").click();
   await page.getByTestId("history-mode-daily").click();
   await expect(page.getByText("No runs match the current filters yet.")).not.toBeVisible();
   await page.getByTestId("history-mode-custom").click();
@@ -137,6 +139,7 @@ test("history filters narrow the recent runs list", async ({ page }) => {
 test("archive insights panel is visible", async ({ page }) => {
   await page.goto("/");
 
+  await page.getByTestId("toggle-right-panel").click();
   await expect(page.getByRole("heading", { name: "Archive Insights" })).toBeVisible();
   await expect(page.locator('div').filter({ hasText: /^Finished runs$/ })).toBeVisible();
   await expect(page.locator('div').filter({ hasText: /^Last 7 days$/ })).toBeVisible();
