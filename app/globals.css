@@ -70,6 +70,12 @@ body::before {
   --accent-strong: rgb(16 185 129 / 0.28);
 }
 
+.style-classic {
+  --accent: #f8fafc;
+  --accent-soft: rgb(248 250 252 / 0.1);
+  --accent-strong: rgb(226 232 240 / 0.22);
+}
+
 .glass-card {
   background: linear-gradient(180deg, rgb(15 23 42 / 0.9), rgb(9 14 26 / 0.85));
   border: 1px solid rgb(255 255 255 / 0.09);

@@ -1,6 +1,6 @@
 export type ChallengeLevel = "breeze" | "quest" | "mythic";
 
-export type ThemeStyleId = "alpha" | "nebula" | "sunforge" | "arcade";
+export type ThemeStyleId = "alpha" | "nebula" | "sunforge" | "arcade" | "classic";
 
 export type PuzzleMode = "custom" | "daily";
 

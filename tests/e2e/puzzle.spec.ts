@@ -1,5 +1,10 @@
 import { expect, test } from "@playwright/test";
 
+async function openWordReview(page: import("@playwright/test").Page) {
+  await page.getByRole("button", { name: "Review Word" }).click();
+  await page.getByRole("button", { name: "Reveal word" }).click();
+}
+
 test("player can reveal a review answer and solve the active clue", async ({ page }) => {
   await page.goto("/");
 
@@ -7,7 +12,7 @@ test("player can reveal a review answer and solve the active clue", async ({ pag
   await expect(page.getByRole("button", { name: "Start Fresh Run" })).toBeVisible();
   await expect(page.getByTestId("progress-label")).toContainText("0/");
 
-  await page.getByRole("button", { name: "Review Word" }).click();
+  await openWordReview(page);
   const cleanedAnswer = ((await page.getByTestId("review-word-answer").textContent()) ?? "").trim();
   await page.getByRole("button", { name: "Close" }).click();
 
@@ -22,6 +27,8 @@ test("player can reveal a letter, clear a clue, and move to the next clue", asyn
   const startingBadge = ((await page.getByTestId("active-clue-badge").textContent()) ?? "").trim();
   await page.getByRole("button", { name: "Reveal letter" }).click();
   await expect(page.getByTestId("active-answer-input")).not.toHaveValue("");
+  await page.getByRole("button", { name: "Show scramble" }).click();
+  await expect(page.getByText(/^Scramble:/)).toBeVisible();
 
   await page.getByRole("button", { name: "Clear word" }).click();
   await expect(page.getByTestId("active-answer-input")).toHaveValue("");
@@ -84,7 +91,7 @@ test("player sees completion stats after clearing the full puzzle", async ({ pag
   await page.goto("/");
 
   for (let index = 0; index < 7; index += 1) {
-    await page.getByRole("button", { name: "Review Word" }).click();
+    await openWordReview(page);
     const answer = ((await page.getByTestId("review-word-answer").textContent()) ?? "").trim();
     await page.getByRole("button", { name: "Close" }).click();
     await page.getByTestId("active-answer-input").fill(answer);
@@ -106,7 +113,7 @@ test("daily run completion exposes the daily share action", async ({ page }) => 
   await page.goto("/?mode=daily&seed=2026-04-24&topics=myth,greek&challenge=quest&style=alpha&puzzleSize=7&clueDensity=2&timerEnabled=true");
 
   for (let index = 0; index < 7; index += 1) {
-    await page.getByRole("button", { name: "Review Word" }).click();
+    await openWordReview(page);
     const answer = ((await page.getByTestId("review-word-answer").textContent()) ?? "").trim();
     await page.getByRole("button", { name: "Close" }).click();
     await page.getByTestId("active-answer-input").fill(answer);
@@ -140,7 +147,7 @@ test("word review exposes vocabulary support for learners", async ({ page }) => 
   await page.goto("/");
 
   await page.getByLabel("Learning mode").check();
-  await page.getByRole("button", { name: "Review Word" }).click();
+  await openWordReview(page);
   await expect(page.getByTestId("review-vocabulary-support")).toBeVisible();
   await expect(page.getByTestId("review-vocabulary-support")).toContainText(/Example:/);
   await expect(page.getByTestId("review-vocabulary-support")).toContainText(/Plain meaning:/);
