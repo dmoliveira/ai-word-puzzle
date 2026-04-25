@@ -18,6 +18,7 @@ type ToastTone = NonNullable<ToastState>["tone"];
 type HistoryFilterMode = "all" | "daily" | "custom";
 type HistoryFilterStatus = "all" | "finished" | "active";
 type RevealConfirmState = "none" | "word" | "puzzle";
+type BuilderPresetId = "gentle" | "balanced" | "study" | "deep";
 
 const defaultOptions: PuzzleOptions = {
   mode: "custom",
@@ -383,6 +384,7 @@ export function WordPuzzleStudio() {
   const [mobilePanel, setMobilePanel] = useState<"board" | "clues" | "archive">("board");
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(false);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
+  const [builderAdvancedOpen, setBuilderAdvancedOpen] = useState(false);
   const [revealConfirm, setRevealConfirm] = useState<RevealConfirmState>("none");
   const [shownAnagrams, setShownAnagrams] = useState<Record<string, string>>({});
   const [isStarting, setIsStarting] = useState(false);
@@ -521,6 +523,48 @@ export function WordPuzzleStudio() {
         return nextState;
       });
     }
+  }
+
+  function applyPreset(preset: BuilderPresetId) {
+    const presetOptions: Record<BuilderPresetId, Partial<PuzzleOptions>> = {
+      gentle: {
+        challenge: "breeze",
+        puzzleSize: 6,
+        clueDensity: 3,
+        learningMode: true,
+      },
+      balanced: {
+        challenge: "quest",
+        puzzleSize: 7,
+        clueDensity: 2,
+        learningMode: false,
+      },
+      study: {
+        challenge: "quest",
+        puzzleSize: 8,
+        clueDensity: 3,
+        learningMode: true,
+      },
+      deep: {
+        challenge: "mythic",
+        puzzleSize: 9,
+        clueDensity: 2,
+        learningMode: true,
+      },
+    };
+
+    const nextOptions = normalizeOptions({
+      ...options,
+      ...presetOptions[preset],
+    });
+    setOptions(nextOptions);
+    setState((current) => ({
+      ...current,
+      run: {
+        ...current.run,
+        options: nextOptions,
+      },
+    }));
   }
 
   function toggleTopic(topicId: TopicId) {
@@ -1026,11 +1070,16 @@ export function WordPuzzleStudio() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Challenge</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(["breeze", "quest", "mythic"] as const).map((level) => (
-                    <button key={level} type="button" onClick={() => updateOptions("challenge", level)} className={`rounded-2xl border px-3 py-2 text-sm capitalize transition ${options.challenge === level ? "accent-chip" : "border-white/10 bg-white/4 text-slate-200"}`}>
-                      {level}
+                <label className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Quick presets</label>
+                <div className="grid gap-2">
+                  {([
+                    ["gentle", "Gentle / Learn"],
+                    ["balanced", "Balanced"],
+                    ["study", "Study / Extra help"],
+                    ["deep", "Deep challenge"],
+                  ] as const).map(([preset, label]) => (
+                    <button key={preset} type="button" onClick={() => applyPreset(preset)} className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2 text-left text-sm text-slate-200 transition hover:border-white/20">
+                      {label}
                     </button>
                   ))}
                 </div>
@@ -1047,13 +1096,36 @@ export function WordPuzzleStudio() {
                 </div>
               </div>
 
-              <label className="space-y-2 text-sm text-slate-300">
-                <span className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Puzzle Size</span>
-                <input type="range" min={4} max={12} value={options.puzzleSize} onChange={(event) => updateOptions("puzzleSize", Number(event.target.value))} className="w-full" />
-                <span>{options.puzzleSize} words</span>
-              </label>
+              <div className="rounded-2xl border border-white/10 bg-white/4 px-4 py-3 text-sm text-slate-300">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Current setup</div>
+                    <div className="mt-1">{options.challenge} · {options.puzzleSize} words · {options.learningMode ? "learning on" : "learning off"}</div>
+                  </div>
+                  <button type="button" onClick={() => setBuilderAdvancedOpen((current) => !current)} className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-100">
+                    {builderAdvancedOpen ? "Hide advanced" : "Show advanced"}
+                  </button>
+                </div>
+              </div>
 
-              <div className="grid gap-4">
+              <div className={`${builderAdvancedOpen ? "grid" : "hidden"} gap-4`}>
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Challenge</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(["breeze", "quest", "mythic"] as const).map((level) => (
+                      <button key={level} type="button" onClick={() => updateOptions("challenge", level)} className={`rounded-2xl border px-3 py-2 text-sm capitalize transition ${options.challenge === level ? "accent-chip" : "border-white/10 bg-white/4 text-slate-200"}`}>
+                        {level}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <label className="space-y-2 text-sm text-slate-300">
+                  <span className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Puzzle Size</span>
+                  <input type="range" min={4} max={12} value={options.puzzleSize} onChange={(event) => updateOptions("puzzleSize", Number(event.target.value))} className="w-full" />
+                  <span>{options.puzzleSize} words</span>
+                </label>
+
                 <label className="space-y-2 text-sm text-slate-300">
                   <span className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Clue Density</span>
                   <select value={options.clueDensity} onChange={(event) => updateOptions("clueDensity", Number(event.target.value) as 1 | 2 | 3)} className="w-full rounded-2xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none">

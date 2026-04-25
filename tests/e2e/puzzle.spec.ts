@@ -149,6 +149,7 @@ test("archive insights panel is visible", async ({ page }) => {
 test("word review exposes vocabulary support for learners", async ({ page }) => {
   await page.goto("/");
 
+  await page.getByRole("button", { name: "Show advanced" }).click();
   await page.getByLabel("Learning mode").check();
   await openWordReview(page);
   await expect(page.getByTestId("review-vocabulary-support")).toBeVisible();
