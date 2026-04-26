@@ -1246,11 +1246,12 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
     <main className={`scroll-shell ${theme.className} min-h-screen px-4 py-6 sm:px-6 lg:px-8`}>
       <div className="mx-auto grid w-full max-w-[96rem] gap-6 xl:grid-cols-[4.5rem_minmax(0,1fr)]">
         <aside className="hidden xl:flex xl:flex-col xl:items-center xl:gap-4">
-          <div className="glass-card flex w-full flex-col items-center gap-4 rounded-[2rem] px-3 py-4">
+          <div className="glass-card quest-card-frame flex w-full flex-col items-center gap-4 rounded-[2rem] px-3 py-4">
             <div className="text-center">
               <div className="text-xl">👑</div>
               <div className="quest-logo mt-2 text-lg font-black uppercase tracking-[0.12em]">Word</div>
               <div className="quest-logo text-lg font-black uppercase tracking-[0.12em]">Quest</div>
+              <div className="quest-spark-row mt-3 justify-center"><span /><span /><span /></div>
             </div>
             {[
               ["🎮", "Play"],
@@ -1265,7 +1266,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
               </button>
             ))}
 
-            <div className="mt-4 w-full rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-center">
+            <div className="quest-card-frame mt-4 w-full rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-center">
               <div className="text-2xl">🧑‍🚀</div>
               <div className="mt-2 text-xs font-semibold text-white">Hunter</div>
               <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Lv. {Math.max(1, progress.bestStreak + 1)}</div>
@@ -1274,7 +1275,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
         </aside>
 
         <div className="flex flex-col gap-6">
-        <section className="glass-card overflow-hidden rounded-[2rem] px-5 py-4 sm:px-6">
+        <section className="glass-card quest-card-frame overflow-hidden rounded-[2rem] px-5 py-4 sm:px-6">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-start gap-4">
               <div className="hidden rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(125,211,252,0.12),rgba(168,85,247,0.12))] px-4 py-3 text-center xl:block">
@@ -1285,6 +1286,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
               <div className="space-y-2">
                 <div className="text-sm font-semibold text-fuchsia-300">Today&apos;s Quest</div>
                 <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">Find {state.run.words.length} hidden words</h1>
+                <div className="quest-spark-row"><span /><span /><span /><span /></div>
                 <div className="flex flex-wrap gap-2 text-sm text-slate-300">
                   <span>Theme: {state.run.words[0]?.topicLabel ?? "Mixed"}</span>
                   <span>•</span>
@@ -1316,22 +1318,22 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
         </section>
 
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <div className="quest-card-glow glass-card rounded-[2rem] p-4">
+          <div className="quest-card-glow quest-card-frame glass-card rounded-[2rem] p-4">
             <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Preset</div>
             <div className="mt-3 flex items-center gap-2 text-lg font-semibold text-white capitalize"><span className="text-xl">⚖️</span>{options.challenge}</div>
             <div className="mt-1 text-sm text-slate-300">{options.learningMode ? "Learning-friendly" : "Standard quest"}</div>
           </div>
-          <div className="quest-card-glow glass-card rounded-[2rem] p-4">
+          <div className="quest-card-glow quest-card-frame glass-card rounded-[2rem] p-4">
             <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Theme</div>
             <div className="mt-3 flex items-center gap-2 text-lg font-semibold text-white"><span className="text-xl">🎭</span>{state.run.words[0]?.topicLabel ?? "Mixed"}</div>
             <div className="mt-1 text-sm text-slate-300">Focused word lane</div>
           </div>
-          <div className="quest-card-glow glass-card rounded-[2rem] p-4">
+          <div className="quest-card-glow quest-card-frame glass-card rounded-[2rem] p-4">
             <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Rules</div>
             <div className="mt-3 flex items-center gap-2 text-lg font-semibold text-white"><span className="text-xl">🧩</span>Across + Down</div>
             <div className="mt-1 text-sm text-slate-300">Classic crossword style</div>
           </div>
-          <div className="quest-card-glow glass-card rounded-[2rem] p-4">
+          <div className="quest-card-glow quest-card-frame glass-card rounded-[2rem] p-4">
             <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Mode</div>
             <div className="mt-3 flex items-center gap-2 text-lg font-semibold text-white"><span className="text-xl">⚡</span>{options.mode === "daily" ? "Daily Spark" : "Custom Run"}</div>
             <div className="mt-1 text-sm text-slate-300">Seed {state.run.seed.replace(/^daily:/, "")}</div>
@@ -1350,7 +1352,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
               </button>
             </div>
             <div className={leftSidebarOpen ? "space-y-5" : "hidden xl:block"}>
-              <div className="quest-card-glow overflow-hidden rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(91,33,182,0.18),rgba(15,23,42,0.18))] p-4">
+              <div className="quest-card-glow quest-card-frame overflow-hidden rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(91,33,182,0.18),rgba(15,23,42,0.18))] p-4">
                 <div className="flex items-start gap-3">
                   <div className="rounded-2xl border border-white/10 bg-white/6 px-3 py-2 text-3xl">🧙</div>
                   <div>
