@@ -1316,24 +1316,24 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
         </section>
 
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <div className="glass-card rounded-[2rem] p-4">
+          <div className="quest-card-glow glass-card rounded-[2rem] p-4">
             <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Preset</div>
-            <div className="mt-3 text-lg font-semibold text-white capitalize">{options.challenge}</div>
+            <div className="mt-3 flex items-center gap-2 text-lg font-semibold text-white capitalize"><span className="text-xl">⚖️</span>{options.challenge}</div>
             <div className="mt-1 text-sm text-slate-300">{options.learningMode ? "Learning-friendly" : "Standard quest"}</div>
           </div>
-          <div className="glass-card rounded-[2rem] p-4">
+          <div className="quest-card-glow glass-card rounded-[2rem] p-4">
             <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Theme</div>
-            <div className="mt-3 text-lg font-semibold text-white">{state.run.words[0]?.topicLabel ?? "Mixed"}</div>
+            <div className="mt-3 flex items-center gap-2 text-lg font-semibold text-white"><span className="text-xl">🎭</span>{state.run.words[0]?.topicLabel ?? "Mixed"}</div>
             <div className="mt-1 text-sm text-slate-300">Focused word lane</div>
           </div>
-          <div className="glass-card rounded-[2rem] p-4">
+          <div className="quest-card-glow glass-card rounded-[2rem] p-4">
             <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Rules</div>
-            <div className="mt-3 text-lg font-semibold text-white">Across + Down</div>
+            <div className="mt-3 flex items-center gap-2 text-lg font-semibold text-white"><span className="text-xl">🧩</span>Across + Down</div>
             <div className="mt-1 text-sm text-slate-300">Classic crossword style</div>
           </div>
-          <div className="glass-card rounded-[2rem] p-4">
+          <div className="quest-card-glow glass-card rounded-[2rem] p-4">
             <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Mode</div>
-            <div className="mt-3 text-lg font-semibold text-white">{options.mode === "daily" ? "Daily Spark" : "Custom Run"}</div>
+            <div className="mt-3 flex items-center gap-2 text-lg font-semibold text-white"><span className="text-xl">⚡</span>{options.mode === "daily" ? "Daily Spark" : "Custom Run"}</div>
             <div className="mt-1 text-sm text-slate-300">Seed {state.run.seed.replace(/^daily:/, "")}</div>
           </div>
         </section>
@@ -1350,13 +1350,18 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
               </button>
             </div>
             <div className={leftSidebarOpen ? "space-y-5" : "hidden xl:block"}>
-              <div className="overflow-hidden rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(91,33,182,0.18),rgba(15,23,42,0.18))] p-4">
+              <div className="quest-card-glow overflow-hidden rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(91,33,182,0.18),rgba(15,23,42,0.18))] p-4">
                 <div className="flex items-start gap-3">
                   <div className="rounded-2xl border border-white/10 bg-white/6 px-3 py-2 text-3xl">🧙</div>
                   <div>
                     <div className="text-xl font-semibold text-white">Setup Your Quest</div>
                     <p className="mt-1 text-sm text-slate-300">Pick a theme, choose a quick preset, and start hunting words.</p>
                   </div>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-300">
+                  <span className="rounded-full border border-white/10 px-3 py-1">Theme path</span>
+                  <span className="rounded-full border border-white/10 px-3 py-1">Quest preset</span>
+                  <span className="rounded-full border border-white/10 px-3 py-1">Grid challenge</span>
                 </div>
               </div>
 
