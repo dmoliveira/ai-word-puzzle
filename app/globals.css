@@ -125,6 +125,27 @@ body::before {
   pointer-events: none;
 }
 
+.quest-card-frame {
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.05),
+    inset 0 1px 0 rgb(255 255 255 / 0.06),
+    0 20px 40px -28px rgb(15 23 42 / 0.85);
+}
+
+.quest-spark-row {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.quest-spark-row span {
+  width: 0.35rem;
+  height: 0.35rem;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, #c084fc, #7dd3fc);
+  opacity: 0.9;
+}
+
 .completion-burst::before,
 .completion-burst::after {
   position: absolute;
