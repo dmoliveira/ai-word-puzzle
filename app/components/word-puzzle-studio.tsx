@@ -1033,6 +1033,24 @@ function getTargetChipClass(word: PuzzleWord, solved: boolean, active: boolean) 
   }
 }
 
+function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
+  const solvedWordId = cell.wordIds.find((wordId) => state.solvedIds.includes(wordId));
+  if (!solvedWordId) {
+    return null;
+  }
+
+  const solvedIndex = state.run.words.findIndex((word) => word.id === solvedWordId);
+  const trailClasses = [
+    "border-fuchsia-400/35 bg-fuchsia-500/18 text-fuchsia-100",
+    "border-emerald-400/35 bg-emerald-500/18 text-emerald-100",
+    "border-amber-400/35 bg-amber-500/18 text-amber-100",
+    "border-sky-400/35 bg-sky-500/18 text-sky-100",
+    "border-violet-400/35 bg-violet-500/18 text-violet-100",
+  ];
+
+  return trailClasses[Math.max(0, solvedIndex) % trailClasses.length];
+}
+
   const desktopLayoutClass = leftSidebarOpen
     ? rightSidebarOpen
       ? "xl:grid-cols-[16rem_minmax(0,1.85fr)_16rem]"
@@ -1338,6 +1356,7 @@ function getTargetChipClass(word: PuzzleWord, solved: boolean, active: boolean) 
                           const cell = cellMap.get(key);
                           const activeCell = activeWord ? cell?.wordIds.includes(activeWord.id) : false;
                           const solvedCell = cell ? cell.wordIds.every((wordId) => state.solvedIds.includes(wordId)) : false;
+                          const solvedTrailClass = cell ? getSolvedTrailClass(state, cell) : null;
 
                           if (!cell) {
                             return <div key={key} className={`size-9 rounded-md sm:size-10 ${classicEmptyCellClass}`} />;
@@ -1355,7 +1374,7 @@ function getTargetChipClass(word: PuzzleWord, solved: boolean, active: boolean) 
                               onClick={() => selectWordFromCell(cell)}
                               onFocus={() => setFocusedCellKey(key)}
                               onKeyDown={(event) => handleBoardCellKeyDown(event, cell)}
-                              className={`relative size-9 rounded-md border text-sm font-semibold uppercase transition sm:size-10 ${activeCell ? `bg-gradient-to-br ${getThemeAccentCellClass(state.run.options.style)} border-white/30 text-white` : classicBoardCellClass} ${solvedCell ? "border-emerald-400/30 bg-emerald-500/12 text-emerald-100" : ""} ${boardFocusKey === key ? "ring-2 ring-white/55" : ""}`}
+                              className={`relative size-9 rounded-md border text-sm font-semibold uppercase transition sm:size-10 ${activeCell ? `bg-gradient-to-br ${getThemeAccentCellClass(state.run.options.style)} border-white/30 text-white` : solvedTrailClass ?? classicBoardCellClass} ${solvedCell ? "shadow-[0_0_18px_rgba(255,255,255,0.06)]" : ""} ${boardFocusKey === key ? "ring-2 ring-white/55" : ""}`}
                             >
                               {cell.clueNumbers[0] ? <span className="absolute left-1 top-0.5 text-[9px] font-medium text-slate-400">{cell.clueNumbers[0]}</span> : null}
                               <span>{(state.cellEntries[key] ?? "").toUpperCase()}</span>
