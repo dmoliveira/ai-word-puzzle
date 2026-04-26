@@ -799,6 +799,11 @@ export function WordPuzzleStudio() {
     setRevealConfirm("puzzle");
   }
 
+  function clearQuestPathSelection() {
+    setQuestPath({ anchor: null, cells: [] });
+    setQuestSelecting(false);
+  }
+
   function solveWordById(wordId: string) {
     const word = getWordById(state, wordId);
     const placement = getPlacementByWordId(state, wordId);
@@ -1527,10 +1532,10 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
               <div className={`${mobilePanel === "board" ? "block" : "hidden"} glass-card rounded-[2rem] p-4 sm:p-6 lg:block`}>
                 <div className="mb-4 flex items-center justify-between">
                   <div>
-                    <h3 className="text-lg font-semibold text-white">Board</h3>
-                    <p className="mt-1 text-sm text-slate-400">{isQuestView ? "Scan the full letter grid and use the clue to locate the right word path." : "Select a clue and fill the board. Crossing cells can switch between clue directions."}</p>
+                    <h3 className="text-lg font-semibold text-white">{isQuestView ? "Your Quest Board" : "Board"}</h3>
+                    <p className="mt-1 text-sm text-slate-400">{isQuestView ? "Trace a straight path across the full grid to solve each target word." : "Select a clue and fill the board. Crossing cells can switch between clue directions."}</p>
                   </div>
-                  {activePlacement ? <span data-testid="active-clue-badge" className="accent-chip rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em]">{activePlacement.clueNumber} {activePlacement.direction}</span> : null}
+                  {activePlacement ? <span data-testid="active-clue-badge" className="accent-chip rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em]">{isQuestView ? "quest view" : `${activePlacement.clueNumber} ${activePlacement.direction}`}</span> : null}
                 </div>
 
                 <div className="overflow-auto pb-2">
@@ -1619,52 +1624,58 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                   <div className="mt-5 rounded-[1.5rem] border border-white/10 bg-white/4 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Clue</div>
-                        <div className="mt-1 text-lg font-semibold text-white">{activePlacement?.clueNumber}. {getActiveClueSummary(activeWord)}</div>
+                        <div className="text-xs uppercase tracking-[0.24em] text-slate-400">{isQuestView ? "Target" : "Clue"}</div>
+                        <div className="mt-1 text-lg font-semibold text-white">{isQuestView ? activeWord.answer.length + " letters · starts with " + (activeWord.answer[0]?.toUpperCase() ?? "?") : `${activePlacement?.clueNumber}. ${getActiveClueSummary(activeWord)}`}</div>
                         <div className="mt-2 text-sm text-slate-300">{activeWord.prompt}</div>
-                        <div className="mt-2 text-xs uppercase tracking-[0.2em] text-slate-400">{activeFilledCount}/{activeWord.length} letters filled</div>
+                        <div className="mt-2 text-xs uppercase tracking-[0.2em] text-slate-400">{isQuestView ? `${questPath.cells.length || 1}/${activeWord.length} trail cells` : `${activeFilledCount}/${activeWord.length} letters filled`}</div>
                       </div>
                       <div className={`rounded-full border px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] ${getClueTone(activeWord)}`}>{getFrequencyLabel(activeWord.frequencyBand)}</div>
                     </div>
 
-                    <input
-                      ref={activeAnswerInputRef}
-                      data-testid="active-answer-input"
-                      aria-label="Active clue answer"
-                      value={activeGuess}
-                      onChange={(event) => updateWordGuess(activeWord, event.target.value)}
-                      onKeyDown={(event) => {
-                        const target = event.currentTarget;
-                        const cursorAtStart = (target.selectionStart ?? 0) === 0 && (target.selectionEnd ?? 0) === 0;
-                        const cursorAtEnd = (target.selectionStart ?? target.value.length) === target.value.length && (target.selectionEnd ?? target.value.length) === target.value.length;
+                    {isQuestView ? (
+                      <div className="mt-4 rounded-2xl border border-dashed border-white/12 bg-slate-950/45 px-4 py-3 text-sm text-slate-200">
+                        Trace the word directly on the board. Start on the first letter, drag in a straight line, and release on the last letter.
+                      </div>
+                    ) : (
+                      <input
+                        ref={activeAnswerInputRef}
+                        data-testid="active-answer-input"
+                        aria-label="Active clue answer"
+                        value={activeGuess}
+                        onChange={(event) => updateWordGuess(activeWord, event.target.value)}
+                        onKeyDown={(event) => {
+                          const target = event.currentTarget;
+                          const cursorAtStart = (target.selectionStart ?? 0) === 0 && (target.selectionEnd ?? 0) === 0;
+                          const cursorAtEnd = (target.selectionStart ?? target.value.length) === target.value.length && (target.selectionEnd ?? target.value.length) === target.value.length;
 
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          jumpToAdjacentClue(event.shiftKey ? -1 : 1);
-                          return;
-                        }
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            jumpToAdjacentClue(event.shiftKey ? -1 : 1);
+                            return;
+                          }
 
-                        if ((event.key === "ArrowRight" || event.key === "ArrowDown") && cursorAtEnd) {
-                          event.preventDefault();
-                          jumpToAdjacentClue(1);
-                          return;
-                        }
+                          if ((event.key === "ArrowRight" || event.key === "ArrowDown") && cursorAtEnd) {
+                            event.preventDefault();
+                            jumpToAdjacentClue(1);
+                            return;
+                          }
 
-                        if ((event.key === "ArrowLeft" || event.key === "ArrowUp") && cursorAtStart) {
-                          event.preventDefault();
-                          jumpToAdjacentClue(-1);
-                          return;
-                        }
+                          if ((event.key === "ArrowLeft" || event.key === "ArrowUp") && cursorAtStart) {
+                            event.preventDefault();
+                            jumpToAdjacentClue(-1);
+                            return;
+                          }
 
-                        if (event.key === "Escape") {
-                          event.preventDefault();
-                          clearActiveWord();
-                        }
-                      }}
-                      disabled={state.paused || state.solvedIds.includes(activeWord.id)}
-                      placeholder={state.paused ? "Paused" : `${activeWord.length} letters`}
-                      className="mt-4 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm uppercase tracking-[0.25em] text-white outline-none placeholder:text-slate-500 disabled:opacity-60"
-                    />
+                          if (event.key === "Escape") {
+                            event.preventDefault();
+                            clearActiveWord();
+                          }
+                        }}
+                        disabled={state.paused || state.solvedIds.includes(activeWord.id)}
+                        placeholder={state.paused ? "Paused" : `${activeWord.length} letters`}
+                        className="mt-4 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm uppercase tracking-[0.25em] text-white outline-none placeholder:text-slate-500 disabled:opacity-60"
+                      />
+                    )}
 
                     <div className="mt-4 grid gap-3 sm:grid-cols-3">
                       {activeWord.visuals.slice(0, 3).map((visual, index) => (
@@ -1740,8 +1751,8 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                       <button type="button" onClick={revealActiveLetter} disabled={state.paused || state.solvedIds.includes(activeWord.id)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
                         Reveal letter
                       </button>
-                      <button type="button" onClick={clearActiveWord} disabled={state.paused || state.solvedIds.includes(activeWord.id)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
-                        Clear word
+                      <button type="button" onClick={isQuestView ? clearQuestPathSelection : clearActiveWord} disabled={state.paused || state.solvedIds.includes(activeWord.id)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
+                        {isQuestView ? "Clear trail" : "Clear word"}
                       </button>
                       <button type="button" onClick={() => revealAnagram(activeWord)} disabled={state.paused || state.solvedIds.includes(activeWord.id)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
                         Show scramble

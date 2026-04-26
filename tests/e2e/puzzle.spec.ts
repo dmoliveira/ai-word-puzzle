@@ -164,7 +164,7 @@ test("quest view renders a full letter grid", async ({ page }) => {
 
   await page.getByRole("button", { name: "Show advanced" }).click();
   await page.getByLabel("Board View").selectOption("quest");
-  await expect(page.getByText(/Scan the full letter grid/i)).toBeVisible();
+  await expect(page.getByText(/Trace a straight path across the full grid/i)).toBeVisible();
   await expect(page.locator('[data-testid^="board-cell-"]')).toHaveCount(196);
 });
 
