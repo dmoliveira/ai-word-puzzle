@@ -158,3 +158,12 @@ test("word review exposes vocabulary support for learners", async ({ page }) => 
   await expect(page.getByTestId("review-vocabulary-support")).toContainText(/Pronunciation:/);
   await expect(page.getByTestId("review-vocabulary-support").getByRole("button", { name: "Speak" })).toBeVisible();
 });
+
+test("quest view renders a full letter grid", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Show advanced" }).click();
+  await page.getByLabel("Board View").selectOption("quest");
+  await expect(page.getByText(/Scan the full letter grid/i)).toBeVisible();
+  await expect(page.locator('[data-testid^="board-cell-"]')).toHaveCount(196);
+});
