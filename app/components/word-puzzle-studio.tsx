@@ -19,6 +19,10 @@ type HistoryFilterMode = "all" | "daily" | "custom";
 type HistoryFilterStatus = "all" | "finished" | "active";
 type RevealConfirmState = "none" | "word" | "puzzle";
 type BuilderPresetId = "gentle" | "balanced" | "study" | "deep";
+type QuestPathState = {
+  anchor: string | null;
+  cells: string[];
+};
 
 const defaultOptions: PuzzleOptions = {
   mode: "custom",
@@ -339,6 +343,28 @@ function getQuestFillLetter(seed: string, row: number, col: number) {
   return letters[hash];
 }
 
+function getQuestDisplayLetter(cell: PuzzleBoardCell | undefined, seed: string, row: number, col: number) {
+  return cell ? cell.solution.toUpperCase() : getQuestFillLetter(seed, row, col);
+}
+
+function buildLinearQuestPath(start: { row: number; col: number }, end: { row: number; col: number }) {
+  const rowDelta = end.row - start.row;
+  const colDelta = end.col - start.col;
+  const rowStep = rowDelta === 0 ? 0 : rowDelta / Math.abs(rowDelta);
+  const colStep = colDelta === 0 ? 0 : colDelta / Math.abs(colDelta);
+
+  const straight = rowDelta === 0 || colDelta === 0 || Math.abs(rowDelta) === Math.abs(colDelta);
+  if (!straight) {
+    return null;
+  }
+
+  const length = Math.max(Math.abs(rowDelta), Math.abs(colDelta)) + 1;
+  return Array.from({ length }, (_, index) => ({
+    row: start.row + rowStep * index,
+    col: start.col + colStep * index,
+  }));
+}
+
 function getFrequencyLabel(frequencyBand: PuzzleWord["frequencyBand"]) {
   switch (frequencyBand) {
     case "common":
@@ -407,6 +433,7 @@ export function WordPuzzleStudio() {
   const [builderAdvancedOpen, setBuilderAdvancedOpen] = useState(false);
   const [revealConfirm, setRevealConfirm] = useState<RevealConfirmState>("none");
   const [shownAnagrams, setShownAnagrams] = useState<Record<string, string>>({});
+  const [questPath, setQuestPath] = useState<QuestPathState>({ anchor: null, cells: [] });
   const [isStarting, setIsStarting] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState>(null);
@@ -620,6 +647,7 @@ export function WordPuzzleStudio() {
         setMobilePanel("board");
         setRevealConfirm("none");
         setShownAnagrams({});
+        setQuestPath({ anchor: null, cells: [] });
         syncProgress(nextState);
         setReviewMode("none");
       });
@@ -767,6 +795,61 @@ export function WordPuzzleStudio() {
 
   function confirmRevealPuzzle() {
     setRevealConfirm("puzzle");
+  }
+
+  function solveWordById(wordId: string) {
+    const word = getWordById(state, wordId);
+    const placement = getPlacementByWordId(state, wordId);
+    if (!word || !placement) {
+      return false;
+    }
+
+    setState((current) => {
+      const nextCellEntries = { ...current.cellEntries };
+      const cells = getWordCells(current, placement);
+
+      cells.forEach((cell, index) => {
+        nextCellEntries[getCellKey(cell.row, cell.col)] = word.answer[index];
+      });
+
+      const nextState = buildStateWithEntries(current, nextCellEntries, wordId);
+      syncProgress(nextState);
+      return nextState;
+    });
+
+    return true;
+  }
+
+  function handleQuestSelection(row: number, col: number) {
+    const key = getCellKey(row, col);
+
+    if (!questPath.anchor) {
+      setQuestPath({ anchor: key, cells: [key] });
+      return;
+    }
+
+    const [startRow, startCol] = questPath.anchor.split(":").map(Number);
+    const path = buildLinearQuestPath({ row: startRow, col: startCol }, { row, col });
+    if (!path) {
+      setQuestPath({ anchor: key, cells: [key] });
+      return;
+    }
+
+    const pathKeys = path.map((cell) => getCellKey(cell.row, cell.col));
+    setQuestPath({ anchor: questPath.anchor, cells: pathKeys });
+
+    const forward = path.map((cell) => getQuestDisplayLetter(cellMap.get(getCellKey(cell.row, cell.col)), state.run.seed, cell.row, cell.col)).join("").toLowerCase();
+    const backward = forward.split("").reverse().join("");
+    const match = state.run.words.find((word) => !state.solvedIds.includes(word.id) && (word.answer === forward || word.answer === backward));
+
+    if (match) {
+      solveWordById(match.id);
+      setQuestPath({ anchor: null, cells: [] });
+      showToast(`Found ${match.answer.toUpperCase()}.`);
+      return;
+    }
+
+    setQuestPath({ anchor: key, cells: [key] });
   }
 
   function selectWord(wordId: string) {
@@ -1382,6 +1465,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                           const activeCell = activeWord ? cell?.wordIds.includes(activeWord.id) : false;
                           const solvedCell = cell ? cell.wordIds.every((wordId) => state.solvedIds.includes(wordId)) : false;
                           const solvedTrailClass = cell ? getSolvedTrailClass(state, cell) : null;
+                          const selectedQuestCell = questPath.cells.includes(key);
 
                           if (!cell && !isQuestView) {
                             return <div key={key} className={`size-9 rounded-md sm:size-10 ${classicEmptyCellClass}`} />;
@@ -1406,10 +1490,13 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                                 boardCellRefs.current[key] = node;
                               }}
                               data-testid={`board-cell-${row}-${col}`}
+                              data-active-cell={activeCell ? "true" : "false"}
                               type="button"
                               tabIndex={cell && boardFocusKey === key ? 0 : -1}
                               onClick={() => {
-                                if (cell) {
+                                if (isQuestView) {
+                                  handleQuestSelection(row, col);
+                                } else if (cell) {
                                   selectWordFromCell(cell);
                                 }
                               }}
@@ -1423,7 +1510,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                                   handleBoardCellKeyDown(event, cell);
                                 }
                               }}
-                              className={`relative size-9 rounded-md border text-sm font-semibold uppercase transition sm:size-10 ${buttonClass} ${solvedCell ? "shadow-[0_0_18px_rgba(255,255,255,0.06)]" : ""} ${cell && boardFocusKey === key ? "ring-2 ring-white/55" : ""}`}
+                              className={`relative size-9 rounded-md border text-sm font-semibold uppercase transition sm:size-10 ${selectedQuestCell ? "border-cyan-300/55 bg-cyan-400/18 text-white" : buttonClass} ${solvedCell ? "shadow-[0_0_18px_rgba(255,255,255,0.06)]" : ""} ${cell && boardFocusKey === key ? "ring-2 ring-white/55" : ""}`}
                             >
                               {!isQuestView && cell?.clueNumbers[0] ? <span className="absolute left-1 top-0.5 text-[9px] font-medium text-slate-400">{cell.clueNumbers[0]}</span> : null}
                               <span>{displayLetter}</span>

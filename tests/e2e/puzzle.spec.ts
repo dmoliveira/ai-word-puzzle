@@ -167,3 +167,17 @@ test("quest view renders a full letter grid", async ({ page }) => {
   await expect(page.getByText(/Scan the full letter grid/i)).toBeVisible();
   await expect(page.locator('[data-testid^="board-cell-"]')).toHaveCount(196);
 });
+
+test("quest view can solve the active word by selecting its path", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Show advanced" }).click();
+  await page.getByLabel("Board View").selectOption("quest");
+
+  const activeCells = page.locator('[data-active-cell="true"]');
+  const count = await activeCells.count();
+  await activeCells.nth(0).click();
+  await activeCells.nth(count - 1).click();
+
+  await expect(page.getByTestId("progress-label")).not.toContainText("0/");
+});
