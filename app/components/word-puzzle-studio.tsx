@@ -434,6 +434,7 @@ export function WordPuzzleStudio() {
   const [revealConfirm, setRevealConfirm] = useState<RevealConfirmState>("none");
   const [shownAnagrams, setShownAnagrams] = useState<Record<string, string>>({});
   const [questPath, setQuestPath] = useState<QuestPathState>({ anchor: null, cells: [] });
+  const [questSelecting, setQuestSelecting] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState>(null);
@@ -648,6 +649,7 @@ export function WordPuzzleStudio() {
         setRevealConfirm("none");
         setShownAnagrams({});
         setQuestPath({ anchor: null, cells: [] });
+        setQuestSelecting(false);
         syncProgress(nextState);
         setReviewMode("none");
       });
@@ -818,6 +820,82 @@ export function WordPuzzleStudio() {
     });
 
     return true;
+  }
+
+  function getQuestPathKeys(anchorKey: string, row: number, col: number) {
+    const [startRow, startCol] = anchorKey.split(":").map(Number);
+    const path = buildLinearQuestPath({ row: startRow, col: startCol }, { row, col });
+    return path?.map((entry) => getCellKey(entry.row, entry.col)) ?? null;
+  }
+
+  function finalizeQuestPath(pathKeys: string[], fallbackKey: string) {
+    const forward = pathKeys
+      .map((pathKey) => {
+        const [pathRow, pathCol] = pathKey.split(":").map(Number);
+        return getQuestDisplayLetter(cellMap.get(pathKey), state.run.seed, pathRow, pathCol);
+      })
+      .join("")
+      .toLowerCase();
+    const backward = forward.split("").reverse().join("");
+    const match = state.run.words.find((word) => !state.solvedIds.includes(word.id) && (word.answer === forward || word.answer === backward));
+
+    if (match) {
+      solveWordById(match.id);
+      setQuestPath({ anchor: null, cells: [] });
+      setQuestSelecting(false);
+      showToast(`Found ${match.answer.toUpperCase()}.`);
+      return true;
+    }
+
+    setQuestPath({ anchor: fallbackKey, cells: [fallbackKey] });
+    setQuestSelecting(false);
+    return false;
+  }
+
+  function beginQuestSelection(row: number, col: number) {
+    const key = getCellKey(row, col);
+
+    if (questPath.anchor && !questSelecting && questPath.anchor !== key) {
+      const pathKeys = getQuestPathKeys(questPath.anchor, row, col);
+      if (pathKeys) {
+        setQuestPath({ anchor: questPath.anchor, cells: pathKeys });
+      }
+      setQuestSelecting(true);
+      return;
+    }
+
+    setQuestPath({ anchor: key, cells: [key] });
+    setQuestSelecting(true);
+  }
+
+  function extendQuestSelection(row: number, col: number) {
+    if (!questSelecting || !questPath.anchor) {
+      return;
+    }
+
+    const pathKeys = getQuestPathKeys(questPath.anchor, row, col);
+    if (!pathKeys) {
+      return;
+    }
+
+    setQuestPath({ anchor: questPath.anchor, cells: pathKeys });
+  }
+
+  function finishQuestSelection(row: number, col: number) {
+    if (!questPath.anchor) {
+      return;
+    }
+
+    const key = getCellKey(row, col);
+    const pathKeys = getQuestPathKeys(questPath.anchor, row, col) ?? [questPath.anchor];
+
+    if (pathKeys.length <= 1) {
+      setQuestPath({ anchor: key, cells: [key] });
+      setQuestSelecting(false);
+      return;
+    }
+
+    finalizeQuestPath(pathKeys, key);
   }
 
   function handleQuestSelection(row: number, col: number) {
@@ -1498,6 +1576,21 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                                   handleQuestSelection(row, col);
                                 } else if (cell) {
                                   selectWordFromCell(cell);
+                                }
+                              }}
+                              onPointerDown={() => {
+                                if (isQuestView) {
+                                  beginQuestSelection(row, col);
+                                }
+                              }}
+                              onPointerEnter={() => {
+                                if (isQuestView) {
+                                  extendQuestSelection(row, col);
+                                }
+                              }}
+                              onPointerUp={() => {
+                                if (isQuestView) {
+                                  finishQuestSelection(row, col);
                                 }
                               }}
                               onFocus={() => {
