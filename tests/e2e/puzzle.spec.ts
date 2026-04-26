@@ -176,8 +176,10 @@ test("quest view can solve the active word by selecting its path", async ({ page
 
   const activeCells = page.locator('[data-active-cell="true"]');
   const count = await activeCells.count();
-  await activeCells.nth(0).click();
-  await activeCells.nth(count - 1).click();
+  await activeCells.nth(0).hover();
+  await page.mouse.down();
+  await activeCells.nth(count - 1).hover();
+  await page.mouse.up();
 
   await expect(page.getByTestId("progress-label")).not.toContainText("0/");
 });
