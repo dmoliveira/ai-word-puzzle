@@ -1267,9 +1267,10 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
             ))}
 
             <div className="quest-card-frame mt-4 w-full rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-center">
-              <div className="text-2xl">🧑‍🚀</div>
+              <div className="mx-auto grid size-12 place-items-center rounded-full border border-white/10 bg-white/6 text-2xl">🧑‍🚀</div>
               <div className="mt-2 text-xs font-semibold text-white">Hunter</div>
               <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Lv. {Math.max(1, progress.bestStreak + 1)}</div>
+              <div className="quest-spark-row mt-3 justify-center"><span /><span /><span /></div>
             </div>
           </div>
         </aside>
@@ -1278,10 +1279,11 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
         <section className="glass-card quest-card-frame overflow-hidden rounded-[2rem] px-5 py-4 sm:px-6">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-start gap-4">
-              <div className="hidden rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(125,211,252,0.12),rgba(168,85,247,0.12))] px-4 py-3 text-center xl:block">
-                <div className="text-2xl">👑</div>
+              <div className="hidden quest-card-frame rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(125,211,252,0.12),rgba(168,85,247,0.12))] px-4 py-3 text-center xl:block">
+                <div className="mx-auto grid size-12 place-items-center rounded-full border border-white/10 bg-white/6 text-2xl">👑</div>
                 <div className="quest-logo mt-2 text-2xl font-black uppercase tracking-[0.08em] leading-none">Word</div>
                 <div className="quest-logo text-2xl font-black uppercase tracking-[0.08em] leading-none">Quest</div>
+                <div className="quest-spark-row mt-3 justify-center"><span /><span /><span /><span /></div>
               </div>
               <div className="space-y-2">
                 <div className="text-sm font-semibold text-fuchsia-300">Today&apos;s Quest</div>
@@ -1320,22 +1322,22 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <div className="quest-card-glow quest-card-frame glass-card rounded-[2rem] p-4">
             <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Preset</div>
-            <div className="mt-3 flex items-center gap-2 text-lg font-semibold text-white capitalize"><span className="text-xl">⚖️</span>{options.challenge}</div>
+            <div className="mt-3 flex items-center gap-3 text-lg font-semibold text-white capitalize"><span className="grid size-9 place-items-center rounded-full border border-white/10 bg-white/6 text-xl">⚖️</span>{options.challenge}</div>
             <div className="mt-1 text-sm text-slate-300">{options.learningMode ? "Learning-friendly" : "Standard quest"}</div>
           </div>
           <div className="quest-card-glow quest-card-frame glass-card rounded-[2rem] p-4">
             <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Theme</div>
-            <div className="mt-3 flex items-center gap-2 text-lg font-semibold text-white"><span className="text-xl">🎭</span>{state.run.words[0]?.topicLabel ?? "Mixed"}</div>
+            <div className="mt-3 flex items-center gap-3 text-lg font-semibold text-white"><span className="grid size-9 place-items-center rounded-full border border-white/10 bg-white/6 text-xl">🎭</span>{state.run.words[0]?.topicLabel ?? "Mixed"}</div>
             <div className="mt-1 text-sm text-slate-300">Focused word lane</div>
           </div>
           <div className="quest-card-glow quest-card-frame glass-card rounded-[2rem] p-4">
             <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Rules</div>
-            <div className="mt-3 flex items-center gap-2 text-lg font-semibold text-white"><span className="text-xl">🧩</span>Across + Down</div>
+            <div className="mt-3 flex items-center gap-3 text-lg font-semibold text-white"><span className="grid size-9 place-items-center rounded-full border border-white/10 bg-white/6 text-xl">🧩</span>Across + Down</div>
             <div className="mt-1 text-sm text-slate-300">Classic crossword style</div>
           </div>
           <div className="quest-card-glow quest-card-frame glass-card rounded-[2rem] p-4">
             <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Mode</div>
-            <div className="mt-3 flex items-center gap-2 text-lg font-semibold text-white"><span className="text-xl">⚡</span>{options.mode === "daily" ? "Daily Spark" : "Custom Run"}</div>
+            <div className="mt-3 flex items-center gap-3 text-lg font-semibold text-white"><span className="grid size-9 place-items-center rounded-full border border-white/10 bg-white/6 text-xl">⚡</span>{options.mode === "daily" ? "Daily Spark" : "Custom Run"}</div>
             <div className="mt-1 text-sm text-slate-300">Seed {state.run.seed.replace(/^daily:/, "")}</div>
           </div>
         </section>
