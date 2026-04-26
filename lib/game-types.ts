@@ -1,6 +1,7 @@
 export type ChallengeLevel = "breeze" | "quest" | "mythic";
 
 export type ThemeStyleId = "alpha" | "nebula" | "sunforge" | "arcade" | "classic";
+export type BoardView = "crossword" | "quest";
 
 export type PuzzleMode = "custom" | "daily";
 
@@ -73,6 +74,7 @@ export type PuzzleOptions = {
   challenge: ChallengeLevel;
   topics: TopicId[];
   puzzleSize: number;
+  boardView: BoardView;
   style: ThemeStyleId;
   clueDensity: 1 | 2 | 3;
   timerEnabled: boolean;

@@ -25,6 +25,7 @@ const defaultOptions: PuzzleOptions = {
   challenge: "quest",
   topics: ["myth", "cosmos", "greek"],
   puzzleSize: 7,
+  boardView: "crossword",
   style: "alpha",
   clueDensity: 2,
   timerEnabled: true,
@@ -38,6 +39,7 @@ function normalizeOptions(input?: Partial<PuzzleOptions>): PuzzleOptions {
     challenge: input?.challenge ?? defaultOptions.challenge,
     topics: input?.topics?.length ? input.topics : defaultOptions.topics,
     puzzleSize: input?.puzzleSize ?? defaultOptions.puzzleSize,
+    boardView: input?.boardView ?? defaultOptions.boardView,
     style: input?.style ?? defaultOptions.style,
     clueDensity: input?.clueDensity ?? defaultOptions.clueDensity,
     timerEnabled: input?.timerEnabled ?? defaultOptions.timerEnabled,
@@ -71,6 +73,7 @@ function readSharedOptionsFromUrl() {
     style: (params.get("style") as PuzzleOptions["style"] | null) ?? undefined,
     clueDensity: Number(params.get("clueDensity") ?? "") as 1 | 2 | 3,
     puzzleSize: Number(params.get("puzzleSize") ?? "") || undefined,
+    boardView: (params.get("boardView") as PuzzleOptions["boardView"] | null) ?? undefined,
     timerEnabled: params.get("timerEnabled") ? params.get("timerEnabled") === "true" : undefined,
     learningMode: params.get("learningMode") ? params.get("learningMode") === "true" : undefined,
     topics,
@@ -85,6 +88,7 @@ function buildShareUrl(options: PuzzleOptions) {
   url.searchParams.set("mode", options.mode);
   url.searchParams.set("seed", shareSeed);
   url.searchParams.set("challenge", options.challenge);
+  url.searchParams.set("boardView", options.boardView);
   url.searchParams.set("style", options.style);
   url.searchParams.set("puzzleSize", String(options.puzzleSize));
   url.searchParams.set("clueDensity", String(options.clueDensity));
@@ -323,6 +327,18 @@ function getClueArtLabel(index: number) {
   return ["topic", "starter", "length"][index] ?? "cue";
 }
 
+function getQuestFillLetter(seed: string, row: number, col: number) {
+  const letters = "ETAOINSHRDLUCMFWYPVBGKQJXZ";
+  const hashBase = `${seed}:${row}:${col}`;
+  let hash = 0;
+
+  for (let index = 0; index < hashBase.length; index += 1) {
+    hash = (hash * 31 + hashBase.charCodeAt(index)) % letters.length;
+  }
+
+  return letters[hash];
+}
+
 function getFrequencyLabel(frequencyBand: PuzzleWord["frequencyBand"]) {
   switch (frequencyBand) {
     case "common":
@@ -488,6 +504,7 @@ export function WordPuzzleStudio() {
   const classicEmptyCellClass = state.run.options.style === "classic" ? "bg-slate-950/90 border border-slate-700/60" : "bg-transparent";
   const classicBoardShellClass = state.run.options.style === "classic" ? "border-slate-300/18 bg-[#111827]/90 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]" : "border-white/10 bg-slate-950/30 p-3";
   const archiveRailClass = rightSidebarOpen ? "opacity-85 xl:opacity-90" : "opacity-100";
+  const isQuestView = state.run.options.boardView === "quest";
   const filteredHistory = progress.history
     .filter((entry) => (historyModeFilter === "all" ? true : entry.mode === historyModeFilter))
     .filter((entry) => (historyStatusFilter === "all" ? true : historyStatusFilter === "finished" ? entry.finished : !entry.finished));
@@ -514,7 +531,7 @@ export function WordPuzzleStudio() {
   function updateOptions<K extends keyof PuzzleOptions>(key: K, value: PuzzleOptions[K]) {
     setOptions((current) => ({ ...current, [key]: value }));
 
-    if (key === "learningMode") {
+    if (key === "learningMode" || key === "boardView") {
       setState((current) => {
         const nextState = {
           ...current,
@@ -522,7 +539,7 @@ export function WordPuzzleStudio() {
             ...current.run,
             options: {
               ...current.run.options,
-              learningMode: value as boolean,
+              ...(key === "learningMode" ? { learningMode: value as boolean } : { boardView: value as PuzzleOptions["boardView"] }),
             },
           },
         };
@@ -1220,7 +1237,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Current setup</div>
-                    <div className="mt-1">{options.challenge} · {options.puzzleSize} words · {options.learningMode ? "learning on" : "learning off"}</div>
+                    <div className="mt-1">{options.challenge} · {options.puzzleSize} words · {options.learningMode ? "learning on" : "learning off"} · {options.boardView}</div>
                   </div>
                   <button type="button" onClick={() => setBuilderAdvancedOpen((current) => !current)} className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-100">
                     {builderAdvancedOpen ? "Hide advanced" : "Show advanced"}
@@ -1261,6 +1278,14 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                     {themeStyles.map((style) => (
                       <option key={style.id} value={style.id}>{style.label}</option>
                     ))}
+                  </select>
+                </label>
+
+                <label className="space-y-2 text-sm text-slate-300">
+                  <span className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Board View</span>
+                  <select aria-label="Board View" value={options.boardView} onChange={(event) => updateOptions("boardView", event.target.value as PuzzleOptions["boardView"])} className="w-full rounded-2xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none">
+                    <option value="crossword">Crossword</option>
+                    <option value="quest">Quest View</option>
                   </select>
                 </label>
 
@@ -1342,7 +1367,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 <div className="mb-4 flex items-center justify-between">
                   <div>
                     <h3 className="text-lg font-semibold text-white">Board</h3>
-                    <p className="mt-1 text-sm text-slate-400">Select a clue and fill the board. Crossing cells can switch between clue directions.</p>
+                    <p className="mt-1 text-sm text-slate-400">{isQuestView ? "Scan the full letter grid and use the clue to locate the right word path." : "Select a clue and fill the board. Crossing cells can switch between clue directions."}</p>
                   </div>
                   {activePlacement ? <span data-testid="active-clue-badge" className="accent-chip rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em]">{activePlacement.clueNumber} {activePlacement.direction}</span> : null}
                 </div>
@@ -1358,9 +1383,21 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                           const solvedCell = cell ? cell.wordIds.every((wordId) => state.solvedIds.includes(wordId)) : false;
                           const solvedTrailClass = cell ? getSolvedTrailClass(state, cell) : null;
 
-                          if (!cell) {
+                          if (!cell && !isQuestView) {
                             return <div key={key} className={`size-9 rounded-md sm:size-10 ${classicEmptyCellClass}`} />;
                           }
+
+                          const displayLetter = cell
+                            ? isQuestView
+                              ? cell.solution.toUpperCase()
+                              : (state.cellEntries[key] ?? "").toUpperCase()
+                            : getQuestFillLetter(state.run.seed, row, col);
+
+                          const buttonClass = cell
+                            ? activeCell
+                              ? `bg-gradient-to-br ${getThemeAccentCellClass(state.run.options.style)} border-white/30 text-white`
+                              : solvedTrailClass ?? classicBoardCellClass
+                            : "border-white/10 bg-slate-900/65 text-slate-400";
 
                           return (
                             <button
@@ -1370,14 +1407,26 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                               }}
                               data-testid={`board-cell-${row}-${col}`}
                               type="button"
-                              tabIndex={boardFocusKey === key ? 0 : -1}
-                              onClick={() => selectWordFromCell(cell)}
-                              onFocus={() => setFocusedCellKey(key)}
-                              onKeyDown={(event) => handleBoardCellKeyDown(event, cell)}
-                              className={`relative size-9 rounded-md border text-sm font-semibold uppercase transition sm:size-10 ${activeCell ? `bg-gradient-to-br ${getThemeAccentCellClass(state.run.options.style)} border-white/30 text-white` : solvedTrailClass ?? classicBoardCellClass} ${solvedCell ? "shadow-[0_0_18px_rgba(255,255,255,0.06)]" : ""} ${boardFocusKey === key ? "ring-2 ring-white/55" : ""}`}
+                              tabIndex={cell && boardFocusKey === key ? 0 : -1}
+                              onClick={() => {
+                                if (cell) {
+                                  selectWordFromCell(cell);
+                                }
+                              }}
+                              onFocus={() => {
+                                if (cell) {
+                                  setFocusedCellKey(key);
+                                }
+                              }}
+                              onKeyDown={(event) => {
+                                if (cell) {
+                                  handleBoardCellKeyDown(event, cell);
+                                }
+                              }}
+                              className={`relative size-9 rounded-md border text-sm font-semibold uppercase transition sm:size-10 ${buttonClass} ${solvedCell ? "shadow-[0_0_18px_rgba(255,255,255,0.06)]" : ""} ${cell && boardFocusKey === key ? "ring-2 ring-white/55" : ""}`}
                             >
-                              {cell.clueNumbers[0] ? <span className="absolute left-1 top-0.5 text-[9px] font-medium text-slate-400">{cell.clueNumbers[0]}</span> : null}
-                              <span>{(state.cellEntries[key] ?? "").toUpperCase()}</span>
+                              {!isQuestView && cell?.clueNumbers[0] ? <span className="absolute left-1 top-0.5 text-[9px] font-medium text-slate-400">{cell.clueNumbers[0]}</span> : null}
+                              <span>{displayLetter}</span>
                             </button>
                           );
                         })}

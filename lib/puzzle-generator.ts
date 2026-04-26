@@ -310,6 +310,7 @@ export function buildPuzzleRun(input: Partial<PuzzleOptions> = {}): PuzzleRun {
     challenge: input.challenge ?? "quest",
     topics: normalizeTopics(input.topics ?? defaultTopics),
     puzzleSize: clampPuzzleSize(input.puzzleSize ?? 7),
+    boardView: input.boardView ?? "crossword",
     style: input.style ?? "alpha",
     clueDensity: input.clueDensity ?? 2,
     timerEnabled: input.timerEnabled ?? true,
