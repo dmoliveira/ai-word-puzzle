@@ -2041,7 +2041,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                     ["🛡", "Veteran Hunter"],
                   ].map(([icon, label]) => (
                     <div key={label} className="quest-card-glow quest-card-frame rounded-2xl border border-white/10 bg-white/4 px-4 py-4 text-center">
-                      <div className="mx-auto grid size-14 place-items-center rounded-full border border-white/10 bg-white/6 text-2xl">{icon}</div>
+                      <div className="quest-badge mx-auto grid size-16 place-items-center border border-white/10 bg-white/6 text-2xl">{icon}</div>
                       <div className="mt-3 text-sm font-semibold text-white">{label}</div>
                     </div>
                   ))}
@@ -2054,7 +2054,10 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                     <h3 className="text-lg font-semibold text-white">Reward Chest</h3>
                     <p className="mt-1 text-sm text-slate-300">Keep your chain alive to unlock brighter daily rewards.</p>
                   </div>
-                  <div className="text-5xl">🪙</div>
+                  <div className="relative text-5xl">
+                    🪙
+                    <span className="absolute -bottom-1 -right-2 text-2xl opacity-70">✨</span>
+                  </div>
                 </div>
                 <div className="mt-5 flex items-center gap-2">
                   {[0, 1, 2, 3, 4].map((index) => (

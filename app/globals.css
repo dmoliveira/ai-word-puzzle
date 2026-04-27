@@ -146,6 +146,10 @@ body::before {
   opacity: 0.9;
 }
 
+.quest-badge {
+  clip-path: polygon(25% 6%, 75% 6%, 96% 50%, 75% 94%, 25% 94%, 4% 50%);
+}
+
 .completion-burst::before,
 .completion-burst::after {
   position: absolute;
