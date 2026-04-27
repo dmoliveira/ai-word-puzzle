@@ -2023,6 +2023,47 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 </div>
               </div>
             </div>
+
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
+              <div className="glass-card quest-card-frame rounded-[2rem] p-5 sm:p-6">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-semibold text-white">Achievements</h3>
+                    <p className="mt-1 text-sm text-slate-300">Small milestones that make each run feel more like a quest.</p>
+                  </div>
+                  <button type="button" className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-200">View all</button>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  {[
+                    ["🏅", "First Clear"],
+                    ["⚡", "Speed Runner"],
+                    ["🌙", "Daily Keeper"],
+                    ["🛡", "Veteran Hunter"],
+                  ].map(([icon, label]) => (
+                    <div key={label} className="quest-card-glow quest-card-frame rounded-2xl border border-white/10 bg-white/4 px-4 py-4 text-center">
+                      <div className="mx-auto grid size-14 place-items-center rounded-full border border-white/10 bg-white/6 text-2xl">{icon}</div>
+                      <div className="mt-3 text-sm font-semibold text-white">{label}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="glass-card quest-card-frame rounded-[2rem] p-5 sm:p-6 bg-[linear-gradient(135deg,rgba(91,33,182,0.22),rgba(15,23,42,0.2))]">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-semibold text-white">Reward Chest</h3>
+                    <p className="mt-1 text-sm text-slate-300">Keep your chain alive to unlock brighter daily rewards.</p>
+                  </div>
+                  <div className="text-5xl">🪙</div>
+                </div>
+                <div className="mt-5 flex items-center gap-2">
+                  {[0, 1, 2, 3, 4].map((index) => (
+                    <div key={index} className={`h-2 flex-1 rounded-full ${index < Math.max(1, Math.min(5, progress.streak || 1)) ? "bg-fuchsia-300" : "bg-white/10"}`} />
+                  ))}
+                </div>
+                <div className="mt-4 quest-spark-row"><span /><span /><span /><span /><span /></div>
+              </div>
+            </div>
           </section>
 
           <aside className={`${mobilePanel === "archive" ? "block" : "hidden"} space-y-6 xl:block ${archiveRailClass}`}>
