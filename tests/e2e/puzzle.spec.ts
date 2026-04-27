@@ -146,6 +146,13 @@ test("archive insights panel is visible", async ({ page }) => {
   await expect(page.locator('div').filter({ hasText: /^Last 30 days$/ })).toBeVisible();
 });
 
+test("achievement strip is visible", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "Achievements" })).toBeVisible();
+  await expect(page.getByText("Reward Chest")).toBeVisible();
+});
+
 test("word review exposes vocabulary support for learners", async ({ page }) => {
   await page.goto("/");
 
