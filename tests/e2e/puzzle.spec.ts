@@ -5,8 +5,16 @@ async function openWordReview(page: import("@playwright/test").Page) {
   await page.getByRole("button", { name: "Reveal word" }).click();
 }
 
+async function expandSetupRail(page: import("@playwright/test").Page) {
+  const expandButton = page.getByRole("button", { name: "Expand setup rail" });
+  if (await expandButton.isVisible().catch(() => false)) {
+    await expandButton.click();
+  }
+}
+
 test("player can reveal a review answer and solve the active clue", async ({ page }) => {
   await page.goto("/");
+  await expandSetupRail(page);
 
   await expect(page.getByText(/Today's Quest/i)).toBeVisible();
   await expect(page.getByRole("button", { name: "Start Fresh Run" })).toBeVisible();
@@ -75,7 +83,7 @@ test("mobile player can switch between board, clues, and archive panels", async 
   await page.goto("/");
 
   await expect(page.getByRole("button", { name: "Board" })).toBeVisible();
-  await expect(page.getByText("Clue", { exact: true })).toBeVisible();
+  await expect(page.getByText("Play area", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Clues" }).click();
   await expect(page.getByRole("heading", { name: "Clues" })).toBeVisible();
@@ -85,7 +93,7 @@ test("mobile player can switch between board, clues, and archive panels", async 
   await expect(page.getByRole("heading", { name: "Daily Archive" })).toBeVisible();
 
   await page.getByRole("button", { name: "Board" }).click();
-  await expect(page.getByText("Clue", { exact: true })).toBeVisible();
+  await expect(page.getByText("Play area", { exact: true })).toBeVisible();
 });
 
 test("player sees completion stats after clearing the full puzzle", async ({ page }) => {
@@ -107,7 +115,7 @@ test("shared daily link reopens the requested seeded run", async ({ page }) => {
   await page.goto("/?mode=daily&seed=2026-04-24&topics=myth,greek&challenge=quest&style=alpha&puzzleSize=7&clueDensity=2&timerEnabled=true");
 
   await expect(page.locator('span').filter({ hasText: /^seed 2026-04-24$/ }).first()).toBeVisible();
-  await expect(page.locator('span').filter({ hasText: /^daily$/ }).first()).toBeVisible();
+  await expect(page.getByText("Mode: Daily Spark", { exact: true })).toBeVisible();
 });
 
 test("daily run completion exposes the daily share action", async ({ page }) => {
@@ -126,6 +134,7 @@ test("daily run completion exposes the daily share action", async ({ page }) => 
 
 test("history filters narrow the recent runs list", async ({ page }) => {
   await page.goto("/?mode=daily&seed=2026-04-24&topics=myth,greek&challenge=quest&style=alpha&puzzleSize=7&clueDensity=2&timerEnabled=true");
+  await expandSetupRail(page);
 
   await page.getByRole("button", { name: "Start Fresh Run" }).click();
   await page.getByRole("button", { name: "Spin random custom" }).click();
@@ -141,7 +150,7 @@ test("archive insights panel is visible", async ({ page }) => {
 
   await page.getByTestId("toggle-right-panel").click();
   await expect(page.getByRole("heading", { name: "Archive Insights" })).toBeVisible();
-  await expect(page.locator('div').filter({ hasText: /^Finished runs$/ })).toBeVisible();
+  await expect(page.getByText("Closed runs", { exact: true })).toBeVisible();
   await expect(page.locator('div').filter({ hasText: /^Last 7 days$/ })).toBeVisible();
   await expect(page.locator('div').filter({ hasText: /^Last 30 days$/ })).toBeVisible();
 });
@@ -155,8 +164,9 @@ test("achievement strip is visible", async ({ page }) => {
 
 test("word review exposes vocabulary support for learners", async ({ page }) => {
   await page.goto("/");
+  await expandSetupRail(page);
 
-  await page.getByRole("button", { name: "Show advanced" }).click();
+  await page.getByRole("button", { name: /Show advanced|Hide advanced/ }).click();
   await page.getByLabel("Learning mode").check();
   await openWordReview(page);
   await expect(page.getByTestId("review-vocabulary-support")).toBeVisible();
@@ -168,18 +178,20 @@ test("word review exposes vocabulary support for learners", async ({ page }) => 
 
 test("quest view renders a full letter grid", async ({ page }) => {
   await page.goto("/");
+  await expandSetupRail(page);
 
-  await page.getByRole("button", { name: "Show advanced" }).click();
-  await page.getByLabel("Board View").selectOption("quest");
+  await page.getByRole("button", { name: /Show advanced|Hide advanced/ }).click();
+  await page.getByLabel("Board mode").selectOption("quest");
   await expect(page.getByText(/Trace a straight path across the full grid/i)).toBeVisible();
   await expect(page.locator('[data-testid^="board-cell-"]')).toHaveCount(196);
 });
 
 test("quest view can solve the active word by selecting its path", async ({ page }) => {
   await page.goto("/");
+  await expandSetupRail(page);
 
-  await page.getByRole("button", { name: "Show advanced" }).click();
-  await page.getByLabel("Board View").selectOption("quest");
+  await page.getByRole("button", { name: /Show advanced|Hide advanced/ }).click();
+  await page.getByLabel("Board mode").selectOption("quest");
 
   const activeCells = page.locator('[data-active-cell="true"]');
   const count = await activeCells.count();
