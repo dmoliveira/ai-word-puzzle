@@ -19,6 +19,7 @@ type HistoryFilterMode = "all" | "daily" | "custom";
 type HistoryFilterStatus = "all" | "finished" | "active";
 type RevealConfirmState = "none" | "word" | "puzzle";
 type BuilderPresetId = "gentle" | "balanced" | "study" | "deep";
+type MobilePanel = "board" | "clues" | "review" | "archive";
 type QuestPathState = {
   anchor: string | null;
   cells: string[];
@@ -427,7 +428,7 @@ export function WordPuzzleStudio() {
   const [options, setOptions] = useState<PuzzleOptions>(defaultOptions);
   const [state, setState] = useState<PersistedRunState>(() => createFreshState(defaultOptions));
   const [reviewMode, setReviewMode] = useState<"none" | "word" | "puzzle">("none");
-  const [mobilePanel, setMobilePanel] = useState<"board" | "clues" | "archive">("board");
+  const [mobilePanel, setMobilePanel] = useState<MobilePanel>("board");
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(false);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
   const [builderAdvancedOpen, setBuilderAdvancedOpen] = useState(false);
@@ -513,7 +514,9 @@ export function WordPuzzleStudio() {
   const activePlacement = activeWord ? getWordPlacement(state, activeWord.id) : null;
   const activeGuess = activeWord ? deriveGuessFromCells(state, activeWord.id) : "";
   const finished = solvedCount === state.run.words.length && state.run.words.length > 0;
+  const activePlay = !finished;
   const progressLabel = `${solvedCount}/${state.run.words.length} solved`;
+  const runStateLabel = finished ? "Done" : state.paused ? "Paused" : "Live";
   const cellMap = new Map(state.run.board.cells.map((cell) => [getCellKey(cell.row, cell.col), cell]));
   const archive = buildDailyArchive(progress.history, 10);
   const activeFilledCount = countFilledLetters(activeGuess);
@@ -528,10 +531,23 @@ export function WordPuzzleStudio() {
   const weeklyDailyClearCount = countFinishedRunsSince(progress.history, 7, "daily");
   const monthlyDailyClearCount = countFinishedRunsSince(progress.history, 30, "daily");
   const weeklyFinishedRunCount = countFinishedRunsSince(progress.history, 7);
+  const selectedTopicLabels = topicCatalog.filter((topic) => options.topics.includes(topic.id)).map((topic) => topic.label);
+  const desktopRailItems = [
+    { icon: "🎮", label: "Board", panel: "board" as const },
+    { icon: "🧩", label: "Clues", panel: "clues" as const },
+    ...(reviewMode === "none" ? [] : [{ icon: "🪞", label: reviewMode === "word" ? "Word" : "Review", panel: "review" as const }]),
+    { icon: "🗂", label: "Archive", panel: "archive" as const },
+  ];
   const classicBoardCellClass = state.run.options.style === "classic" ? "border-slate-300/18 bg-slate-50/8 text-slate-50" : "border-white/10 bg-white/6 text-slate-100";
   const classicEmptyCellClass = state.run.options.style === "classic" ? "bg-slate-950/90 border border-slate-700/60" : "bg-transparent";
   const classicBoardShellClass = state.run.options.style === "classic" ? "border-slate-300/18 bg-[#111827]/90 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]" : "border-white/10 bg-slate-950/30 p-3";
-  const archiveRailClass = rightSidebarOpen ? "opacity-85 xl:opacity-90" : "opacity-100";
+  const archiveRailClass = rightSidebarOpen
+    ? activePlay
+      ? "opacity-70 xl:opacity-75"
+      : "opacity-85 xl:opacity-90"
+    : activePlay
+      ? "opacity-85"
+      : "opacity-100";
   const isQuestView = state.run.options.boardView === "quest";
   const filteredHistory = progress.history
     .filter((entry) => (historyModeFilter === "all" ? true : entry.mode === historyModeFilter))
@@ -792,10 +808,12 @@ export function WordPuzzleStudio() {
   }
 
   function confirmRevealWord() {
+    setMobilePanel("review");
     setRevealConfirm("word");
   }
 
   function confirmRevealPuzzle() {
+    setMobilePanel("review");
     setRevealConfirm("puzzle");
   }
 
@@ -953,6 +971,21 @@ export function WordPuzzleStudio() {
     window.requestAnimationFrame(() => {
       boardCellRefs.current[cellKey]?.focus();
     });
+  }
+
+  function jumpToStudioSection(panel: MobilePanel) {
+    const sectionId = panel === "board" ? "studio-board" : panel === "clues" ? "studio-clues" : panel === "review" ? "studio-review" : "studio-archive";
+    if (panel === "archive") {
+      setRightSidebarOpen(true);
+      window.setTimeout(() => {
+        const section = document.getElementById(sectionId);
+        section?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 0);
+      return;
+    }
+
+    const section = typeof document !== "undefined" ? document.getElementById(sectionId) : null;
+    section?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function updateBoardCellEntry(cell: PuzzleBoardCell, nextLetter: string, options?: { moveBackward?: boolean }) {
@@ -1236,11 +1269,11 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
 
   const desktopLayoutClass = leftSidebarOpen
     ? rightSidebarOpen
-      ? "xl:grid-cols-[16rem_minmax(0,1.85fr)_16rem]"
-      : "xl:grid-cols-[16rem_minmax(0,2fr)_4rem]"
+      ? "xl:grid-cols-[16rem_minmax(0,1.95fr)_16rem]"
+      : "xl:grid-cols-[16rem_minmax(0,2.1fr)_4rem]"
     : rightSidebarOpen
-      ? "xl:grid-cols-[4rem_minmax(0,2fr)_16rem]"
-      : "xl:grid-cols-[4rem_minmax(0,2.15fr)_4rem]";
+      ? "xl:grid-cols-[4rem_minmax(0,2.1fr)_16rem]"
+      : "xl:grid-cols-[4rem_minmax(0,2.25fr)_4rem]";
 
   return (
     <main className={`scroll-shell ${theme.className} min-h-screen px-4 py-6 sm:px-6 lg:px-8`}>
@@ -1248,23 +1281,20 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
         <aside className="hidden xl:flex xl:flex-col xl:items-center xl:gap-4">
           <div className="glass-card quest-card-frame flex w-full flex-col items-center gap-4 rounded-[2rem] px-3 py-4">
             <div className="text-center">
+              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Quest rail</div>
               <div className="text-xl">👑</div>
               <div className="quest-logo mt-2 text-lg font-black uppercase tracking-[0.12em]">Word</div>
               <div className="quest-logo text-lg font-black uppercase tracking-[0.12em]">Quest</div>
               <div className="quest-spark-row mt-3 justify-center"><span /><span /><span /></div>
             </div>
-            {[
-              ["🎮", "Play"],
-              ["🧭", "Quests"],
-              ["📈", "Stats"],
-              ["🏆", "Badges"],
-              ["⚙️", "Settings"],
-            ].map(([icon, label], index) => (
-              <button key={label} type="button" onClick={() => setMobilePanel(index === 0 ? "board" : index === 1 ? "clues" : "archive")} className={`flex w-full flex-col items-center gap-2 rounded-2xl border px-2 py-3 text-xs transition ${index === 0 ? "accent-chip" : "border-white/10 bg-white/4 text-slate-300"}`}>
+            <div className="w-full space-y-2">
+            {desktopRailItems.map(({ icon, label, panel }) => (
+              <button key={label} type="button" onClick={() => jumpToStudioSection(panel)} className="flex w-full flex-col items-center gap-2 rounded-2xl border border-white/10 bg-white/4 px-2 py-3 text-xs text-slate-300 transition hover:border-white/20 hover:text-white">
                 <span className="text-lg">{icon}</span>
                 <span>{label}</span>
               </button>
             ))}
+            </div>
 
             <div className="quest-card-frame mt-4 w-full rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-center">
               <div className="mx-auto grid size-12 place-items-center rounded-full border border-white/10 bg-white/6 text-2xl">🧑‍🚀</div>
@@ -1277,7 +1307,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
 
         <div className="flex flex-col gap-6">
         <section className="glass-card quest-card-frame overflow-hidden rounded-[2rem] px-5 py-4 sm:px-6">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-start gap-4">
               <div className="hidden quest-card-frame rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(125,211,252,0.12),rgba(168,85,247,0.12))] px-4 py-3 text-center xl:block">
                 <div className="mx-auto grid size-12 place-items-center rounded-full border border-white/10 bg-white/6 text-2xl">👑</div>
@@ -1285,7 +1315,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 <div className="quest-logo text-2xl font-black uppercase tracking-[0.08em] leading-none">Quest</div>
                 <div className="quest-spark-row mt-3 justify-center"><span /><span /><span /><span /></div>
               </div>
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <div className="text-sm font-semibold text-fuchsia-300">Today&apos;s Quest</div>
                 <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">Find {state.run.words.length} hidden words</h1>
                 <div className="quest-spark-row"><span /><span /><span /><span /></div>
@@ -1296,79 +1326,33 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                   <span>•</span>
                   <span>Mode: {state.run.options.mode === "daily" ? "Daily Spark" : "Custom Run"}</span>
                 </div>
+                <div className="flex flex-wrap gap-2 text-xs text-slate-200">
+                  <span data-testid="progress-label" className="accent-chip rounded-full px-3 py-1 font-semibold uppercase tracking-[0.22em]">{progressLabel}</span>
+                  <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1 uppercase tracking-[0.2em] text-slate-300">{runStateLabel}</span>
+                  <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1 text-slate-300">{formatElapsed(state.elapsedMs)}</span>
+                  <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1 text-slate-300">streak {progress.streak}</span>
+                </div>
               </div>
             </div>
-            <div className="grid gap-2 text-sm text-slate-200 sm:grid-cols-4 lg:min-w-[30rem]">
-              <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2">
-                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">⭐ Progress</div>
-                <div className="mt-1 text-lg font-semibold text-white">{progressLabel}</div>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2">
-                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">⏱ Timer</div>
-                <div className="mt-1 text-lg font-semibold text-white">{formatElapsed(state.elapsedMs)}</div>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2">
-                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">🔥 Streak</div>
-                <div className="mt-1 text-lg font-semibold text-white">{progress.streak}</div>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2">
-                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">🛡 State</div>
-                <div className="mt-1 text-lg font-semibold text-white">{finished ? "Done" : state.paused ? "Paused" : "Live"}</div>
-              </div>
+            <div className="max-w-xl text-sm leading-6 text-slate-300 lg:text-right">
+              Set the run up once, then stay centered on the board and the active clue. Archive, rewards, and history can wait until the solve is underway.
             </div>
-          </div>
-        </section>
-
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <div className="quest-card-glow quest-card-frame glass-card rounded-[2rem] p-4">
-            <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Preset</div>
-            <div className="mt-3 flex items-center gap-3 text-lg font-semibold text-white capitalize"><span className="grid size-9 place-items-center rounded-full border border-white/10 bg-white/6 text-xl">⚖️</span>{options.challenge}</div>
-            <div className="mt-1 text-sm text-slate-300">{options.learningMode ? "Learning-friendly" : "Standard quest"}</div>
-          </div>
-          <div className="quest-card-glow quest-card-frame glass-card rounded-[2rem] p-4">
-            <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Theme</div>
-            <div className="mt-3 flex items-center gap-3 text-lg font-semibold text-white"><span className="grid size-9 place-items-center rounded-full border border-white/10 bg-white/6 text-xl">🎭</span>{state.run.words[0]?.topicLabel ?? "Mixed"}</div>
-            <div className="mt-1 text-sm text-slate-300">Focused word lane</div>
-          </div>
-          <div className="quest-card-glow quest-card-frame glass-card rounded-[2rem] p-4">
-            <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Rules</div>
-            <div className="mt-3 flex items-center gap-3 text-lg font-semibold text-white"><span className="grid size-9 place-items-center rounded-full border border-white/10 bg-white/6 text-xl">🧩</span>Across + Down</div>
-            <div className="mt-1 text-sm text-slate-300">Classic crossword style</div>
-          </div>
-          <div className="quest-card-glow quest-card-frame glass-card rounded-[2rem] p-4">
-            <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Mode</div>
-            <div className="mt-3 flex items-center gap-3 text-lg font-semibold text-white"><span className="grid size-9 place-items-center rounded-full border border-white/10 bg-white/6 text-xl">⚡</span>{options.mode === "daily" ? "Daily Spark" : "Custom Run"}</div>
-            <div className="mt-1 text-sm text-slate-300">Seed {state.run.seed.replace(/^daily:/, "")}</div>
           </div>
         </section>
 
         <div className={`grid gap-6 ${desktopLayoutClass}`}>
           <aside className="glass-card rounded-[2rem] p-4 sm:p-5">
             <div className="mb-4 flex items-center justify-between gap-3">
-              <div className={`${leftSidebarOpen ? "block" : "hidden xl:block"}`}>
-                <h2 className="text-lg font-semibold text-white">Setup Your Quest</h2>
+              <div className={`${leftSidebarOpen ? "block" : "hidden"}`}>
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Pre-play</div>
+                <h2 className="mt-1 text-lg font-semibold text-white">Setup Your Quest</h2>
                 <p className="mt-1 text-sm text-slate-400">Choose a quick run style, then fine-tune only if you want extra control.</p>
               </div>
-              <button data-testid="toggle-left-panel" type="button" onClick={() => setLeftSidebarOpen((current) => !current)} className="hidden rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs text-slate-200 xl:inline-flex">
-                {leftSidebarOpen ? "Hide" : "Show"}
+              <button data-testid="toggle-left-panel" type="button" aria-expanded={leftSidebarOpen} aria-controls="studio-setup-rail" aria-label={leftSidebarOpen ? "Collapse setup rail" : "Expand setup rail"} onClick={() => setLeftSidebarOpen((current) => !current)} className={`hidden rounded-full border border-white/10 bg-white/4 text-slate-200 xl:inline-flex ${leftSidebarOpen ? "px-3 py-1.5 text-xs" : "size-9 items-center justify-center text-sm"}`}>
+                <span aria-hidden="true">{leftSidebarOpen ? "Collapse setup" : "→"}</span>
               </button>
             </div>
-            <div className={leftSidebarOpen ? "space-y-5" : "hidden xl:block"}>
-              <div className="quest-card-glow quest-card-frame overflow-hidden rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(91,33,182,0.18),rgba(15,23,42,0.18))] p-4">
-                <div className="flex items-start gap-3">
-                  <div className="rounded-2xl border border-white/10 bg-white/6 px-3 py-2 text-3xl">🧙</div>
-                  <div>
-                    <div className="text-xl font-semibold text-white">Setup Your Quest</div>
-                    <p className="mt-1 text-sm text-slate-300">Pick a theme, choose a quick preset, and start hunting words.</p>
-                  </div>
-                </div>
-                <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-300">
-                  <span className="rounded-full border border-white/10 px-3 py-1">Theme path</span>
-                  <span className="rounded-full border border-white/10 px-3 py-1">Quest preset</span>
-                  <span className="rounded-full border border-white/10 px-3 py-1">Grid challenge</span>
-                </div>
-              </div>
-
+              <div id="studio-setup-rail" className={leftSidebarOpen ? "space-y-5" : "hidden"}>
               <div className="space-y-2">
                 <label className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Mode</label>
                 <div className="grid grid-cols-2 gap-2">
@@ -1382,7 +1366,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
 
               <div className="space-y-2">
                 <label className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Quick presets</label>
-                <div className="grid gap-2">
+                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
                   {([
                     ["gentle", "Gentle / Learn"],
                     ["balanced", "Balanced"],
@@ -1412,7 +1396,14 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Current setup</div>
-                    <div className="mt-1">{options.challenge} · {options.puzzleSize} words · {options.learningMode ? "learning on" : "learning off"} · {options.boardView}</div>
+                    <div className="mt-1 text-slate-200">{options.challenge} · {options.puzzleSize} words · {options.learningMode ? "learning on" : "learning off"} · {options.boardView}</div>
+                    <div className="mt-2 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                      <span className="rounded-full border border-white/10 px-2.5 py-1">{options.mode}</span>
+                      <span className="rounded-full border border-white/10 px-2.5 py-1">{options.topics.length} topics</span>
+                      <span className="rounded-full border border-white/10 px-2.5 py-1">{options.seed.trim() ? `seeded` : `fresh seed`}</span>
+                      <span className="rounded-full border border-white/10 px-2.5 py-1">{options.timerEnabled ? "timer on" : "timer off"}</span>
+                    </div>
+                    <div className="mt-2 text-xs text-slate-400">{selectedTopicLabels.slice(0, 3).join(" • ")}{selectedTopicLabels.length > 3 ? ` +${selectedTopicLabels.length - 3}` : ""}{options.seed.trim() ? ` · ${options.seed}` : ""}</div>
                   </div>
                   <button type="button" onClick={() => setBuilderAdvancedOpen((current) => !current)} className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-100">
                     {builderAdvancedOpen ? "Hide advanced" : "Show advanced"}
@@ -1433,7 +1424,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 </div>
 
                 <label className="space-y-2 text-sm text-slate-300">
-                  <span className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Puzzle Size</span>
+                  <span className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Target count</span>
                   <input type="range" min={4} max={12} value={options.puzzleSize} onChange={(event) => updateOptions("puzzleSize", Number(event.target.value))} className="w-full" />
                   <span>{options.puzzleSize} words</span>
                 </label>
@@ -1448,7 +1439,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 </label>
 
                 <label className="space-y-2 text-sm text-slate-300">
-                  <span className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Style</span>
+                  <span className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Theme shell</span>
                   <select value={options.style} onChange={(event) => updateOptions("style", event.target.value as PuzzleOptions["style"])} className="w-full rounded-2xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none">
                     {themeStyles.map((style) => (
                       <option key={style.id} value={style.id}>{style.label}</option>
@@ -1457,8 +1448,8 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 </label>
 
                 <label className="space-y-2 text-sm text-slate-300">
-                  <span className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Board View</span>
-                  <select aria-label="Board View" value={options.boardView} onChange={(event) => updateOptions("boardView", event.target.value as PuzzleOptions["boardView"])} className="w-full rounded-2xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none">
+                  <span className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Board mode</span>
+                  <select aria-label="Board mode" value={options.boardView} onChange={(event) => updateOptions("boardView", event.target.value as PuzzleOptions["boardView"])} className="w-full rounded-2xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none">
                     <option value="crossword">Crossword</option>
                     <option value="quest">Quest View</option>
                   </select>
@@ -1480,6 +1471,8 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 </label>
               </div>
 
+              <div className="space-y-3">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Quick start</div>
               <button type="button" onClick={() => startNewRun()} disabled={isStarting} className="accent-chip w-full rounded-2xl px-4 py-3 text-sm font-semibold disabled:opacity-60">
                 {isStarting ? "Starting..." : "Start Fresh Run"}
               </button>
@@ -1492,6 +1485,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                   Spin random custom
                 </button>
               </div>
+              </div>
 
               {runError ? <p className="text-sm text-rose-300">{runError}</p> : null}
             </div>
@@ -1501,35 +1495,41 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
             <div className="glass-card rounded-[2rem] p-5 sm:p-6">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div className="space-y-2">
+                  <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Current run</div>
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="text-2xl font-semibold text-white">{state.run.title}</h2>
-                    <span data-testid="progress-label" className="accent-chip rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em]">{progressLabel}</span>
-                    <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300">{formatElapsed(state.elapsedMs)}</span>
                     <span className="rounded-full border border-white/10 px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-300">{state.run.options.mode}</span>
                     <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300">seed {state.run.seed.replace(/^daily:/, "")}</span>
                   </div>
                   <p className="max-w-4xl text-sm leading-6 text-slate-300">{state.run.blurb}</p>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
-                  <button type="button" onClick={togglePause} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">{state.paused ? "Resume" : "Pause"}</button>
-                  <button type="button" onClick={() => startNewRun(state.run.options)} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">Restart</button>
-                  <button type="button" onClick={confirmRevealWord} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">Review Word</button>
-                  <button type="button" onClick={confirmRevealPuzzle} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">Review Puzzle</button>
+                <div className="space-y-3 lg:max-w-md lg:text-right">
+                  <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Run controls</div>
+                  <div className="flex flex-wrap gap-2 lg:justify-end">
+                    <button type="button" onClick={togglePause} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">{state.paused ? "Resume" : "Pause"}</button>
+                    <button type="button" onClick={() => startNewRun(state.run.options)} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">Restart</button>
+                  </div>
+                  <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Review tools</div>
+                  <div className="flex flex-wrap gap-2 lg:justify-end">
+                    <button type="button" onClick={confirmRevealWord} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">Review Word</button>
+                    <button type="button" onClick={confirmRevealPuzzle} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">Review Puzzle</button>
+                  </div>
                 </div>
               </div>
 
-              <div className="mt-4 flex gap-2 lg:hidden">
+              <div className={`mt-4 grid gap-2 lg:hidden ${reviewMode === "none" ? "grid-cols-3" : "grid-cols-4"}`}>
                 {([
                   ["board", "Board"],
                   ["clues", "Clues"],
+                  ...(reviewMode === "none" ? [] : [["review", reviewMode === "word" ? "Word" : "Puzzle"] as const]),
                   ["archive", "Archive"],
                 ] as const).map(([panelId, label]) => (
                   <button
                     key={panelId}
                     type="button"
                     onClick={() => setMobilePanel(panelId)}
-                    className={`flex-1 rounded-2xl border px-3 py-2 text-sm transition ${mobilePanel === panelId ? "accent-chip" : "border-white/10 bg-white/4 text-slate-200"}`}
+                    className={`rounded-2xl border px-3 py-2 text-sm transition ${mobilePanel === panelId ? "accent-chip" : "border-white/10 bg-white/4 text-slate-200"}`}
                   >
                     {label}
                   </button>
@@ -1538,13 +1538,19 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
             </div>
 
             <div className="grid gap-6 lg:grid-cols-[minmax(0,1.45fr)_19rem]">
-              <div className={`${mobilePanel === "board" ? "block" : "hidden"} glass-card rounded-[2rem] p-4 sm:p-6 lg:block`}>
+              <div id="studio-board" className={`${mobilePanel === "board" ? "block" : "hidden"} glass-card rounded-[2rem] p-4 sm:p-6 lg:block`}>
                 <div className="mb-4 flex items-center justify-between">
                   <div>
-                    <h3 className="text-lg font-semibold text-white">{isQuestView ? "Your Quest Board" : "Board"}</h3>
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Play area</div>
+                    <h3 className="mt-1 text-lg font-semibold text-white">{isQuestView ? "Your Quest Board" : "Board"}</h3>
                     <p className="mt-1 text-sm text-slate-400">{isQuestView ? "Trace a straight path across the full grid to solve each target word." : "Select a clue and fill the board. Crossing cells can switch between clue directions."}</p>
                   </div>
                   {activePlacement ? <span data-testid="active-clue-badge" className="accent-chip rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em]">{isQuestView ? "quest view" : `${activePlacement.clueNumber} ${activePlacement.direction}`}</span> : null}
+                </div>
+                <div className="mb-4 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                  <span className="rounded-full border border-white/10 px-3 py-1.5">tap board to jump</span>
+                  <span className="rounded-full border border-white/10 px-3 py-1.5">active clue stays highlighted</span>
+                  <span className="rounded-full border border-white/10 px-3 py-1.5">review stays separate</span>
                 </div>
 
                 <div className="overflow-auto pb-2">
@@ -1633,7 +1639,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                   <div className="mt-5 rounded-[1.5rem] border border-white/10 bg-white/4 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <div className="text-xs uppercase tracking-[0.24em] text-slate-400">{isQuestView ? "Target" : "Clue"}</div>
+                        <div className="text-xs uppercase tracking-[0.24em] text-slate-400">{isQuestView ? "Solve focus" : "Active clue"}</div>
                         <div className="mt-1 text-lg font-semibold text-white">{isQuestView ? activeWord.answer.length + " letters · starts with " + (activeWord.answer[0]?.toUpperCase() ?? "?") : `${activePlacement?.clueNumber}. ${getActiveClueSummary(activeWord)}`}</div>
                         <div className="mt-2 text-sm text-slate-300">{activeWord.prompt}</div>
                         <div className="mt-2 text-xs uppercase tracking-[0.2em] text-slate-400">{isQuestView ? `${questPath.cells.length || 1}/${activeWord.length} trail cells` : `${activeFilledCount}/${activeWord.length} letters filled`}</div>
@@ -1646,44 +1652,48 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                         Trace the word directly on the board. Start on the first letter, drag in a straight line, and release on the last letter.
                       </div>
                     ) : (
-                      <input
-                        ref={activeAnswerInputRef}
-                        data-testid="active-answer-input"
-                        aria-label="Active clue answer"
-                        value={activeGuess}
-                        onChange={(event) => updateWordGuess(activeWord, event.target.value)}
-                        onKeyDown={(event) => {
-                          const target = event.currentTarget;
-                          const cursorAtStart = (target.selectionStart ?? 0) === 0 && (target.selectionEnd ?? 0) === 0;
-                          const cursorAtEnd = (target.selectionStart ?? target.value.length) === target.value.length && (target.selectionEnd ?? target.value.length) === target.value.length;
+                      <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/45 p-4">
+                        <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Answer lane</div>
+                        <p className="mt-2 text-sm text-slate-300">Type straight through, then use the shortcut row to keep momentum across neighboring clues.</p>
+                        <input
+                          ref={activeAnswerInputRef}
+                          data-testid="active-answer-input"
+                          aria-label="Active clue answer"
+                          value={activeGuess}
+                          onChange={(event) => updateWordGuess(activeWord, event.target.value)}
+                          onKeyDown={(event) => {
+                            const target = event.currentTarget;
+                            const cursorAtStart = (target.selectionStart ?? 0) === 0 && (target.selectionEnd ?? 0) === 0;
+                            const cursorAtEnd = (target.selectionStart ?? target.value.length) === target.value.length && (target.selectionEnd ?? target.value.length) === target.value.length;
 
-                          if (event.key === "Enter") {
-                            event.preventDefault();
-                            jumpToAdjacentClue(event.shiftKey ? -1 : 1);
-                            return;
-                          }
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              jumpToAdjacentClue(event.shiftKey ? -1 : 1);
+                              return;
+                            }
 
-                          if ((event.key === "ArrowRight" || event.key === "ArrowDown") && cursorAtEnd) {
-                            event.preventDefault();
-                            jumpToAdjacentClue(1);
-                            return;
-                          }
+                            if ((event.key === "ArrowRight" || event.key === "ArrowDown") && cursorAtEnd) {
+                              event.preventDefault();
+                              jumpToAdjacentClue(1);
+                              return;
+                            }
 
-                          if ((event.key === "ArrowLeft" || event.key === "ArrowUp") && cursorAtStart) {
-                            event.preventDefault();
-                            jumpToAdjacentClue(-1);
-                            return;
-                          }
+                            if ((event.key === "ArrowLeft" || event.key === "ArrowUp") && cursorAtStart) {
+                              event.preventDefault();
+                              jumpToAdjacentClue(-1);
+                              return;
+                            }
 
-                          if (event.key === "Escape") {
-                            event.preventDefault();
-                            clearActiveWord();
-                          }
-                        }}
-                        disabled={state.paused || state.solvedIds.includes(activeWord.id)}
-                        placeholder={state.paused ? "Paused" : `${activeWord.length} letters`}
-                        className="mt-4 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm uppercase tracking-[0.25em] text-white outline-none placeholder:text-slate-500 disabled:opacity-60"
-                      />
+                            if (event.key === "Escape") {
+                              event.preventDefault();
+                              clearActiveWord();
+                            }
+                          }}
+                          disabled={state.paused || state.solvedIds.includes(activeWord.id)}
+                          placeholder={state.paused ? "Paused" : `${activeWord.length} letters`}
+                          className="mt-4 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm uppercase tracking-[0.25em] text-white outline-none placeholder:text-slate-500 disabled:opacity-60"
+                        />
+                      </div>
                     )}
 
                     <div className="mt-4 grid gap-3 sm:grid-cols-3">
@@ -1701,30 +1711,26 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                       <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_16rem]">
                         <div className="rounded-2xl border border-white/10 bg-slate-950/45 p-4">
                           <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Vocabulary help</div>
-                          <div className="mt-3 space-y-3 text-sm text-slate-200">
+                          <div className="mt-3 space-y-4 text-sm text-slate-200">
                             <div>
                               <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Meaning cue</div>
                               <p className="mt-1 text-slate-200">{activeWord.learningNote}</p>
                             </div>
-                            <div>
+                            <div className="rounded-2xl border border-white/10 bg-white/4 p-3">
                               <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Plain meaning</div>
                               <p className="mt-1 text-slate-200">{activeWord.plainMeaning}</p>
-                            </div>
-                            <div>
-                              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Use it like this</div>
+                              <div className="mt-3 text-[11px] uppercase tracking-[0.22em] text-slate-500">Use it like this</div>
                               <p className="mt-1 text-slate-200">{activeWord.usageExample}</p>
                             </div>
-                            <div>
+                            <div className="rounded-2xl border border-white/10 bg-white/4 p-3">
                               <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Pronunciation</div>
-                              <div className="mt-1 flex items-center gap-2">
+                              <div className="mt-2 flex items-center gap-2">
                                 <p className="text-slate-200">{activeWord.pronunciationHint}</p>
                                 <button type="button" onClick={() => speakWord(activeWord.answer)} className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] text-slate-100">
                                   Speak
                                 </button>
                               </div>
-                            </div>
-                            <div>
-                              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Extra cue</div>
+                              <div className="mt-3 text-[11px] uppercase tracking-[0.22em] text-slate-500">Extra cue</div>
                               <p className="mt-1 text-slate-300">{activeWord.microHint}</p>
                             </div>
                           </div>
@@ -1743,14 +1749,19 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                       </div>
                     ) : null}
 
-                    <div className="mt-4 flex flex-wrap gap-2">
+                    <div className="mt-4">
+                      <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Keyboard flow</div>
+                      <div className="mt-3 flex flex-wrap gap-2">
                       <span className="rounded-full border border-white/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-slate-300">Enter next</span>
                       <span className="rounded-full border border-white/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-slate-300">Shift+Enter back</span>
                       <span className="rounded-full border border-white/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-slate-300">Arrows move clues</span>
-                      <span className="rounded-full border border-white/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-slate-300">Esc clears</span>
+                      <span className="rounded-full border border-white/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-slate-300">Esc exits clue</span>
+                      </div>
                     </div>
 
-                    <div className="mt-3 flex flex-wrap gap-2">
+                    <div className="mt-3">
+                      <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Quick actions</div>
+                      <div className="mt-3 flex flex-wrap gap-2">
                       <button type="button" onClick={() => jumpToAdjacentClue(-1)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100">
                         Previous clue
                       </button>
@@ -1766,6 +1777,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                       <button type="button" onClick={() => revealAnagram(activeWord)} disabled={state.paused || state.solvedIds.includes(activeWord.id)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
                         Show scramble
                       </button>
+                      </div>
                     </div>
 
                     {shownAnagrams[activeWord.id] ? <div className="mt-3 rounded-2xl border border-dashed border-white/12 bg-slate-950/45 px-3 py-2 text-sm uppercase tracking-[0.25em] text-slate-200">Scramble: {shownAnagrams[activeWord.id]}</div> : null}
@@ -1784,12 +1796,21 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 ) : null}
               </div>
 
-              <div className={`${mobilePanel === "clues" ? "block" : "hidden"} glass-card rounded-[2rem] p-5 sm:p-6 lg:block`}>
-                <h3 className="text-lg font-semibold text-white">Clues</h3>
+              <div id="studio-clues" className={`${mobilePanel === "clues" ? "block" : "hidden"} glass-card rounded-[2rem] p-5 sm:p-6 lg:block`}>
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Clue rail</div>
+                  <h3 className="mt-1 text-lg font-semibold text-white">Clues</h3>
+                  <p className="mt-2 text-sm text-slate-300">Scan the full lane, then jump back to the active answer without losing your place on the board.</p>
+                </div>
                 <div className="mt-4 space-y-5">
                   {(["across", "down"] as const).map((direction) => (
                     <div key={direction}>
-                      <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{direction}</div>
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{direction}</div>
+                        <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                          {state.run.board.placements.filter((placement) => placement.direction === direction).length} clues
+                        </div>
+                      </div>
                       <div className="mt-3 space-y-2">
                         {state.run.board.placements.filter((placement) => placement.direction === direction).map((placement) => {
                           const word = getWordById(state, placement.wordId);
@@ -1799,6 +1820,10 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
 
                           return (
                             <button key={placement.wordId} type="button" onClick={() => selectWord(placement.wordId)} className={`w-full rounded-2xl border p-3 text-left transition ${state.activeWordId === placement.wordId ? "accent-ring bg-white/6" : "border-white/10 bg-white/4"}`}>
+                              <div className="mb-2 flex items-center justify-between gap-2 text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                                <span>{state.activeWordId === placement.wordId ? "active clue" : "ready"}</span>
+                                <span>{word.topicLabel}</span>
+                              </div>
                               <div className="flex items-start justify-between gap-3">
                                 <div>
                                   <div className="text-xs uppercase tracking-[0.22em] text-slate-400">{placement.clueNumber} / {word.length} letters</div>
@@ -1817,31 +1842,40 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
             </div>
 
             {reviewMode !== "none" ? (
-              <div className="glass-card rounded-[2rem] p-5 sm:p-6">
+              <div id="studio-review" className={`${mobilePanel === "review" ? "block" : "hidden"} glass-card rounded-[2rem] p-5 sm:p-6 lg:block`}>
                 <div className="mb-4 flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-white">{reviewMode === "word" ? "Word Review" : "Puzzle Review"}</h3>
-                  <button type="button" onClick={() => setReviewMode("none")} className="rounded-full border border-white/10 px-3 py-1 text-sm text-slate-300">Close</button>
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Review</div>
+                    <h3 className="mt-1 text-lg font-semibold text-white">{reviewMode === "word" ? "Word Review" : "Puzzle Review"}</h3>
+                  </div>
+                  <button type="button" onClick={() => { setReviewMode("none"); setMobilePanel("board"); }} className="rounded-full border border-white/10 px-3 py-1 text-sm text-slate-300">Close</button>
                 </div>
 
                 {reviewMode === "word" && activeWord ? (
                   <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
                     <div className="rounded-3xl border border-white/10 bg-white/4 p-5">
-                      <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Current answer</div>
+                      <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Answer unlocked</div>
+                      <div className="mt-2 text-[11px] uppercase tracking-[0.18em] text-slate-400">{activeWord.topicLabel} · {getFrequencyLabel(activeWord.frequencyBand)}</div>
                       <div data-testid="review-word-answer" className="mt-2 text-3xl font-semibold uppercase tracking-[0.16em] text-white">{activeWord.answer}</div>
                       <p className="mt-3 text-sm text-slate-300">{activeWord.prompt}</p>
                       {state.run.options.learningMode ? (
                         <div data-testid="review-vocabulary-support" className="mt-4 rounded-2xl border border-white/10 bg-slate-950/40 p-4 text-left">
                           <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Vocabulary support</div>
-                          <p className="mt-2 text-sm text-slate-200">{activeWord.learningNote}</p>
-                          <p className="mt-3 text-sm text-slate-200">{activeWord.plainMeaning}</p>
-                          <p className="mt-3 text-sm text-slate-300">{activeWord.usageExample}</p>
+                          <div className="mt-2 text-[11px] uppercase tracking-[0.22em] text-slate-500">Meaning cue</div>
+                          <p className="mt-1 text-sm text-slate-200">{activeWord.learningNote}</p>
+                          <div className="mt-3 text-[11px] uppercase tracking-[0.22em] text-slate-500">Plain meaning</div>
+                          <p className="mt-1 text-sm text-slate-200">{activeWord.plainMeaning}</p>
+                          <div className="mt-3 text-[11px] uppercase tracking-[0.22em] text-slate-500">Example</div>
+                          <p className="mt-1 text-sm text-slate-300">{activeWord.usageExample}</p>
+                          <div className="mt-3 text-[11px] uppercase tracking-[0.22em] text-slate-500">Pronunciation</div>
                           <div className="mt-3 flex items-center gap-2">
                             <p className="text-sm text-slate-300">{activeWord.pronunciationHint}</p>
                             <button type="button" onClick={() => speakWord(activeWord.answer)} className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] text-slate-100">
                               Speak
                             </button>
                           </div>
-                          <p className="mt-3 text-sm text-slate-400">{activeWord.microHint}</p>
+                          <div className="mt-3 text-[11px] uppercase tracking-[0.22em] text-slate-500">Extra cue</div>
+                          <p className="mt-1 text-sm text-slate-400">{activeWord.microHint}</p>
                           <p className="mt-3 text-sm text-slate-400">{activeWord.translationAid}</p>
                           <div className="mt-3 flex flex-wrap gap-2">
                             {activeWord.relatedWords.map((related) => (
@@ -1855,6 +1889,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                     </div>
                     <div className="rounded-3xl border border-white/10 bg-white/4 p-5">
                       <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Hint ladder</div>
+                      <p className="mt-2 text-sm text-slate-300">A clean recap of the clue trail that led to this answer.</p>
                       <div className="mt-3 space-y-2 text-sm text-slate-200">
                         {createHintLadder(activeWord).map((hint, index) => <div key={hint} className="rounded-2xl border border-white/10 px-3 py-2">{index + 1}. {hint}</div>)}
                       </div>
@@ -1863,7 +1898,9 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 ) : null}
 
                 {reviewMode === "puzzle" ? (
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  <div>
+                    <p className="mb-4 text-sm text-slate-300">Every solved answer, clue reference, and direction in one quick scan.</p>
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                     {state.run.board.placements.map((placement) => {
                       const word = getWordById(state, placement.wordId);
                       if (!word) {
@@ -1872,6 +1909,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
 
                       return (
                         <article key={word.id} className="rounded-3xl border border-white/10 bg-white/4 p-4">
+                          <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{word.topicLabel} · {getFrequencyLabel(word.frequencyBand)}</div>
                           <div className="flex items-center justify-between gap-3">
                             <div data-testid="review-puzzle-answer" className="text-lg font-semibold uppercase tracking-[0.14em] text-white">{word.answer}</div>
                             <span className="accent-chip rounded-full px-2.5 py-1 text-[11px] capitalize">{placement.clueNumber} {placement.direction}</span>
@@ -1880,6 +1918,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                         </article>
                       );
                     })}
+                    </div>
                   </div>
                 ) : null}
               </div>
@@ -1895,9 +1934,11 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 </div>
                 <div className="text-xs uppercase tracking-[0.28em] text-slate-400">Run complete</div>
                 <h3 className="mt-2 text-3xl font-semibold text-white">Puzzle cleared.</h3>
-                <p className="mt-3 text-sm text-slate-300">Your archive and streaks have been updated. Replay the same seed, jump into review, or copy the result for later.</p>
+                <p className="mt-3 text-sm text-slate-300">Your archive and streaks are updated. Replay this exact seed, take a quick review pass, or share the finished run.</p>
 
-                <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="mt-5">
+                  <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Run recap</div>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                   <div className="rounded-3xl border border-white/10 bg-white/4 p-4 text-left">
                     <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Finish time</div>
                     <div className="mt-2 text-2xl font-semibold text-white">{formatElapsed(state.elapsedMs)}</div>
@@ -1914,15 +1955,24 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                     <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Seed</div>
                     <div className="mt-2 text-sm font-medium text-white">{state.run.seed.replace(/^daily:/, "")}</div>
                   </div>
+                  </div>
                 </div>
 
-                <div className="mt-5 flex flex-wrap justify-center gap-2">
+                <div className="mt-5">
+                  <div className="text-xs uppercase tracking-[0.22em] text-slate-400">What next</div>
+                  <div className="mt-3 flex flex-wrap justify-center gap-2">
                   <button type="button" onClick={() => startNewRun(state.run.options)} className="accent-chip rounded-full px-4 py-2 text-sm font-semibold">
                     Replay run
                   </button>
-                  <button type="button" onClick={() => setReviewMode("puzzle")} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">
+                  <button type="button" onClick={() => { setReviewMode("puzzle"); setMobilePanel("review"); }} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">
                     Review full puzzle
                   </button>
+                  <button type="button" onClick={startTodayDailyRun} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">
+                    Play daily
+                  </button>
+                  </div>
+                  <div className="mt-3 text-[11px] uppercase tracking-[0.22em] text-slate-500">Share or save</div>
+                  <div className="mt-3 flex flex-wrap justify-center gap-2">
                   <button type="button" onClick={shareCurrentRunLink} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">
                     Share run link
                   </button>
@@ -1934,16 +1984,17 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                   <button type="button" onClick={copyCompletionSummary} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">
                     Copy result text
                   </button>
-                  <button type="button" onClick={startTodayDailyRun} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">
-                    Play daily
-                  </button>
+                  </div>
                 </div>
               </div>
             ) : null}
 
             <div className="glass-card rounded-[2rem] p-5 sm:p-6 bg-[linear-gradient(180deg,rgba(15,23,42,0.92),rgba(9,14,26,0.88))]">
               <div className="mb-4 flex items-center justify-between gap-3">
-                <h3 className="text-lg font-semibold text-white">Word Targets</h3>
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Solve now</div>
+                  <h3 className="mt-1 text-lg font-semibold text-white">Word Targets</h3>
+                </div>
                 <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300">{state.run.words.length - solvedCount} left</span>
               </div>
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -1952,13 +2003,14 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                   return (
                     <button key={word.id} type="button" onClick={() => selectWord(word.id)} className={`relative overflow-hidden rounded-2xl border px-4 py-3 text-left transition ${getTargetChipClass(word, solved, state.activeWordId === word.id)}`}>
                       <div className="absolute inset-y-0 left-0 w-1 bg-white/12" />
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{solved ? "cleared" : state.activeWordId === word.id ? "active target" : "ready target"}</div>
                       <div className="flex items-center justify-between gap-3">
-                        <span className="text-sm font-medium uppercase tracking-[0.12em]">{word.answer.length} letters</span>
+                        <span className="text-sm font-medium uppercase tracking-[0.12em]">{word.topicLabel}</span>
                         <span className="text-[11px] uppercase tracking-[0.18em]">{solved ? "✓ done" : getFrequencyLabel(word.frequencyBand)}</span>
                       </div>
                       <div className="mt-2 flex items-center justify-between gap-2 text-sm">
-                        <span className="text-slate-300">{word.topicLabel}</span>
-                        <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em]">{word.answer[0]?.toUpperCase()}</span>
+                        <span className="text-slate-300">{word.answer.length} letters</span>
+                        <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em]">starts {word.answer[0]?.toUpperCase()}</span>
                       </div>
                     </button>
                   );
@@ -1971,8 +2023,9 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 <div className="pointer-events-none absolute right-4 top-4 text-5xl opacity-15">🧭</div>
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <h3 className="text-lg font-semibold text-white">Quest Progress</h3>
-                    <p className="mt-1 text-sm text-slate-300">Keep the streak alive and clear words steadily.</p>
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Current run</div>
+                    <h3 className="mt-1 text-lg font-semibold text-white">Quest Progress</h3>
+                    <p className="mt-1 text-sm text-slate-300">Track momentum without losing focus on the active board.</p>
                   </div>
                   <div className="grid size-16 place-items-center rounded-full border border-white/10 bg-white/6 text-white">
                     <div className="text-lg font-semibold">{solvedCount}</div>
@@ -1990,25 +2043,26 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs text-slate-300">
                   <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2">
                     <div className="text-lg">⭐</div>
-                    <div className="mt-1">Progress</div>
+                    <div className="mt-1">{progressLabel}</div>
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2">
                     <div className="text-lg">🔥</div>
-                    <div className="mt-1">Streak</div>
+                    <div className="mt-1">best streak {progress.bestStreak}</div>
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2">
                     <div className="text-lg">💡</div>
-                    <div className="mt-1">Hints</div>
+                    <div className="mt-1">hints used {hintsUsed}</div>
                   </div>
                 </div>
               </div>
 
-              <div className="glass-card relative overflow-hidden rounded-[2rem] p-5 sm:p-6 bg-[linear-gradient(135deg,rgba(168,85,247,0.22),rgba(15,23,42,0.2))]">
+              <div className={`glass-card relative overflow-hidden rounded-[2rem] p-5 sm:p-6 bg-[linear-gradient(135deg,rgba(168,85,247,0.22),rgba(15,23,42,0.2))] ${activePlay ? "opacity-70" : "opacity-100"}`}>
                 <div className="pointer-events-none absolute -right-2 -bottom-2 text-8xl opacity-12">💎</div>
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <h3 className="text-lg font-semibold text-white">Keep the streak alive!</h3>
-                    <p className="mt-1 text-sm text-slate-300">Play tomorrow for another clean run and more confident vocabulary recall.</p>
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Next up</div>
+                    <h3 className="mt-1 text-lg font-semibold text-white">Keep the streak alive!</h3>
+                    <p className="mt-1 text-sm text-slate-300">A quick reminder for tomorrow, not a detour from the current solve.</p>
                   </div>
                   <div className="text-4xl">🎁</div>
                 </div>
@@ -2024,12 +2078,19 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
               </div>
             </div>
 
+            {activePlay ? (
+              <div className="rounded-2xl border border-white/10 bg-slate-950/35 px-4 py-3 text-sm text-slate-300">
+                Rewards and archive history stay nearby for short check-ins, but they intentionally sit behind the active solve until this run is cleared.
+              </div>
+            ) : null}
+
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
-              <div className="glass-card quest-card-frame rounded-[2rem] p-5 sm:p-6">
+              <div className={`glass-card quest-card-frame rounded-[2rem] p-5 sm:p-6 ${activePlay ? "opacity-75" : "opacity-100"}`}>
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
-                    <h3 className="text-lg font-semibold text-white">Achievements</h3>
-                    <p className="mt-1 text-sm text-slate-300">Small milestones that make each run feel more like a quest.</p>
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Later</div>
+                    <h3 className="mt-1 text-lg font-semibold text-white">Achievements</h3>
+                    <p className="mt-1 text-sm text-slate-300">Milestones worth checking after the board work is done.</p>
                   </div>
                   <button type="button" className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-200">View all</button>
                 </div>
@@ -2048,11 +2109,12 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 </div>
               </div>
 
-              <div className="glass-card quest-card-frame rounded-[2rem] p-5 sm:p-6 bg-[linear-gradient(135deg,rgba(91,33,182,0.22),rgba(15,23,42,0.2))]">
+              <div className={`glass-card quest-card-frame rounded-[2rem] p-5 sm:p-6 bg-[linear-gradient(135deg,rgba(91,33,182,0.22),rgba(15,23,42,0.2))] ${activePlay ? "opacity-70" : "opacity-100"}`}>
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <h3 className="text-lg font-semibold text-white">Reward Chest</h3>
-                    <p className="mt-1 text-sm text-slate-300">Keep your chain alive to unlock brighter daily rewards.</p>
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">After the clear</div>
+                    <h3 className="mt-1 text-lg font-semibold text-white">Reward Chest</h3>
+                    <p className="mt-1 text-sm text-slate-300">Your streak perks wait here once the current puzzle is settled.</p>
                   </div>
                   <div className="relative text-5xl">
                     🪙
@@ -2069,48 +2131,51 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
             </div>
           </section>
 
-          <aside className={`${mobilePanel === "archive" ? "block" : "hidden"} space-y-6 xl:block ${archiveRailClass}`}>
+          <aside id="studio-archive" className={`${mobilePanel === "archive" ? "block" : "hidden"} space-y-6 xl:block ${archiveRailClass}`}>
             <div className="hidden xl:flex justify-end">
-              <button data-testid="toggle-right-panel" type="button" onClick={() => setRightSidebarOpen((current) => !current)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs text-slate-200">
-                {rightSidebarOpen ? "Hide" : "Show"}
+              <button data-testid="toggle-right-panel" type="button" aria-expanded={rightSidebarOpen} aria-controls="studio-archive-rail" aria-label={rightSidebarOpen ? "Collapse archive rail" : "Expand archive rail"} onClick={() => setRightSidebarOpen((current) => !current)} className={`rounded-full border border-white/10 bg-white/4 text-slate-200 ${rightSidebarOpen ? "px-3 py-1.5 text-xs" : "size-9 text-sm"}`}>
+                <span aria-hidden="true">{rightSidebarOpen ? "Collapse archive" : "←"}</span>
               </button>
             </div>
-            <div className={`${mobilePanel === "archive" ? "space-y-6" : "hidden"} ${rightSidebarOpen ? "xl:space-y-6 xl:block" : "xl:hidden"}`}>
-            <div className="glass-card rounded-[2rem] p-5 sm:p-6 opacity-75 xl:opacity-80">
-              <h3 className="text-lg font-semibold text-white">Archive Insights</h3>
+            <div id="studio-archive-rail" className={`${mobilePanel === "archive" ? "space-y-6" : "hidden"} ${rightSidebarOpen ? "xl:space-y-6 xl:block" : "xl:hidden"}`}>
+            <div className={`glass-card rounded-[2rem] p-5 sm:p-6 ${activePlay ? "opacity-65 xl:opacity-70" : "opacity-75 xl:opacity-80"}`}>
+              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Archive</div>
+              <h3 className="mt-1 text-lg font-semibold text-white">Archive Insights</h3>
+              <p className="mt-2 text-sm text-slate-300">A softer snapshot of how your recent runs are stacking up, without pulling you away from the current solve.</p>
               <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
                 <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
-                  <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Daily clears</div>
+                  <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Daily wins</div>
                   <div className="mt-2 text-2xl font-semibold text-white">{dailyClearCount}</div>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
-                  <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Finished runs</div>
+                  <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Closed runs</div>
                   <div className="mt-2 text-2xl font-semibold text-white">{finishedHistoryCount}</div>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
-                  <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Saved runs</div>
+                  <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Live saves</div>
                   <div className="mt-2 text-2xl font-semibold text-white">{activeHistoryCount}</div>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
                   <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Last 7 days</div>
                   <div className="mt-2 text-2xl font-semibold text-white">{weeklyDailyClearCount}</div>
-                  <div className="mt-1 text-xs text-slate-400">daily clears</div>
+                  <div className="mt-1 text-xs text-slate-400">daily wins</div>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
                   <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Last 30 days</div>
                   <div className="mt-2 text-2xl font-semibold text-white">{monthlyDailyClearCount}</div>
-                  <div className="mt-1 text-xs text-slate-400">daily clears</div>
+                  <div className="mt-1 text-xs text-slate-400">daily wins</div>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/4 p-4 sm:col-span-2 xl:col-span-1">
-                  <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Weekly finish pace</div>
+                  <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Weekly pace</div>
                   <div className="mt-2 text-2xl font-semibold text-white">{weeklyFinishedRunCount}</div>
-                  <div className="mt-1 text-xs text-slate-400">finished runs in the last 7 days</div>
+                  <div className="mt-1 text-xs text-slate-400">closed runs in the last 7 days</div>
                 </div>
               </div>
             </div>
 
             <div className="glass-card rounded-[2rem] p-5 sm:p-6 opacity-75 xl:opacity-80">
-              <h3 className="text-lg font-semibold text-white">Daily Archive</h3>
+              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Replay a daily</div>
+              <h3 className="mt-1 text-lg font-semibold text-white">Daily Archive</h3>
               <div className="mt-4 space-y-2">
                 {archive.map((entry) => (
                   <button key={entry.day} type="button" onClick={() => entry.summary ? replaySavedRun(entry.summary) : startNewRun({ ...options, mode: "daily", seed: entry.day })} className={`w-full rounded-2xl border px-3 py-3 text-left text-sm text-slate-200 transition hover:border-white/20 ${entry.day === getDefaultDailySeed() ? "border-sky-400/30 bg-sky-500/10" : "border-white/10 bg-white/4"}`}>
@@ -2128,12 +2193,14 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
             </div>
 
             <div className="glass-card rounded-[2rem] p-5 sm:p-6 opacity-70 xl:opacity-75">
-              <h3 className="text-lg font-semibold text-white">Recent Runs</h3>
+              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Resume or replay</div>
+              <h3 className="mt-1 text-lg font-semibold text-white">Recent Runs</h3>
+              <p className="mt-2 text-sm text-slate-300">Use the chips to narrow the list down to the runs you want to continue or compare.</p>
               <div className="mt-4 flex flex-wrap gap-2">
                 {([
-                  ["all", "All"],
-                  ["daily", "Daily"],
-                  ["custom", "Custom"],
+                  ["all", "All runs"],
+                  ["daily", "Daily runs"],
+                  ["custom", "Custom runs"],
                 ] as const).map(([value, label]) => (
                   <button key={value} data-testid={`history-mode-${value}`} type="button" onClick={() => setHistoryModeFilter(value)} className={`rounded-full border px-3 py-1 text-xs transition ${historyModeFilter === value ? "accent-chip" : "border-white/10 bg-white/4 text-slate-300"}`}>
                     {label}
@@ -2143,8 +2210,8 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
               <div className="mt-2 flex flex-wrap gap-2">
                 {([
                   ["all", "Any state"],
-                  ["finished", "Finished"],
-                  ["active", "In progress"],
+                  ["finished", "Cleared"],
+                  ["active", "Still open"],
                 ] as const).map(([value, label]) => (
                   <button key={value} data-testid={`history-status-${value}`} type="button" onClick={() => setHistoryStatusFilter(value)} className={`rounded-full border px-3 py-1 text-xs transition ${historyStatusFilter === value ? "accent-chip" : "border-white/10 bg-white/4 text-slate-300"}`}>
                     {label}
@@ -2165,7 +2232,12 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                     </div>
                   </button>
                 ))}
-                {filteredHistory.length === 0 ? <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-4 text-sm text-slate-400">No runs match the current filters yet.</div> : null}
+                {filteredHistory.length === 0 ? (
+                  <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-4 text-sm text-slate-400">
+                    <div className="font-medium text-slate-200">No runs match these filters yet.</div>
+                    <div className="mt-2">Try switching the mode or state chips, or finish another run to grow this archive.</div>
+                  </div>
+                ) : null}
               </div>
             </div>
             </div>
@@ -2176,12 +2248,12 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
         {revealConfirm !== "none" ? (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/72 px-4">
             <div className="glass-card w-full max-w-md rounded-[2rem] p-6">
-              <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Confirm reveal</div>
+              <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Review gate</div>
               <h3 className="mt-2 text-2xl font-semibold text-white">{revealConfirm === "word" ? "Reveal this word?" : "Reveal the full puzzle?"}</h3>
               <p className="mt-3 text-sm text-slate-300">{revealConfirm === "word" ? "This will show the current answer in review mode." : "This will open the full puzzle review with every answer visible."}</p>
               <div className="mt-5 flex flex-wrap justify-end gap-2">
                 <button type="button" onClick={() => setRevealConfirm("none")} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">Cancel</button>
-                <button type="button" onClick={() => { setReviewMode(revealConfirm === "word" ? "word" : "puzzle"); setRevealConfirm("none"); }} className="accent-chip rounded-full px-4 py-2 text-sm font-semibold">{revealConfirm === "word" ? "Reveal word" : "Reveal puzzle"}</button>
+                <button type="button" onClick={() => { setReviewMode(revealConfirm === "word" ? "word" : "puzzle"); setMobilePanel("review"); setRevealConfirm("none"); }} className="accent-chip rounded-full px-4 py-2 text-sm font-semibold">{revealConfirm === "word" ? "Reveal word" : "Reveal puzzle"}</button>
               </div>
             </div>
           </div>
