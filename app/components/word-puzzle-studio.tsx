@@ -430,7 +430,7 @@ export function WordPuzzleStudio() {
   const [reviewMode, setReviewMode] = useState<"none" | "word" | "puzzle">("none");
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>("board");
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(false);
-  const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
+  const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
   const [builderAdvancedOpen, setBuilderAdvancedOpen] = useState(false);
   const [revealConfirm, setRevealConfirm] = useState<RevealConfirmState>("none");
   const [shownAnagrams, setShownAnagrams] = useState<Record<string, string>>({});
@@ -532,15 +532,10 @@ export function WordPuzzleStudio() {
   const monthlyDailyClearCount = countFinishedRunsSince(progress.history, 30, "daily");
   const weeklyFinishedRunCount = countFinishedRunsSince(progress.history, 7);
   const selectedTopicLabels = topicCatalog.filter((topic) => options.topics.includes(topic.id)).map((topic) => topic.label);
-  const desktopRailItems = [
-    { icon: "🎮", label: "Board", panel: "board" as const },
-    { icon: "🧩", label: "Clues", panel: "clues" as const },
-    ...(reviewMode === "none" ? [] : [{ icon: "🪞", label: reviewMode === "word" ? "Word" : "Review", panel: "review" as const }]),
-    { icon: "🗂", label: "Archive", panel: "archive" as const },
-  ];
   const classicBoardCellClass = state.run.options.style === "classic" ? "border-slate-300/18 bg-slate-50/8 text-slate-50" : "border-white/10 bg-white/6 text-slate-100";
   const classicEmptyCellClass = state.run.options.style === "classic" ? "bg-slate-950/90 border border-slate-700/60" : "bg-transparent";
   const classicBoardShellClass = state.run.options.style === "classic" ? "border-slate-300/18 bg-[#111827]/90 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]" : "border-white/10 bg-slate-950/30 p-3";
+  const progressPercent = state.run.words.length === 0 ? 0 : (solvedCount / state.run.words.length) * 100;
   const archiveRailClass = rightSidebarOpen
     ? activePlay
       ? "opacity-70 xl:opacity-75"
@@ -1267,92 +1262,88 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
   return trailClasses[Math.max(0, solvedIndex) % trailClasses.length];
 }
 
-  const desktopLayoutClass = leftSidebarOpen
-    ? rightSidebarOpen
-      ? "xl:grid-cols-[16rem_minmax(0,1.95fr)_16rem]"
-      : "xl:grid-cols-[16rem_minmax(0,2.1fr)_4rem]"
-    : rightSidebarOpen
-      ? "xl:grid-cols-[4rem_minmax(0,2.1fr)_16rem]"
-      : "xl:grid-cols-[4rem_minmax(0,2.25fr)_4rem]";
-
   return (
     <main className={`scroll-shell ${theme.className} min-h-screen px-4 py-6 sm:px-6 lg:px-8`}>
-      <div className="mx-auto grid w-full max-w-[96rem] gap-6 xl:grid-cols-[4.5rem_minmax(0,1fr)]">
-        <aside className="hidden xl:flex xl:flex-col xl:items-center xl:gap-4">
-          <div className="glass-card quest-card-frame flex w-full flex-col items-center gap-4 rounded-[2rem] px-3 py-4">
-            <div className="text-center">
-              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Quest rail</div>
-              <div className="text-xl">👑</div>
-              <div className="quest-logo mt-2 text-lg font-black uppercase tracking-[0.12em]">Word</div>
-              <div className="quest-logo text-lg font-black uppercase tracking-[0.12em]">Quest</div>
-              <div className="quest-spark-row mt-3 justify-center"><span /><span /><span /></div>
-            </div>
-            <div className="w-full space-y-2">
-            {desktopRailItems.map(({ icon, label, panel }) => (
-              <button key={label} type="button" onClick={() => jumpToStudioSection(panel)} className="flex w-full flex-col items-center gap-2 rounded-2xl border border-white/10 bg-white/4 px-2 py-3 text-xs text-slate-300 transition hover:border-white/20 hover:text-white">
-                <span className="text-lg">{icon}</span>
-                <span>{label}</span>
-              </button>
-            ))}
-            </div>
-
-            <div className="quest-card-frame mt-4 w-full rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-center">
-              <div className="mx-auto grid size-12 place-items-center rounded-full border border-white/10 bg-white/6 text-2xl">🧑‍🚀</div>
-              <div className="mt-2 text-xs font-semibold text-white">Hunter</div>
-              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Lv. {Math.max(1, progress.bestStreak + 1)}</div>
-              <div className="quest-spark-row mt-3 justify-center"><span /><span /><span /></div>
-            </div>
-          </div>
-        </aside>
-
-        <div className="flex flex-col gap-6">
-        <section className="glass-card quest-card-frame overflow-hidden rounded-[2rem] px-5 py-4 sm:px-6">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-start gap-4">
-              <div className="hidden quest-card-frame rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(125,211,252,0.12),rgba(168,85,247,0.12))] px-4 py-3 text-center xl:block">
-                <div className="mx-auto grid size-12 place-items-center rounded-full border border-white/10 bg-white/6 text-2xl">👑</div>
-                <div className="quest-logo mt-2 text-2xl font-black uppercase tracking-[0.08em] leading-none">Word</div>
-                <div className="quest-logo text-2xl font-black uppercase tracking-[0.08em] leading-none">Quest</div>
-                <div className="quest-spark-row mt-3 justify-center"><span /><span /><span /><span /></div>
-              </div>
-              <div className="space-y-3">
-                <div className="text-sm font-semibold text-fuchsia-300">Today&apos;s Quest</div>
-                <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">Find {state.run.words.length} hidden words</h1>
-                <div className="quest-spark-row"><span /><span /><span /><span /></div>
-                <div className="flex flex-wrap gap-2 text-sm text-slate-300">
-                  <span>Theme: {state.run.words[0]?.topicLabel ?? "Mixed"}</span>
-                  <span>•</span>
-                  <span>Grid: {state.run.board.size}x{state.run.board.size}</span>
-                  <span>•</span>
-                  <span>Mode: {state.run.options.mode === "daily" ? "Daily Spark" : "Custom Run"}</span>
+      <div className="mx-auto flex w-full max-w-[96rem] flex-col gap-6">
+        <section className="glass-card quest-card-frame quest-card-glow overflow-hidden rounded-[2rem] px-5 py-5 sm:px-6">
+          <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-3 rounded-full border border-white/10 bg-slate-950/45 px-3 py-2">
+                  <div className="grid size-8 place-items-center rounded-full border border-white/10 bg-[linear-gradient(135deg,rgba(168,85,247,0.22),rgba(96,165,250,0.18))] text-sm">✦</div>
+                  <div>
+                    <div className="quest-logo text-sm font-black uppercase tracking-[0.12em]">Word Quest</div>
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Quest studio</div>
+                  </div>
                 </div>
-                <div className="flex flex-wrap gap-2 text-xs text-slate-200">
-                  <span data-testid="progress-label" className="accent-chip rounded-full px-3 py-1 font-semibold uppercase tracking-[0.22em]">{progressLabel}</span>
-                  <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1 uppercase tracking-[0.2em] text-slate-300">{runStateLabel}</span>
-                  <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1 text-slate-300">{formatElapsed(state.elapsedMs)}</span>
-                  <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1 text-slate-300">streak {progress.streak}</span>
+                <nav className="flex flex-wrap gap-2 text-sm text-slate-300">
+                  <button type="button" onClick={() => jumpToStudioSection("board")} className="rounded-full border border-fuchsia-400/30 bg-fuchsia-500/10 px-4 py-2 text-fuchsia-100">Play</button>
+                  <button type="button" onClick={startTodayDailyRun} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 transition hover:border-white/20 hover:text-white">Daily</button>
+                  <button type="button" onClick={() => jumpToStudioSection("archive")} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 transition hover:border-white/20 hover:text-white">History</button>
+                  <button type="button" onClick={() => setLeftSidebarOpen((current) => !current)} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 transition hover:border-white/20 hover:text-white">New Quest</button>
+                </nav>
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_8.5rem] lg:items-center">
+                <div className="space-y-3">
+                  <div className="text-sm font-semibold text-fuchsia-300">Today&apos;s Quest</div>
+                  <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">{state.run.title}</h1>
+                  <p className="max-w-3xl text-sm leading-6 text-slate-300">{state.run.blurb}</p>
+                  <div className="flex flex-wrap gap-2 text-xs text-slate-200">
+                    <span data-testid="progress-label" className="accent-chip rounded-full px-3 py-1 font-semibold uppercase tracking-[0.22em]">{progressLabel}</span>
+                    <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1 uppercase tracking-[0.2em] text-slate-300">{runStateLabel}</span>
+                    <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1 text-slate-300">{formatElapsed(state.elapsedMs)}</span>
+                    <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1 text-slate-300">streak {progress.streak}</span>
+                    <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1 text-slate-300">{state.run.words[0]?.topicLabel ?? "Mixed"}</span>
+                  </div>
+                </div>
+                <div className="mx-auto grid size-32 place-items-center rounded-full border border-white/10 bg-[radial-gradient(circle_at_top,_rgba(168,85,247,0.35),_transparent_60%),linear-gradient(180deg,rgba(15,23,42,0.92),rgba(9,14,26,0.88))]">
+                  <div className="grid size-24 place-items-center rounded-full border border-white/10 bg-slate-950/65 text-center shadow-[inset_0_0_28px_rgba(168,85,247,0.16)]">
+                    <div className="text-3xl font-semibold text-white">{solvedCount}/{state.run.words.length}</div>
+                    <div className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Found</div>
+                  </div>
                 </div>
               </div>
             </div>
-            <div className="max-w-xl text-sm leading-6 text-slate-300 lg:text-right">
-              Set the run up once, then stay centered on the board and the active clue. Archive, rewards, and history can wait until the solve is underway.
+
+            <div className="grid gap-3 sm:grid-cols-3 xl:w-[23rem] xl:grid-cols-1">
+              <div className="rounded-[1.5rem] border border-white/10 bg-white/4 px-4 py-3 text-sm text-slate-200">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Streak</div>
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <span className="text-lg font-semibold text-white">{progress.streak}</span>
+                  <span className="text-xl">🔥</span>
+                </div>
+              </div>
+              <div className="rounded-[1.5rem] border border-white/10 bg-white/4 px-4 py-3 text-sm text-slate-200">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Best</div>
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <span className="text-lg font-semibold text-white">{progress.bestStreak}</span>
+                  <span className="text-xl">🏆</span>
+                </div>
+              </div>
+              <div className="rounded-[1.5rem] border border-white/10 bg-white/4 px-4 py-3 text-sm text-slate-200">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Hints</div>
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <span className="text-lg font-semibold text-white">{hintsUsed}</span>
+                  <span className="text-xl">💡</span>
+                </div>
+              </div>
             </div>
           </div>
         </section>
 
-        <div className={`grid gap-6 ${desktopLayoutClass}`}>
-          <aside className="glass-card rounded-[2rem] p-4 sm:p-5">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div className={`${leftSidebarOpen ? "block" : "hidden"}`}>
-                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Pre-play</div>
-                <h2 className="mt-1 text-lg font-semibold text-white">Setup Your Quest</h2>
-                <p className="mt-1 text-sm text-slate-400">Choose a quick run style, then fine-tune only if you want extra control.</p>
-              </div>
-              <button data-testid="toggle-left-panel" type="button" aria-expanded={leftSidebarOpen} aria-controls="studio-setup-rail" aria-label={leftSidebarOpen ? "Collapse setup rail" : "Expand setup rail"} onClick={() => setLeftSidebarOpen((current) => !current)} className={`hidden rounded-full border border-white/10 bg-white/4 text-slate-200 xl:inline-flex ${leftSidebarOpen ? "px-3 py-1.5 text-xs" : "size-9 items-center justify-center text-sm"}`}>
-                <span aria-hidden="true">{leftSidebarOpen ? "Collapse setup" : "→"}</span>
-              </button>
+        <section className={`glass-card rounded-[2rem] p-4 sm:p-5 ${leftSidebarOpen ? "block" : "hidden"}`}>
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Quest setup</div>
+              <h2 className="mt-1 text-lg font-semibold text-white">Build a new puzzle</h2>
+              <p className="mt-1 text-sm text-slate-400">Choose a quick run style, then fine-tune only if you want extra control.</p>
             </div>
-              <div id="studio-setup-rail" className={leftSidebarOpen ? "space-y-5" : "hidden"}>
+            <button data-testid="toggle-left-panel" type="button" aria-expanded={leftSidebarOpen} aria-controls="studio-setup-rail" aria-label={leftSidebarOpen ? "Collapse setup rail" : "Expand setup rail"} onClick={() => setLeftSidebarOpen((current) => !current)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs text-slate-200">
+              Collapse setup
+            </button>
+          </div>
+          <div id="studio-setup-rail" className="space-y-5">
               <div className="space-y-2">
                 <label className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Mode</label>
                 <div className="grid grid-cols-2 gap-2">
@@ -1487,21 +1478,22 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
               </div>
               </div>
 
-              {runError ? <p className="text-sm text-rose-300">{runError}</p> : null}
-            </div>
-          </aside>
+            {runError ? <p className="text-sm text-rose-300">{runError}</p> : null}
+          </div>
+        </section>
 
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.65fr)_22rem]">
           <section className="space-y-6">
             <div className="glass-card rounded-[2rem] p-5 sm:p-6">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div className="space-y-2">
-                  <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Current run</div>
+                  <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Puzzle workspace</div>
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="text-2xl font-semibold text-white">{state.run.title}</h2>
                     <span className="rounded-full border border-white/10 px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-300">{state.run.options.mode}</span>
                     <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300">seed {state.run.seed.replace(/^daily:/, "")}</span>
                   </div>
-                  <p className="max-w-4xl text-sm leading-6 text-slate-300">{state.run.blurb}</p>
+                  <p className="max-w-4xl text-sm leading-6 text-slate-300">Find all hidden words to complete the puzzle. Keep the board in focus, dip into the clues, and use the side rail for progress and quick controls.</p>
                 </div>
 
                 <div className="space-y-3 lg:max-w-md lg:text-right">
@@ -1537,15 +1529,18 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
               </div>
             </div>
 
-            <div className="grid gap-6 lg:grid-cols-[minmax(0,1.45fr)_19rem]">
+            <div className="space-y-6">
               <div id="studio-board" className={`${mobilePanel === "board" ? "block" : "hidden"} glass-card rounded-[2rem] p-4 sm:p-6 lg:block`}>
                 <div className="mb-4 flex items-center justify-between">
                   <div>
-                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Play area</div>
-                    <h3 className="mt-1 text-lg font-semibold text-white">{isQuestView ? "Your Quest Board" : "Board"}</h3>
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Puzzle</div>
+                    <h3 className="mt-1 text-lg font-semibold text-white">{isQuestView ? "Quest board" : "Puzzle board"}</h3>
                     <p className="mt-1 text-sm text-slate-400">{isQuestView ? "Trace a straight path across the full grid to solve each target word." : "Select a clue and fill the board. Crossing cells can switch between clue directions."}</p>
                   </div>
-                  {activePlacement ? <span data-testid="active-clue-badge" className="accent-chip rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em]">{isQuestView ? "quest view" : `${activePlacement.clueNumber} ${activePlacement.direction}`}</span> : null}
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1 text-xs text-slate-300">{theme.label}</span>
+                    {activePlacement ? <span data-testid="active-clue-badge" className="accent-chip rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em]">{isQuestView ? "quest view" : `${activePlacement.clueNumber} ${activePlacement.direction}`}</span> : null}
+                  </div>
                 </div>
                 <div className="mb-4 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.18em] text-slate-400">
                   <span className="rounded-full border border-white/10 px-3 py-1.5">tap board to jump</span>
@@ -1798,11 +1793,11 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
 
               <div id="studio-clues" className={`${mobilePanel === "clues" ? "block" : "hidden"} glass-card rounded-[2rem] p-5 sm:p-6 lg:block`}>
                 <div>
-                  <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Clue rail</div>
+                  <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Across &amp; down</div>
                   <h3 className="mt-1 text-lg font-semibold text-white">Clues</h3>
-                  <p className="mt-2 text-sm text-slate-300">Scan the full lane, then jump back to the active answer without losing your place on the board.</p>
+                  <p className="mt-2 text-sm text-slate-300">Compact clue lanes, with the active word highlighted so you can scan fast and jump back into the board.</p>
                 </div>
-                <div className="mt-4 space-y-5">
+                <div className="mt-4 grid gap-5 xl:grid-cols-2">
                   {(["across", "down"] as const).map((direction) => (
                     <div key={direction}>
                       <div className="flex items-center justify-between gap-3">
@@ -1989,102 +1984,45 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
               </div>
             ) : null}
 
-            <div className="glass-card rounded-[2rem] p-5 sm:p-6 bg-[linear-gradient(180deg,rgba(15,23,42,0.92),rgba(9,14,26,0.88))]">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Solve now</div>
-                  <h3 className="mt-1 text-lg font-semibold text-white">Word Targets</h3>
-                </div>
-                <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300">{state.run.words.length - solvedCount} left</span>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {state.run.words.map((word) => {
-                  const solved = state.solvedIds.includes(word.id);
-                  return (
-                    <button key={word.id} type="button" onClick={() => selectWord(word.id)} className={`relative overflow-hidden rounded-2xl border px-4 py-3 text-left transition ${getTargetChipClass(word, solved, state.activeWordId === word.id)}`}>
-                      <div className="absolute inset-y-0 left-0 w-1 bg-white/12" />
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{solved ? "cleared" : state.activeWordId === word.id ? "active target" : "ready target"}</div>
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-sm font-medium uppercase tracking-[0.12em]">{word.topicLabel}</span>
-                        <span className="text-[11px] uppercase tracking-[0.18em]">{solved ? "✓ done" : getFrequencyLabel(word.frequencyBand)}</span>
-                      </div>
-                      <div className="mt-2 flex items-center justify-between gap-2 text-sm">
-                        <span className="text-slate-300">{word.answer.length} letters</span>
-                        <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em]">starts {word.answer[0]?.toUpperCase()}</span>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
-              <div className="glass-card relative overflow-hidden rounded-[2rem] p-5 sm:p-6 bg-[linear-gradient(135deg,rgba(96,165,250,0.16),rgba(15,23,42,0.16))]">
-                <div className="pointer-events-none absolute right-4 top-4 text-5xl opacity-15">🧭</div>
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Current run</div>
-                    <h3 className="mt-1 text-lg font-semibold text-white">Quest Progress</h3>
-                    <p className="mt-1 text-sm text-slate-300">Track momentum without losing focus on the active board.</p>
-                  </div>
-                  <div className="grid size-16 place-items-center rounded-full border border-white/10 bg-white/6 text-white">
-                    <div className="text-lg font-semibold">{solvedCount}</div>
-                    <div className="text-[10px] uppercase tracking-[0.18em] text-slate-300">found</div>
-                  </div>
-                </div>
-                <div className="mt-4 h-3 overflow-hidden rounded-full bg-white/8">
-                  <div className="h-full rounded-full bg-[linear-gradient(90deg,#a855f7,#60a5fa)]" style={{ width: `${state.run.words.length === 0 ? 0 : (solvedCount / state.run.words.length) * 100}%` }} />
-                </div>
-                <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-300">
-                  <span className="rounded-full border border-white/10 px-3 py-1">Streak {progress.streak}</span>
-                  <span className="rounded-full border border-white/10 px-3 py-1">Best {progress.bestStreak}</span>
-                  <span className="rounded-full border border-white/10 px-3 py-1">Hints {hintsUsed}</span>
-                </div>
-                <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs text-slate-300">
-                  <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2">
-                    <div className="text-lg">⭐</div>
-                    <div className="mt-1">{progressLabel}</div>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2">
-                    <div className="text-lg">🔥</div>
-                    <div className="mt-1">best streak {progress.bestStreak}</div>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2">
-                    <div className="text-lg">💡</div>
-                    <div className="mt-1">hints used {hintsUsed}</div>
-                  </div>
-                </div>
-              </div>
-
-              <div className={`glass-card relative overflow-hidden rounded-[2rem] p-5 sm:p-6 bg-[linear-gradient(135deg,rgba(168,85,247,0.22),rgba(15,23,42,0.2))] ${activePlay ? "opacity-70" : "opacity-100"}`}>
-                <div className="pointer-events-none absolute -right-2 -bottom-2 text-8xl opacity-12">💎</div>
+            <div className="grid gap-4 xl:grid-cols-2">
+              <div className="glass-card quest-card-glow rounded-[2rem] p-5 sm:p-6">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Next up</div>
-                    <h3 className="mt-1 text-lg font-semibold text-white">Keep the streak alive!</h3>
-                    <p className="mt-1 text-sm text-slate-300">A quick reminder for tomorrow, not a detour from the current solve.</p>
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Goals</div>
+                    <h3 className="mt-1 text-lg font-semibold text-white">Solve 1 puzzle</h3>
+                    <p className="mt-1 text-sm text-slate-300">Keep your streak alive with a full clear.</p>
                   </div>
-                  <div className="text-4xl">🎁</div>
+                  <div className="text-4xl opacity-80">🎯</div>
                 </div>
-                <div className="mt-5 flex items-center gap-2">
-                  {[0, 1, 2, 3, 4].map((index) => (
-                    <div key={index} className={`h-2 flex-1 rounded-full ${index < Math.max(1, Math.min(5, progress.streak || 1)) ? "bg-cyan-300" : "bg-white/10"}`} />
-                  ))}
+                <div className="mt-5 flex items-center justify-between gap-3 text-sm text-slate-300">
+                  <span>{finished ? "1/1 completed" : "0/1 in progress"}</span>
+                  <span className="rounded-full border border-white/10 px-3 py-1 text-xs">{finished ? "Done" : progressLabel}</span>
                 </div>
-                <div className="mt-4 flex items-center justify-between gap-2 text-xs text-slate-200">
-                  <span className="rounded-full border border-white/10 px-3 py-1">Daily reward</span>
-                  <span className="rounded-full border border-white/10 px-3 py-1">Quest chest</span>
+                <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/8">
+                  <div className="h-full rounded-full bg-[linear-gradient(90deg,#818cf8,#a855f7)]" style={{ width: `${finished ? 100 : Math.min(100, progressPercent)}%` }} />
+                </div>
+              </div>
+
+              <div className="glass-card quest-card-glow rounded-[2rem] p-5 sm:p-6 bg-[linear-gradient(135deg,rgba(168,85,247,0.18),rgba(15,23,42,0.18))]">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Daily reward</div>
+                    <h3 className="mt-1 text-lg font-semibold text-white">Solve today&apos;s puzzle</h3>
+                    <p className="mt-1 text-sm text-slate-300">Come back every day and keep the quest chest glowing.</p>
+                  </div>
+                  <div className="text-4xl opacity-85">🎁</div>
+                </div>
+                <div className="mt-5 flex items-center justify-between gap-3 text-sm text-slate-300">
+                  <span>{state.run.options.mode === "daily" && finished ? "Daily cleared" : "Daily ready"}</span>
+                  <span className="rounded-full border border-white/10 px-3 py-1 text-xs">{dailyClearCount} wins</span>
+                </div>
+                <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/8">
+                  <div className="h-full rounded-full bg-[linear-gradient(90deg,#60a5fa,#c084fc)]" style={{ width: `${Math.min(100, (dailyClearCount % 7) * (100 / 7))}%` }} />
                 </div>
               </div>
             </div>
 
-            {activePlay ? (
-              <div className="rounded-2xl border border-white/10 bg-slate-950/35 px-4 py-3 text-sm text-slate-300">
-                Rewards and archive history stay nearby for short check-ins, but they intentionally sit behind the active solve until this run is cleared.
-              </div>
-            ) : null}
-
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
+            <div className={`glass-card quest-card-frame rounded-[2rem] p-5 sm:p-6 ${activePlay ? "opacity-90" : "opacity-100"}`}>
               <div className={`glass-card quest-card-frame rounded-[2rem] p-5 sm:p-6 ${activePlay ? "opacity-75" : "opacity-100"}`}>
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
@@ -2137,112 +2075,115 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 <span aria-hidden="true">{rightSidebarOpen ? "Collapse archive" : "←"}</span>
               </button>
             </div>
-            <div id="studio-archive-rail" className={`${mobilePanel === "archive" ? "space-y-6" : "hidden"} ${rightSidebarOpen ? "xl:space-y-6 xl:block" : "xl:hidden"}`}>
-            <div className={`glass-card rounded-[2rem] p-5 sm:p-6 ${activePlay ? "opacity-65 xl:opacity-70" : "opacity-75 xl:opacity-80"}`}>
-              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Archive</div>
-              <h3 className="mt-1 text-lg font-semibold text-white">Archive Insights</h3>
-              <p className="mt-2 text-sm text-slate-300">A softer snapshot of how your recent runs are stacking up, without pulling you away from the current solve.</p>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
-                  <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Daily wins</div>
-                  <div className="mt-2 text-2xl font-semibold text-white">{dailyClearCount}</div>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
-                  <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Closed runs</div>
-                  <div className="mt-2 text-2xl font-semibold text-white">{finishedHistoryCount}</div>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
-                  <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Live saves</div>
-                  <div className="mt-2 text-2xl font-semibold text-white">{activeHistoryCount}</div>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
-                  <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Last 7 days</div>
-                  <div className="mt-2 text-2xl font-semibold text-white">{weeklyDailyClearCount}</div>
-                  <div className="mt-1 text-xs text-slate-400">daily wins</div>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
-                  <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Last 30 days</div>
-                  <div className="mt-2 text-2xl font-semibold text-white">{monthlyDailyClearCount}</div>
-                  <div className="mt-1 text-xs text-slate-400">daily wins</div>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-white/4 p-4 sm:col-span-2 xl:col-span-1">
-                  <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Weekly pace</div>
-                  <div className="mt-2 text-2xl font-semibold text-white">{weeklyFinishedRunCount}</div>
-                  <div className="mt-1 text-xs text-slate-400">closed runs in the last 7 days</div>
-                </div>
-              </div>
-            </div>
-
-            <div className="glass-card rounded-[2rem] p-5 sm:p-6 opacity-75 xl:opacity-80">
-              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Replay a daily</div>
-              <h3 className="mt-1 text-lg font-semibold text-white">Daily Archive</h3>
-              <div className="mt-4 space-y-2">
-                {archive.map((entry) => (
-                  <button key={entry.day} type="button" onClick={() => entry.summary ? replaySavedRun(entry.summary) : startNewRun({ ...options, mode: "daily", seed: entry.day })} className={`w-full rounded-2xl border px-3 py-3 text-left text-sm text-slate-200 transition hover:border-white/20 ${entry.day === getDefaultDailySeed() ? "border-sky-400/30 bg-sky-500/10" : "border-white/10 bg-white/4"}`}>
-                    <div className="flex items-center justify-between gap-3">
-                      <span>{entry.day}</span>
-                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] ${entry.summary?.finished ? "bg-emerald-500/12 text-emerald-200" : "bg-white/6 text-slate-300"}`}>{entry.summary?.finished ? "replay" : entry.summary ? "resume" : "open"}</span>
-                    </div>
-                    <div className="mt-2 flex items-center justify-between gap-2 text-xs uppercase tracking-[0.18em] text-slate-400">
-                      <span>{entry.summary ? `${entry.summary.challenge} / ${entry.summary.solvedCount}-${entry.summary.totalWords}` : "Open this daily seed"}</span>
-                      {entry.day === getDefaultDailySeed() ? <span className="text-sky-200">today</span> : null}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="glass-card rounded-[2rem] p-5 sm:p-6 opacity-70 xl:opacity-75">
-              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Resume or replay</div>
-              <h3 className="mt-1 text-lg font-semibold text-white">Recent Runs</h3>
-              <p className="mt-2 text-sm text-slate-300">Use the chips to narrow the list down to the runs you want to continue or compare.</p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                {([
-                  ["all", "All runs"],
-                  ["daily", "Daily runs"],
-                  ["custom", "Custom runs"],
-                ] as const).map(([value, label]) => (
-                  <button key={value} data-testid={`history-mode-${value}`} type="button" onClick={() => setHistoryModeFilter(value)} className={`rounded-full border px-3 py-1 text-xs transition ${historyModeFilter === value ? "accent-chip" : "border-white/10 bg-white/4 text-slate-300"}`}>
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {([
-                  ["all", "Any state"],
-                  ["finished", "Cleared"],
-                  ["active", "Still open"],
-                ] as const).map(([value, label]) => (
-                  <button key={value} data-testid={`history-status-${value}`} type="button" onClick={() => setHistoryStatusFilter(value)} className={`rounded-full border px-3 py-1 text-xs transition ${historyStatusFilter === value ? "accent-chip" : "border-white/10 bg-white/4 text-slate-300"}`}>
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <div className="mt-4 space-y-2">
-                {filteredHistory.slice(0, 8).map((entry) => (
-                  <button key={entry.runId} data-testid="recent-run-card" type="button" onClick={() => replaySavedRun(entry)} className="w-full rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-left text-sm text-slate-200 transition hover:border-white/20">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="font-medium text-white">{entry.title}</div>
-                        <div className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">{entry.mode} / {entry.challenge} / {entry.solvedCount}-{entry.totalWords}</div>
-                        <div className="mt-2 text-xs text-slate-400">{entry.finished ? "Replay the exact run configuration." : "Resume this seeded setup with the same board mix."}</div>
-                        <div className="mt-2 text-[11px] uppercase tracking-[0.18em] text-slate-500">seed {entry.seed.replace(/^daily:/, "")}</div>
-                      </div>
-                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] ${entry.finished ? "bg-emerald-500/12 text-emerald-200" : "bg-white/6 text-slate-300"}`}>{entry.finished ? "replay" : "resume"}</span>
-                    </div>
-                  </button>
-                ))}
-                {filteredHistory.length === 0 ? (
-                  <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-4 text-sm text-slate-400">
-                    <div className="font-medium text-slate-200">No runs match these filters yet.</div>
-                    <div className="mt-2">Try switching the mode or state chips, or finish another run to grow this archive.</div>
+            <div id="studio-archive-rail" className={`${mobilePanel === "archive" ? "space-y-6" : "hidden"} ${rightSidebarOpen ? "lg:space-y-6 lg:block" : "lg:hidden"}`}>
+              <div className="glass-card relative overflow-hidden rounded-[2rem] p-5 sm:p-6 bg-[linear-gradient(135deg,rgba(96,165,250,0.16),rgba(15,23,42,0.16))]">
+                <div className="pointer-events-none absolute right-4 top-4 text-5xl opacity-15">🧭</div>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Progress</div>
+                    <h3 className="mt-1 text-lg font-semibold text-white">Quest progress</h3>
+                    <p className="mt-1 text-sm text-slate-300">Track momentum without losing focus on the active board.</p>
                   </div>
-                ) : null}
+                  <div className="grid size-18 place-items-center rounded-full border border-white/10 bg-white/6 text-white">
+                    <div className="text-2xl font-semibold">{solvedCount}/{state.run.words.length}</div>
+                    <div className="text-[10px] uppercase tracking-[0.18em] text-slate-300">Found</div>
+                  </div>
+                </div>
+                <div className="mt-5 h-3 overflow-hidden rounded-full bg-white/8">
+                  <div className="h-full rounded-full bg-[linear-gradient(90deg,#a855f7,#60a5fa)]" style={{ width: `${progressPercent}%` }} />
+                </div>
+                <div className="mt-3 text-center text-sm text-slate-300">{Math.round(progressPercent)}% Complete</div>
+                <div className="mt-5 grid grid-cols-3 gap-2 text-center text-xs text-slate-300">
+                  <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2">
+                    <div className="text-lg">🔥</div>
+                    <div className="mt-1">{progress.streak}</div>
+                    <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Streak</div>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2">
+                    <div className="text-lg">🏆</div>
+                    <div className="mt-1">{progress.bestStreak}</div>
+                    <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Best</div>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2">
+                    <div className="text-lg">💡</div>
+                    <div className="mt-1">{Math.max(0, state.run.words.length * 3 - hintsUsed)}</div>
+                    <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Hints left</div>
+                  </div>
+                </div>
               </div>
-            </div>
+
+              <div className="glass-card rounded-[2rem] p-5 sm:p-6 bg-[linear-gradient(180deg,rgba(15,23,42,0.92),rgba(9,14,26,0.88))]">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Word bank</div>
+                    <h3 className="mt-1 text-lg font-semibold text-white">Target words</h3>
+                  </div>
+                  <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300">{state.run.words.length - solvedCount} left</span>
+                </div>
+                <div className="space-y-2">
+                  {state.run.words.map((word) => {
+                    const solved = state.solvedIds.includes(word.id);
+                    return (
+                      <button key={word.id} type="button" onClick={() => selectWord(word.id)} className={`relative w-full overflow-hidden rounded-2xl border px-4 py-3 text-left transition ${getTargetChipClass(word, solved, state.activeWordId === word.id)}`}>
+                        <div className="absolute inset-y-0 left-0 w-1 bg-white/12" />
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-sm font-semibold uppercase tracking-[0.12em] text-white/95">{word.answer}</span>
+                          <span className="text-[11px] uppercase tracking-[0.18em] text-slate-300">{solved ? "done" : `${word.length} letters`}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="glass-card rounded-[2rem] p-5 sm:p-6 opacity-80">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Controls</div>
+                <h3 className="mt-1 text-lg font-semibold text-white">Play guide</h3>
+                <div className="mt-4 space-y-3 text-sm text-slate-200">
+                  {[
+                    ["⌗", "Select a cell", "Tap a cell to start typing"],
+                    ["⌨", "Type a letter", "Use your keyboard to fill the answer"],
+                    ["⌫", "Delete", "Backspace clears the current entry"],
+                    ["💡", "Get a hint", "Use hints when you get stuck"],
+                    ["👁", "Reveal word", "Open review for the current word or puzzle"],
+                  ].map(([icon, title, text]) => (
+                    <div key={title} className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/4 px-4 py-3">
+                      <div className="grid size-10 shrink-0 place-items-center rounded-xl border border-white/10 bg-slate-950/50 text-sm">{icon}</div>
+                      <div>
+                        <div className="font-medium text-white">{title}</div>
+                        <div className="mt-1 text-xs text-slate-400">{text}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button type="button" onClick={togglePause} className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs text-slate-100">{state.paused ? "Resume" : "Pause"}</button>
+                  <button type="button" onClick={() => startNewRun(state.run.options)} className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs text-slate-100">Restart</button>
+                  <button type="button" onClick={shareCurrentRunLink} className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs text-slate-100">Share link</button>
+                </div>
+                <div className="mt-5 grid grid-cols-2 gap-2 text-xs text-slate-300">
+                  <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-center">
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Daily wins</div>
+                    <div className="mt-2 text-xl font-semibold text-white">{dailyClearCount}</div>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-center">
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Closed runs</div>
+                    <div className="mt-2 text-xl font-semibold text-white">{finishedHistoryCount}</div>
+                  </div>
+                </div>
+                <div className="mt-4 space-y-2">
+                  {filteredHistory.slice(0, 2).map((entry) => (
+                    <button key={entry.runId} data-testid="recent-run-card" type="button" onClick={() => replaySavedRun(entry)} className="w-full rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-left text-sm text-slate-200 transition hover:border-white/20">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-medium text-white">{entry.title}</span>
+                        <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] ${entry.finished ? "bg-emerald-500/12 text-emerald-200" : "bg-white/6 text-slate-300"}`}>{entry.finished ? "replay" : "resume"}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           </aside>
-        </div>
         </div>
 
         {revealConfirm !== "none" ? (
