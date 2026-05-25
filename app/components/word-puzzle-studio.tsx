@@ -1510,7 +1510,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 </div>
               </div>
 
-              <div className={`mt-4 grid gap-2 lg:hidden ${reviewMode === "none" ? "grid-cols-3" : "grid-cols-4"}`}>
+              <div className={`mt-4 grid gap-2 xl:hidden ${reviewMode === "none" ? "grid-cols-3" : "grid-cols-4"}`}>
                 {([
                   ["board", "Board"],
                   ["clues", "Clues"],
@@ -2069,8 +2069,8 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
             </div>
           </section>
 
-          <aside id="studio-archive" className={`${mobilePanel === "archive" ? "block" : "hidden"} space-y-6 xl:block ${archiveRailClass}`}>
-            <div className="hidden xl:flex justify-end">
+          <aside id="studio-archive" className={`${mobilePanel === "archive" ? "block" : "hidden"} space-y-6 lg:block ${archiveRailClass}`}>
+            <div className="hidden lg:flex justify-end">
               <button data-testid="toggle-right-panel" type="button" aria-expanded={rightSidebarOpen} aria-controls="studio-archive-rail" aria-label={rightSidebarOpen ? "Collapse archive rail" : "Expand archive rail"} onClick={() => setRightSidebarOpen((current) => !current)} className={`rounded-full border border-white/10 bg-white/4 text-slate-200 ${rightSidebarOpen ? "px-3 py-1.5 text-xs" : "size-9 text-sm"}`}>
                 <span aria-hidden="true">{rightSidebarOpen ? "Collapse archive" : "←"}</span>
               </button>
