@@ -536,6 +536,9 @@ export function WordPuzzleStudio() {
   const classicEmptyCellClass = state.run.options.style === "classic" ? "bg-slate-950/90 border border-slate-700/60" : "bg-transparent";
   const classicBoardShellClass = state.run.options.style === "classic" ? "border-slate-300/18 bg-[#111827]/90 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]" : "border-white/10 bg-slate-950/30 p-3";
   const progressPercent = state.run.words.length === 0 ? 0 : (solvedCount / state.run.words.length) * 100;
+  const progressRingCircumference = 2 * Math.PI * 42;
+  const progressRingOffset = progressRingCircumference - (progressRingCircumference * progressPercent) / 100;
+  const dailyRewardPercent = Math.min(100, (dailyClearCount % 7) * (100 / 7));
   const archiveRailClass = rightSidebarOpen
     ? activePlay
       ? "opacity-70 xl:opacity-75"
@@ -1297,7 +1300,18 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                     <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1 text-slate-300">{state.run.words[0]?.topicLabel ?? "Mixed"}</span>
                   </div>
                 </div>
-                <div className="mx-auto grid size-32 place-items-center rounded-full border border-white/10 bg-[radial-gradient(circle_at_top,_rgba(168,85,247,0.35),_transparent_60%),linear-gradient(180deg,rgba(15,23,42,0.92),rgba(9,14,26,0.88))]">
+                <div className="relative mx-auto grid size-32 place-items-center rounded-full border border-white/10 bg-[radial-gradient(circle_at_top,_rgba(168,85,247,0.35),_transparent_60%),linear-gradient(180deg,rgba(15,23,42,0.92),rgba(9,14,26,0.88))] shadow-[0_18px_40px_-26px_rgba(96,165,250,0.32)]">
+                  <svg viewBox="0 0 100 100" className="absolute inset-3 -rotate-90">
+                    <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(255,255,255,0.09)" strokeWidth="8" />
+                    <circle cx="50" cy="50" r="42" fill="none" stroke="url(#questProgressRing)" strokeWidth="8" strokeLinecap="round" strokeDasharray={progressRingCircumference} strokeDashoffset={progressRingOffset} />
+                    <defs>
+                      <linearGradient id="questProgressRing" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" stopColor="#60a5fa" />
+                        <stop offset="55%" stopColor="#a855f7" />
+                        <stop offset="100%" stopColor="#c084fc" />
+                      </linearGradient>
+                    </defs>
+                  </svg>
                   <div className="grid size-24 place-items-center rounded-full border border-white/10 bg-slate-950/65 text-center shadow-[inset_0_0_28px_rgba(168,85,247,0.16)]">
                     <div className="text-3xl font-semibold text-white">{solvedCount}/{state.run.words.length}</div>
                     <div className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Found</div>
@@ -1331,6 +1345,26 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
             </div>
           </div>
         </section>
+
+        <div className="glass-card quest-card-frame flex flex-col gap-3 rounded-[2rem] px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+          <div>
+            <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Current setup</div>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-200">
+              <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1">{options.challenge}</span>
+              <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1">{options.puzzleSize} words</span>
+              <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1">{options.mode}</span>
+              <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1">{selectedTopicLabels.slice(0, 2).join(" • ")}{selectedTopicLabels.length > 2 ? ` +${selectedTopicLabels.length - 2}` : ""}</span>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => setLeftSidebarOpen((current) => !current)} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100 transition hover:border-white/20">
+              {leftSidebarOpen ? "Hide setup" : "Tune setup"}
+            </button>
+            <button type="button" onClick={() => startNewRun()} disabled={isStarting} className="accent-chip rounded-full px-4 py-2 text-sm font-semibold disabled:opacity-60">
+              {isStarting ? "Starting..." : "Fresh run"}
+            </button>
+          </div>
+        </div>
 
         <section className={`glass-card rounded-[2rem] p-4 sm:p-5 ${leftSidebarOpen ? "block" : "hidden"}`}>
           <div className="mb-4 flex items-center justify-between gap-3">
@@ -2022,11 +2056,11 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
               </div>
             </div>
 
-            <div className={`glass-card quest-card-frame rounded-[2rem] p-5 sm:p-6 ${activePlay ? "opacity-90" : "opacity-100"}`}>
-              <div className={`glass-card quest-card-frame rounded-[2rem] p-5 sm:p-6 ${activePlay ? "opacity-75" : "opacity-100"}`}>
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_20rem]">
+              <div className={`glass-card quest-card-frame rounded-[2rem] p-5 sm:p-6 ${activePlay ? "opacity-95" : "opacity-100"}`}>
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
-                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Later</div>
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Achievements</div>
                     <h3 className="mt-1 text-lg font-semibold text-white">Achievements</h3>
                     <p className="mt-1 text-sm text-slate-300">Milestones worth checking after the board work is done.</p>
                   </div>
@@ -2047,7 +2081,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 </div>
               </div>
 
-              <div className={`glass-card quest-card-frame rounded-[2rem] p-5 sm:p-6 bg-[linear-gradient(135deg,rgba(91,33,182,0.22),rgba(15,23,42,0.2))] ${activePlay ? "opacity-70" : "opacity-100"}`}>
+              <div className={`glass-card quest-card-frame rounded-[2rem] p-5 sm:p-6 bg-[linear-gradient(135deg,rgba(91,33,182,0.22),rgba(15,23,42,0.2))] ${activePlay ? "opacity-85" : "opacity-100"}`}>
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">After the clear</div>
@@ -2064,12 +2098,15 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                     <div key={index} className={`h-2 flex-1 rounded-full ${index < Math.max(1, Math.min(5, progress.streak || 1)) ? "bg-fuchsia-300" : "bg-white/10"}`} />
                   ))}
                 </div>
-                <div className="mt-4 quest-spark-row"><span /><span /><span /><span /><span /></div>
+                <div className="mt-4 flex items-center justify-between gap-2 text-xs text-slate-300">
+                  <span className="rounded-full border border-white/10 px-3 py-1">Daily reward</span>
+                  <span className="rounded-full border border-white/10 px-3 py-1">Chest tier {Math.max(1, Math.min(5, progress.streak || 1))}</span>
+                </div>
               </div>
             </div>
           </section>
 
-          <aside id="studio-archive" className={`${mobilePanel === "archive" ? "block" : "hidden"} space-y-6 xl:block ${archiveRailClass}`}>
+          <aside id="studio-archive" className={`${mobilePanel === "archive" ? "block" : "hidden"} space-y-6 xl:sticky xl:top-6 xl:block ${archiveRailClass}`}>
             <div className="hidden xl:flex justify-end">
               <button data-testid="toggle-right-panel" type="button" aria-expanded={rightSidebarOpen} aria-controls="studio-archive-rail" aria-label={rightSidebarOpen ? "Collapse archive rail" : "Expand archive rail"} onClick={() => setRightSidebarOpen((current) => !current)} className={`rounded-full border border-white/10 bg-white/4 text-slate-200 ${rightSidebarOpen ? "px-3 py-1.5 text-xs" : "size-9 text-sm"}`}>
                 <span aria-hidden="true">{rightSidebarOpen ? "Collapse archive" : "←"}</span>
