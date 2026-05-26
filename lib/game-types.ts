@@ -27,12 +27,34 @@ export type TopicId =
 export type ContentPackId =
   | "myth-beings"
   | "myth-relics"
+  | "cosmos-flight"
+  | "cosmos-phenomena"
   | "ocean-life"
   | "ocean-sailing"
+  | "garden-blooms"
+  | "garden-growers"
   | "city-transit"
   | "city-night"
+  | "music-stage"
+  | "music-instruments"
+  | "kitchen-pantry"
+  | "kitchen-bakes"
+  | "wild-creatures"
+  | "wild-landforms"
+  | "weather-storms"
+  | "weather-skies"
+  | "desert-survival"
+  | "desert-stones"
+  | "festival-parade"
+  | "festival-performance"
   | "winter-weather"
-  | "winter-cozy";
+  | "winter-cozy"
+  | "invent-workshop"
+  | "invent-power"
+  | "story-books"
+  | "story-plot"
+  | "greek-symbols"
+  | "greek-scholar";
 
 export type PuzzleWord = {
   id: string;
