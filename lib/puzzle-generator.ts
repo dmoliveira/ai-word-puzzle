@@ -117,11 +117,11 @@ function scoreEntry(entry: PuzzleWord, options: PuzzleOptions, chosen: PuzzleWor
   return inRange + exactDifficulty + nearDifficulty + topicBonus + repeatedInitialPenalty + repeatedLengthPenalty + suffixPenalty + topicVarietyBonus + frequencyBonus + fairnessPenalty + familyBonus + featuredPackBonus - entry.weight;
 }
 
-function getContentPackCandidates(topics: TopicId[], challenge: ChallengeLevel) {
+function getContentPackCandidates(topics: TopicId[], challenge: ChallengeLevel, minimumSize = 1) {
   const topicSet = new Set(topics);
   return contentCatalog
     .filter((pack) => topicSet.has(pack.topicId))
-    .filter((pack) => pack.answers.some((answer) => wordBank.some((entry) => entry.normalized === answer && difficultyDistance(entry.difficulty, challenge) <= 1)));
+    .filter((pack) => pack.answers.filter((answer) => wordBank.some((entry) => entry.normalized === answer && difficultyDistance(entry.difficulty, challenge) <= 1)).length >= minimumSize);
 }
 
 function resolveContentPack(options: PuzzleOptions, seed: string) {
@@ -130,10 +130,16 @@ function resolveContentPack(options: PuzzleOptions, seed: string) {
   }
 
   if (options.contentPackId !== "auto") {
-    return contentCatalog.find((pack) => pack.id === options.contentPackId) ?? null;
+    const explicitPack = contentCatalog.find((pack) => pack.id === options.contentPackId) ?? null;
+    if (!explicitPack || !options.topics.includes(explicitPack.topicId)) {
+      return null;
+    }
+
+    const eligibleCount = explicitPack.answers.filter((answer) => wordBank.some((entry) => entry.normalized === answer && difficultyDistance(entry.difficulty, options.challenge) <= 1)).length;
+    return eligibleCount >= options.puzzleSize ? explicitPack : null;
   }
 
-  const candidates = getContentPackCandidates(options.topics, options.challenge);
+  const candidates = getContentPackCandidates(options.topics, options.challenge, options.puzzleSize);
   if (candidates.length === 0) {
     return null;
   }
@@ -146,7 +152,7 @@ function resolveFeaturedContentPack(options: PuzzleOptions, seed: string) {
     return resolveContentPack(options, seed);
   }
 
-  const candidates = getContentPackCandidates(options.topics, options.challenge);
+  const candidates = getContentPackCandidates(options.topics, options.challenge, Math.min(options.puzzleSize, 4));
   if (candidates.length === 0) {
     return null;
   }
