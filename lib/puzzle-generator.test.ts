@@ -143,6 +143,32 @@ test("themed family stays themed when supported topics have curated packs", () =
   assert.ok(run.words.every((word) => word.contentPackIds.length > 0));
 });
 
+test("themed family falls back when explicit content pack conflicts with selected topics", () => {
+  const run = buildPuzzleRun({
+    puzzleFamily: "themed",
+    contentPackId: "ocean-life",
+    topics: ["city"],
+    puzzleSize: 6,
+  });
+
+  assert.equal(run.options.puzzleFamily, "classic");
+  assert.equal(run.options.contentPackId, "auto");
+});
+
+test("themed family falls back when a pack cannot satisfy requested challenge and size", () => {
+  const run = buildPuzzleRun({
+    puzzleFamily: "themed",
+    contentPackId: "wild-creatures",
+    topics: ["wild"],
+    challenge: "mythic",
+    puzzleSize: 6,
+  });
+
+  assert.equal(run.options.puzzleFamily, "classic");
+  assert.equal(run.options.contentPackId, "auto");
+  assert.ok(run.words.length >= 4);
+});
+
 test("content catalog now covers a broader set of curated lanes", () => {
   assert.ok(contentCatalog.length >= 24);
 });
