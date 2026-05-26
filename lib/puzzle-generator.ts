@@ -90,6 +90,11 @@ function scoreEntry(entry: PuzzleWord, options: PuzzleOptions, chosen: PuzzleWor
     : options.puzzleFamily === "themed" && contentPack && entry.contentPackIds.includes(contentPack.id)
       ? 8
       : 0;
+  const featuredPackBonus = options.puzzleFamily !== "themed" && contentPack && entry.contentPackIds.includes(contentPack.id)
+    ? chosen.some((word) => word.contentPackIds.includes(contentPack.id))
+      ? 2
+      : 5
+    : 0;
 
   const frequencyBonus = entry.frequencyBand === "common" ? 2 : entry.frequencyBand === "uncommon" ? 1 : -1;
   const rareCount = chosen.filter((word) => word.frequencyBand === "rare").length;
@@ -109,7 +114,14 @@ function scoreEntry(entry: PuzzleWord, options: PuzzleOptions, chosen: PuzzleWor
             : 0
         : 0;
 
-  return inRange + exactDifficulty + nearDifficulty + topicBonus + repeatedInitialPenalty + repeatedLengthPenalty + suffixPenalty + topicVarietyBonus + frequencyBonus + fairnessPenalty + familyBonus - entry.weight;
+  return inRange + exactDifficulty + nearDifficulty + topicBonus + repeatedInitialPenalty + repeatedLengthPenalty + suffixPenalty + topicVarietyBonus + frequencyBonus + fairnessPenalty + familyBonus + featuredPackBonus - entry.weight;
+}
+
+function getContentPackCandidates(topics: TopicId[], challenge: ChallengeLevel) {
+  const topicSet = new Set(topics);
+  return contentCatalog
+    .filter((pack) => topicSet.has(pack.topicId))
+    .filter((pack) => pack.answers.some((answer) => wordBank.some((entry) => entry.normalized === answer && difficultyDistance(entry.difficulty, challenge) <= 1)));
 }
 
 function resolveContentPack(options: PuzzleOptions, seed: string) {
@@ -121,12 +133,25 @@ function resolveContentPack(options: PuzzleOptions, seed: string) {
     return contentCatalog.find((pack) => pack.id === options.contentPackId) ?? null;
   }
 
-  const candidates = contentCatalog.filter((pack) => options.topics.includes(pack.topicId));
+  const candidates = getContentPackCandidates(options.topics, options.challenge);
   if (candidates.length === 0) {
     return null;
   }
 
-  return candidates[hashString(`${seed}:content-pack`) % candidates.length];
+  return candidates[hashString(`${seed}:${options.challenge}:content-pack`) % candidates.length];
+}
+
+function resolveFeaturedContentPack(options: PuzzleOptions, seed: string) {
+  if (options.puzzleFamily === "themed") {
+    return resolveContentPack(options, seed);
+  }
+
+  const candidates = getContentPackCandidates(options.topics, options.challenge);
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  return candidates[hashString(`${seed}:${options.challenge}:${options.puzzleFamily}:featured-pack`) % candidates.length];
 }
 
 function getBoardSize(words: PuzzleWord[]) {
@@ -372,6 +397,7 @@ export function buildPuzzleRun(input: Partial<PuzzleOptions> = {}): PuzzleRun {
   }
 
   resolvedContentPack = resolveContentPack(options, resolvedSeed);
+  const featuredContentPack = resolveFeaturedContentPack(options, resolvedSeed);
 
   const topicSet = new Set(options.topics);
   const candidates = wordBank.filter((entry) => {
@@ -396,7 +422,7 @@ export function buildPuzzleRun(input: Partial<PuzzleOptions> = {}): PuzzleRun {
   while (chosen.length < options.puzzleSize) {
     const ranked = candidates
       .filter((entry) => !used.has(entry.id))
-      .map((entry) => ({ entry, score: scoreEntry(entry, options, chosen, resolvedContentPack) + getEntrySeedScore(entry, resolvedSeed, chosen.length) }))
+      .map((entry) => ({ entry, score: scoreEntry(entry, options, chosen, resolvedContentPack ?? featuredContentPack) + getEntrySeedScore(entry, resolvedSeed, chosen.length) }))
       .sort((left, right) => right.score - left.score || left.entry.answer.localeCompare(right.entry.answer));
 
     const pickWindow = Math.min(6, ranked.length);
@@ -415,7 +441,7 @@ export function buildPuzzleRun(input: Partial<PuzzleOptions> = {}): PuzzleRun {
   const placedWordIds = new Set(board.placements.map((placement) => placement.wordId));
   const placedWords = chosen.filter((word) => placedWordIds.has(word.id));
   const theme = getThemeStyle(options.style);
-  const labelTopic = resolvedContentPack?.label ?? topicCatalog.find((topic) => topic.id === options.topics[0])?.label ?? "Word Puzzle";
+  const labelTopic = resolvedContentPack?.label ?? featuredContentPack?.label ?? topicCatalog.find((topic) => topic.id === options.topics[0])?.label ?? "Word Puzzle";
 
   return {
     id: `${hashString(`${resolvedSeed}:${options.challenge}:${options.puzzleFamily}:${options.contentPackId}:${options.topics.join(",")}:${options.puzzleSize}`)}`,

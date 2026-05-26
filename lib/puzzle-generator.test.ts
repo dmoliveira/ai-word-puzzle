@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildPuzzleRun, createHintLadder, sanitizeGuess } from "@/lib/puzzle-generator";
+import { contentCatalog } from "@/lib/word-bank";
 
 test("buildPuzzleRun returns requested puzzle size when enough candidates exist", () => {
   const run = buildPuzzleRun({
@@ -130,7 +131,7 @@ test("non-themed families ignore explicit content pack filters", () => {
   assert.ok(run.words.some((word) => word.topicId === "city" || word.contentPackIds.length === 0));
 });
 
-test("themed family falls back when selected topics have no supported pack", () => {
+test("themed family stays themed when supported topics have curated packs", () => {
   const run = buildPuzzleRun({
     puzzleFamily: "themed",
     topics: ["greek"],
@@ -138,6 +139,30 @@ test("themed family falls back when selected topics have no supported pack", () 
     puzzleSize: 6,
   });
 
-  assert.equal(run.options.puzzleFamily, "classic");
-  assert.equal(run.options.contentPackId, "auto");
+  assert.equal(run.options.puzzleFamily, "themed");
+  assert.ok(run.words.every((word) => word.contentPackIds.length > 0));
+});
+
+test("content catalog now covers a broader set of curated lanes", () => {
+  assert.ok(contentCatalog.length >= 24);
+});
+
+test("themed auto selection rotates across packs for different seeds", () => {
+  const titles = new Set(
+    ["2026-05-01", "2026-05-02", "2026-05-03", "2026-05-04", "2026-05-05", "2026-05-06"].map((seed) =>
+      buildPuzzleRun({ puzzleFamily: "themed", mode: "daily", seed, topics: ["myth", "ocean", "winter"] }).title,
+    ),
+  );
+
+  assert.ok(titles.size >= 2);
+});
+
+test("classic auto selection gains seeded featured-lane variety", () => {
+  const titles = new Set(
+    ["seed-a", "seed-b", "seed-c", "seed-d", "seed-e"].map((seed) =>
+      buildPuzzleRun({ puzzleFamily: "classic", seed, topics: ["city", "winter", "ocean"], puzzleSize: 7 }).title,
+    ),
+  );
+
+  assert.ok(titles.size >= 2);
 });
