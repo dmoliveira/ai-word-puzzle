@@ -5,6 +5,8 @@ export type BoardView = "crossword" | "quest";
 
 export type PuzzleMode = "custom" | "daily";
 
+export type PuzzleFamily = "classic" | "mini" | "themed";
+
 export type TopicId =
   | "myth"
   | "cosmos"
@@ -22,12 +24,23 @@ export type TopicId =
   | "story"
   | "greek";
 
+export type ContentPackId =
+  | "myth-beings"
+  | "myth-relics"
+  | "ocean-life"
+  | "ocean-sailing"
+  | "city-transit"
+  | "city-night"
+  | "winter-weather"
+  | "winter-cozy";
+
 export type PuzzleWord = {
   id: string;
   answer: string;
   normalized: string;
   topicId: TopicId;
   topicLabel: string;
+  contentPackIds: ContentPackId[];
   difficulty: ChallengeLevel;
   frequencyBand: "common" | "uncommon" | "rare";
   length: number;
@@ -72,7 +85,9 @@ export type PuzzleBoard = {
 export type PuzzleOptions = {
   mode: PuzzleMode;
   challenge: ChallengeLevel;
+  puzzleFamily: PuzzleFamily;
   topics: TopicId[];
+  contentPackId: ContentPackId | "auto";
   puzzleSize: number;
   boardView: BoardView;
   style: ThemeStyleId;
@@ -111,6 +126,14 @@ export type ThemeStyle = {
   className: string;
   greekConstellation: string[];
   motif: string;
+};
+
+export type ContentPack = {
+  id: ContentPackId;
+  topicId: TopicId;
+  label: string;
+  summary: string;
+  answers: string[];
 };
 
 export type PersistedRunState = {

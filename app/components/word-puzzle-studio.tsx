@@ -5,7 +5,7 @@ import type { PersistedRunState, ProgressSnapshot, PuzzleBoardCell, PuzzlePlacem
 import { buildPuzzleRun, createHintLadder, getDefaultDailySeed, sanitizeGuess } from "@/lib/puzzle-generator";
 import { buildDailyArchive, createEmptyProgress, readProgressSnapshot, recordRunProgress, writeProgressSnapshot } from "@/lib/progress";
 import { getThemeStyle, themeStyles } from "@/lib/themes";
-import { topicCatalog, wordBank } from "@/lib/word-bank";
+import { contentCatalog, topicCatalog, wordBank } from "@/lib/word-bank";
 
 const storageKey = "astra-lexa-session";
 
@@ -28,7 +28,9 @@ type QuestPathState = {
 const defaultOptions: PuzzleOptions = {
   mode: "custom",
   challenge: "quest",
+  puzzleFamily: "classic",
   topics: ["myth", "cosmos", "greek"],
+  contentPackId: "auto",
   puzzleSize: 7,
   boardView: "crossword",
   style: "alpha",
@@ -42,7 +44,9 @@ function normalizeOptions(input?: Partial<PuzzleOptions>): PuzzleOptions {
   return {
     mode: input?.mode ?? defaultOptions.mode,
     challenge: input?.challenge ?? defaultOptions.challenge,
+    puzzleFamily: input?.puzzleFamily ?? defaultOptions.puzzleFamily,
     topics: input?.topics?.length ? input.topics : defaultOptions.topics,
+    contentPackId: input?.contentPackId ?? defaultOptions.contentPackId,
     puzzleSize: input?.puzzleSize ?? defaultOptions.puzzleSize,
     boardView: input?.boardView ?? defaultOptions.boardView,
     style: input?.style ?? defaultOptions.style,
@@ -75,6 +79,8 @@ function readSharedOptionsFromUrl() {
     mode: mode === "daily" ? "daily" : "custom",
     seed: seed ?? "",
     challenge: (params.get("challenge") as PuzzleOptions["challenge"] | null) ?? undefined,
+    puzzleFamily: (params.get("puzzleFamily") as PuzzleOptions["puzzleFamily"] | null) ?? undefined,
+    contentPackId: (params.get("contentPackId") as PuzzleOptions["contentPackId"] | null) ?? undefined,
     style: (params.get("style") as PuzzleOptions["style"] | null) ?? undefined,
     clueDensity: Number(params.get("clueDensity") ?? "") as 1 | 2 | 3,
     puzzleSize: Number(params.get("puzzleSize") ?? "") || undefined,
@@ -93,6 +99,8 @@ function buildShareUrl(options: PuzzleOptions) {
   url.searchParams.set("mode", options.mode);
   url.searchParams.set("seed", shareSeed);
   url.searchParams.set("challenge", options.challenge);
+  url.searchParams.set("puzzleFamily", options.puzzleFamily);
+  url.searchParams.set("contentPackId", options.contentPackId);
   url.searchParams.set("boardView", options.boardView);
   url.searchParams.set("style", options.style);
   url.searchParams.set("puzzleSize", String(options.puzzleSize));
@@ -532,6 +540,8 @@ export function WordPuzzleStudio() {
   const monthlyDailyClearCount = countFinishedRunsSince(progress.history, 30, "daily");
   const weeklyFinishedRunCount = countFinishedRunsSince(progress.history, 7);
   const selectedTopicLabels = topicCatalog.filter((topic) => options.topics.includes(topic.id)).map((topic) => topic.label);
+  const availableContentPacks = contentCatalog.filter((pack) => options.topics.includes(pack.topicId));
+  const selectedContentPack = contentCatalog.find((pack) => pack.id === options.contentPackId) ?? null;
   const classicBoardCellClass = state.run.options.style === "classic" ? "border-slate-300/18 bg-slate-50/8 text-slate-50" : "border-white/10 bg-white/6 text-slate-100";
   const classicEmptyCellClass = state.run.options.style === "classic" ? "bg-slate-950/90 border border-slate-700/60" : "bg-transparent";
   const classicBoardShellClass = state.run.options.style === "classic" ? "border-slate-300/18 bg-[#111827]/90 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]" : "border-white/10 bg-slate-950/30 p-3";
@@ -637,9 +647,12 @@ export function WordPuzzleStudio() {
     setOptions((current) => {
       const hasTopic = current.topics.includes(topicId);
       const nextTopics = hasTopic ? current.topics.filter((topic) => topic !== topicId) : [...current.topics, topicId];
+      const normalizedTopics = nextTopics.length > 0 ? nextTopics : [topicId];
+      const contentPackStillValid = current.contentPackId === "auto" || contentCatalog.some((pack) => pack.id === current.contentPackId && normalizedTopics.includes(pack.topicId));
       return {
         ...current,
-        topics: nextTopics.length > 0 ? nextTopics : [topicId],
+        topics: normalizedTopics,
+        contentPackId: contentPackStillValid ? current.contentPackId : "auto",
       };
     });
   }
@@ -1421,14 +1434,15 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Current setup</div>
-                    <div className="mt-1 text-slate-200">{options.challenge} · {options.puzzleSize} words · {options.learningMode ? "learning on" : "learning off"} · {options.boardView}</div>
+                    <div className="mt-1 text-slate-200">{options.puzzleFamily} · {options.challenge} · {options.puzzleSize} words · {options.learningMode ? "learning on" : "learning off"} · {options.boardView}</div>
                     <div className="mt-2 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.18em] text-slate-400">
                       <span className="rounded-full border border-white/10 px-2.5 py-1">{options.mode}</span>
                       <span className="rounded-full border border-white/10 px-2.5 py-1">{options.topics.length} topics</span>
+                      <span className="rounded-full border border-white/10 px-2.5 py-1">{options.contentPackId === "auto" ? "auto pack" : selectedContentPack?.label ?? options.contentPackId}</span>
                       <span className="rounded-full border border-white/10 px-2.5 py-1">{options.seed.trim() ? `seeded` : `fresh seed`}</span>
                       <span className="rounded-full border border-white/10 px-2.5 py-1">{options.timerEnabled ? "timer on" : "timer off"}</span>
                     </div>
-                    <div className="mt-2 text-xs text-slate-400">{selectedTopicLabels.slice(0, 3).join(" • ")}{selectedTopicLabels.length > 3 ? ` +${selectedTopicLabels.length - 3}` : ""}{options.seed.trim() ? ` · ${options.seed}` : ""}</div>
+                    <div className="mt-2 text-xs text-slate-400">{selectedTopicLabels.slice(0, 3).join(" • ")}{selectedTopicLabels.length > 3 ? ` +${selectedTopicLabels.length - 3}` : ""}{selectedContentPack ? ` · ${selectedContentPack.label}` : ""}{options.seed.trim() ? ` · ${options.seed}` : ""}</div>
                   </div>
                   <button type="button" onClick={() => setBuilderAdvancedOpen((current) => !current)} className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-100">
                     {builderAdvancedOpen ? "Hide advanced" : "Show advanced"}
@@ -1447,6 +1461,28 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                     ))}
                   </div>
                 </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Puzzle family</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(["classic", "mini", "themed"] as const).map((family) => (
+                      <button key={family} type="button" onClick={() => updateOptions("puzzleFamily", family)} className={`rounded-2xl border px-3 py-2 text-sm capitalize transition ${options.puzzleFamily === family ? "accent-chip" : "border-white/10 bg-white/4 text-slate-200"}`}>
+                        {family}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <label className="space-y-2 text-sm text-slate-300">
+                  <span className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Content pack</span>
+                  <select value={options.contentPackId} onChange={(event) => updateOptions("contentPackId", event.target.value as PuzzleOptions["contentPackId"])} className="w-full rounded-2xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none">
+                    <option value="auto">Auto choose</option>
+                    {availableContentPacks.map((pack) => (
+                      <option key={pack.id} value={pack.id}>{pack.label}</option>
+                    ))}
+                  </select>
+                  <span className="text-xs text-slate-400">{selectedContentPack?.summary ?? (availableContentPacks.length > 0 ? "Pick a tighter content lane or let the generator choose for you." : "Select topics that support curated packs.")}</span>
+                </label>
 
                 <label className="space-y-2 text-sm text-slate-300">
                   <span className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Target count</span>

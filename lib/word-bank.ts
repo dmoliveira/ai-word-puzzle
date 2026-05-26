@@ -1,4 +1,4 @@
-import type { ChallengeLevel, PuzzleWord, TopicId, TopicPack } from "@/lib/game-types";
+import type { ChallengeLevel, ContentPack, ContentPackId, PuzzleWord, TopicId, TopicPack } from "@/lib/game-types";
 import { curatedEnglishLexicon } from "@/lib/lexicon-seeds";
 
 const greekMarks = [
@@ -168,6 +168,78 @@ const topicPacks: TopicPack[] = [
     hard: "philosophic harmonics mnemonic semiotic etymology iconography".split(" "),
   },
 ];
+
+const contentPacks: ContentPack[] = [
+  {
+    id: "myth-beings",
+    topicId: "myth",
+    label: "Mythic Beings",
+    summary: "Gods, monsters, and legendary figures.",
+    answers: ["titan", "hero", "nymph", "pegasus", "siren", "chimera", "hydra", "centaur", "gorgon", "atlas", "immortal", "titaness"],
+  },
+  {
+    id: "myth-relics",
+    topicId: "myth",
+    label: "Sacred Relics",
+    summary: "Temples, omens, and old ceremonial artifacts.",
+    answers: ["oracle", "temple", "olive", "shield", "laurel", "trident", "labyrinth", "prophecy", "ambrosia", "relic", "citadel", "amphora", "omen", "ritual", "talisman", "pantheon", "aegis"],
+  },
+  {
+    id: "ocean-life",
+    topicId: "ocean",
+    label: "Sea Life",
+    summary: "Creatures and living detail beneath the tide.",
+    answers: ["coral", "shell", "reef", "dolphin", "kelp", "seagull", "seabed", "barnacle", "lanternfish", "tidepool", "brackish", "undertow"],
+  },
+  {
+    id: "ocean-sailing",
+    topicId: "ocean",
+    label: "Sailing & Shore",
+    summary: "Harbors, navigation, craft, and coastlines.",
+    answers: ["harbor", "tide", "anchor", "marina", "current", "sailor", "vessel", "beacon", "compass", "trawler", "ferry", "estuary", "captaincy", "shoreline", "seaworthy", "semaphore"],
+  },
+  {
+    id: "city-transit",
+    topicId: "city",
+    label: "Transit Grid",
+    summary: "Subways, stations, and routes through the city.",
+    answers: ["avenue", "subway", "bridge", "signal", "plaza", "station", "tunnel", "courier", "traffic", "boulevard", "sidewalk", "overpass", "timetable", "underpass", "metroline"],
+  },
+  {
+    id: "city-night",
+    topicId: "city",
+    label: "Night Lights",
+    summary: "Rooftops, storefronts, and after-hours glow.",
+    answers: ["market", "skyline", "lantern", "cafe", "mural", "alley", "rooftop", "district", "balcony", "headlight", "afterhours", "storefront", "highrise", "warehouse", "cityscape", "courtyard", "brickwork"],
+  },
+  {
+    id: "winter-weather",
+    topicId: "winter",
+    label: "Frost & Snow",
+    summary: "Cold air, snowfall, and ice-bright weather.",
+    answers: ["winter", "frost", "icicle", "snowfall", "moonfrost", "snowdrift", "northwind", "moonsnow", "silverpine", "crystalline", "everfrost", "glimmersnow", "frostbound"],
+  },
+  {
+    id: "winter-cozy",
+    topicId: "winter",
+    label: "Cozy Hearth",
+    summary: "Warm shelter, fireside comfort, and winter calm.",
+    answers: ["pinewood", "blanket", "firelight", "cocoa", "mitten", "sled", "lantern", "chimney", "scarf", "hearthlight", "windowglow", "fireside", "weatherglass", "wintertide"],
+  },
+];
+
+const contentPackAnswerMap = new Map<string, ContentPackId[]>();
+
+for (const pack of contentPacks) {
+  for (const answer of pack.answers) {
+    const normalized = normalizeWord(answer);
+    contentPackAnswerMap.set(normalized, [...(contentPackAnswerMap.get(normalized) ?? []), pack.id]);
+  }
+}
+
+function getContentPackIds(answer: string) {
+  return contentPackAnswerMap.get(answer) ?? [];
+}
 
 const topicCompoundSpecs: Record<TopicId, { prefixes: string[]; suffixes: string[] }> = {
   myth: {
@@ -461,6 +533,7 @@ function createGeneralWords(level: ChallengeLevel, existingCount: number): Puzzl
       normalized: word,
       topicId: "story",
       topicLabel: "General English",
+      contentPackIds: [],
       difficulty: level,
       frequencyBand,
       length: word.length,
@@ -510,6 +583,7 @@ function createCuratedLexiconWords(startIndex: number): PuzzleWord[] {
         normalized: answer,
         topicId: "story",
         topicLabel: "General English",
+        contentPackIds: [],
         difficulty,
         frequencyBand: band,
         length: answer.length,
@@ -562,6 +636,7 @@ function createGeneratedCompoundWords(): PuzzleWord[] {
             normalized: answer,
             topicId: pack.id,
             topicLabel: pack.label,
+            contentPackIds: getContentPackIds(answer),
             difficulty,
             frequencyBand: difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare",
             length: answer.length,
@@ -585,6 +660,8 @@ function createGeneratedCompoundWords(): PuzzleWord[] {
 
 export const topicCatalog = topicPacks;
 
+export const contentCatalog = contentPacks;
+
 export const wordBank: PuzzleWord[] = (() => {
   const themed = topicPacks.flatMap((pack) => {
     const source = [
@@ -606,6 +683,7 @@ export const wordBank: PuzzleWord[] = (() => {
             normalized: answer,
             topicId: pack.id,
             topicLabel: pack.label,
+            contentPackIds: getContentPackIds(answer),
             difficulty,
             frequencyBand,
             length: answer.length,
@@ -652,6 +730,11 @@ export const wordBank: PuzzleWord[] = (() => {
 export function getWordsForTopics(topics: TopicId[]) {
   const topicSet = new Set(topics);
   return wordBank.filter((entry) => topicSet.has(entry.topicId));
+}
+
+export function getContentPacksForTopics(topics: TopicId[]) {
+  const topicSet = new Set(topics);
+  return contentCatalog.filter((pack) => topicSet.has(pack.topicId));
 }
 
 export function getRelatedWords(topicId: TopicId, challenge: ChallengeLevel) {

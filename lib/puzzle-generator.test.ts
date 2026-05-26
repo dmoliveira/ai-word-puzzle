@@ -90,3 +90,29 @@ test("quest runs keep rare entries limited", () => {
 
   assert.ok(run.words.filter((word) => word.frequencyBand === "rare").length <= 1);
 });
+
+test("mini family clamps puzzle size to a tighter run", () => {
+  const run = buildPuzzleRun({
+    puzzleFamily: "mini",
+    puzzleSize: 9,
+    topics: ["city", "winter"],
+  });
+
+  assert.equal(run.options.puzzleFamily, "mini");
+  assert.equal(run.options.puzzleSize, 6);
+  assert.ok(run.words.every((word) => word.length <= 8));
+});
+
+test("themed family keeps answers inside the selected content pack", () => {
+  const run = buildPuzzleRun({
+    puzzleFamily: "themed",
+    contentPackId: "ocean-life",
+    topics: ["ocean"],
+    puzzleSize: 6,
+    challenge: "quest",
+  });
+
+  assert.equal(run.options.contentPackId, "ocean-life");
+  assert.ok(run.words.length >= 5);
+  assert.ok(run.words.every((word) => word.contentPackIds.includes("ocean-life")));
+});

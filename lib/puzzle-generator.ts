@@ -1,8 +1,10 @@
 import type {
   ChallengeLevel,
+  ContentPack,
   PuzzleBoard,
   PuzzleBoardCell,
   PuzzleDirection,
+  PuzzleFamily,
   PuzzleMode,
   PuzzleOptions,
   PuzzlePlacement,
@@ -11,12 +13,18 @@ import type {
   TopicId,
 } from "@/lib/game-types";
 import { getThemeStyle } from "@/lib/themes";
-import { topicCatalog, wordBank } from "@/lib/word-bank";
+import { contentCatalog, topicCatalog, wordBank } from "@/lib/word-bank";
 
 const targetLengthRanges: Record<ChallengeLevel, [number, number]> = {
   breeze: [4, 8],
   quest: [5, 10],
   mythic: [6, 14],
+};
+
+const miniTargetLengthRanges: Record<ChallengeLevel, [number, number]> = {
+  breeze: [3, 6],
+  quest: [4, 7],
+  mythic: [4, 8],
 };
 
 const challengeOrder: ChallengeLevel[] = ["breeze", "quest", "mythic"];
@@ -29,6 +37,10 @@ const defaultTopics: TopicId[] = ["myth", "cosmos", "greek"];
 
 function normalizeTopics(topics: TopicId[]) {
   return topics.length > 0 ? topics : defaultTopics;
+}
+
+function clampPuzzleSizeForFamily(size: number, family: PuzzleFamily) {
+  return family === "mini" ? Math.max(4, Math.min(6, size)) : clampPuzzleSize(size);
 }
 
 function difficultyDistance(left: ChallengeLevel, right: ChallengeLevel) {
@@ -63,8 +75,8 @@ function getEntrySeedScore(entry: PuzzleWord, seed: string, turn: number) {
   return (hash % 1000) / 1000;
 }
 
-function scoreEntry(entry: PuzzleWord, options: PuzzleOptions, chosen: PuzzleWord[]) {
-  const [minLength, maxLength] = targetLengthRanges[options.challenge];
+function scoreEntry(entry: PuzzleWord, options: PuzzleOptions, chosen: PuzzleWord[], contentPack: ContentPack | null) {
+  const [minLength, maxLength] = options.puzzleFamily === "mini" ? miniTargetLengthRanges[options.challenge] : targetLengthRanges[options.challenge];
   const inRange = entry.length >= minLength && entry.length <= maxLength ? 4 : 0;
   const exactDifficulty = entry.difficulty === options.challenge ? 8 : 0;
   const nearDifficulty = exactDifficulty === 0 && difficultyDistance(entry.difficulty, options.challenge) === 1 ? 4 : -4;
@@ -73,6 +85,11 @@ function scoreEntry(entry: PuzzleWord, options: PuzzleOptions, chosen: PuzzleWor
   const repeatedLengthPenalty = chosen.filter((word) => word.length === entry.length).length * -2;
   const suffixPenalty = chosen.some((word) => word.answer.slice(-3) === entry.answer.slice(-3)) ? -3 : 0;
   const topicVarietyBonus = chosen.every((word) => word.topicId !== entry.topicId) ? 3 : 0;
+  const familyBonus = options.puzzleFamily === "mini"
+    ? entry.length <= maxLength ? 6 : -10
+    : options.puzzleFamily === "themed" && contentPack && entry.contentPackIds.includes(contentPack.id)
+      ? 8
+      : 0;
 
   const frequencyBonus = entry.frequencyBand === "common" ? 2 : entry.frequencyBand === "uncommon" ? 1 : -1;
   const rareCount = chosen.filter((word) => word.frequencyBand === "rare").length;
@@ -92,7 +109,24 @@ function scoreEntry(entry: PuzzleWord, options: PuzzleOptions, chosen: PuzzleWor
             : 0
         : 0;
 
-  return inRange + exactDifficulty + nearDifficulty + topicBonus + repeatedInitialPenalty + repeatedLengthPenalty + suffixPenalty + topicVarietyBonus + frequencyBonus + fairnessPenalty - entry.weight;
+  return inRange + exactDifficulty + nearDifficulty + topicBonus + repeatedInitialPenalty + repeatedLengthPenalty + suffixPenalty + topicVarietyBonus + frequencyBonus + fairnessPenalty + familyBonus - entry.weight;
+}
+
+function resolveContentPack(options: PuzzleOptions, seed: string) {
+  if (options.contentPackId !== "auto") {
+    return contentCatalog.find((pack) => pack.id === options.contentPackId) ?? null;
+  }
+
+  if (options.puzzleFamily !== "themed") {
+    return null;
+  }
+
+  const candidates = contentCatalog.filter((pack) => options.topics.includes(pack.topicId));
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  return candidates[hashString(`${seed}:content-pack`) % candidates.length];
 }
 
 function getBoardSize(words: PuzzleWord[]) {
@@ -308,8 +342,10 @@ export function buildPuzzleRun(input: Partial<PuzzleOptions> = {}): PuzzleRun {
   const options: PuzzleOptions = {
     mode: input.mode ?? "custom",
     challenge: input.challenge ?? "quest",
+    puzzleFamily: input.puzzleFamily ?? "classic",
     topics: normalizeTopics(input.topics ?? defaultTopics),
-    puzzleSize: clampPuzzleSize(input.puzzleSize ?? 7),
+    contentPackId: input.contentPackId ?? "auto",
+    puzzleSize: clampPuzzleSizeForFamily(input.puzzleSize ?? 7, input.puzzleFamily ?? "classic"),
     boardView: input.boardView ?? "crossword",
     style: input.style ?? "alpha",
     clueDensity: input.clueDensity ?? 2,
@@ -323,9 +359,14 @@ export function buildPuzzleRun(input: Partial<PuzzleOptions> = {}): PuzzleRun {
   }
 
   const resolvedSeed = resolveModeSeed(options.mode, options.seed);
+  const resolvedContentPack = resolveContentPack(options, resolvedSeed);
 
   const topicSet = new Set(options.topics);
   const candidates = wordBank.filter((entry) => {
+    if (resolvedContentPack) {
+      return entry.contentPackIds.includes(resolvedContentPack.id) && difficultyDistance(entry.difficulty, options.challenge) <= 1;
+    }
+
     if (topicSet.has(entry.topicId)) {
       return true;
     }
@@ -343,7 +384,7 @@ export function buildPuzzleRun(input: Partial<PuzzleOptions> = {}): PuzzleRun {
   while (chosen.length < options.puzzleSize) {
     const ranked = candidates
       .filter((entry) => !used.has(entry.id))
-      .map((entry) => ({ entry, score: scoreEntry(entry, options, chosen) + getEntrySeedScore(entry, resolvedSeed, chosen.length) }))
+      .map((entry) => ({ entry, score: scoreEntry(entry, options, chosen, resolvedContentPack) + getEntrySeedScore(entry, resolvedSeed, chosen.length) }))
       .sort((left, right) => right.score - left.score || left.entry.answer.localeCompare(right.entry.answer));
 
     const pickWindow = Math.min(6, ranked.length);
@@ -362,10 +403,10 @@ export function buildPuzzleRun(input: Partial<PuzzleOptions> = {}): PuzzleRun {
   const placedWordIds = new Set(board.placements.map((placement) => placement.wordId));
   const placedWords = chosen.filter((word) => placedWordIds.has(word.id));
   const theme = getThemeStyle(options.style);
-  const labelTopic = topicCatalog.find((topic) => topic.id === options.topics[0])?.label ?? "Word Puzzle";
+  const labelTopic = resolvedContentPack?.label ?? topicCatalog.find((topic) => topic.id === options.topics[0])?.label ?? "Word Puzzle";
 
   return {
-    id: `${hashString(`${resolvedSeed}:${options.challenge}:${options.topics.join(",")}:${options.puzzleSize}`)}`,
+    id: `${hashString(`${resolvedSeed}:${options.challenge}:${options.puzzleFamily}:${options.contentPackId}:${options.topics.join(",")}:${options.puzzleSize}`)}`,
     createdAt: new Date().toISOString(),
     seed: resolvedSeed,
     options,
