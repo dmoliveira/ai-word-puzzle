@@ -563,6 +563,13 @@ export function WordPuzzleStudio() {
   const progressRingCircumference = 2 * Math.PI * 42;
   const progressRingOffset = progressRingCircumference - (progressRingCircumference * progressPercent) / 100;
   const dailyRewardPercent = Math.min(100, (dailyClearCount % 7) * (100 / 7));
+  const secondaryActionClass = "inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/4 px-4 py-2.5 text-sm font-medium text-slate-100 transition hover:border-white/20";
+  const secondaryPillClass = "inline-flex items-center justify-center rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm font-medium text-slate-100 transition hover:border-white/20";
+  const compactPillClass = "inline-flex items-center justify-center rounded-full border border-white/10 bg-white/4 px-3.5 py-2 text-sm font-medium text-slate-100 transition hover:border-white/20";
+  const boardCellSizeClass = "size-[clamp(1.9rem,8.2vw,2.45rem)] rounded-md text-xs sm:size-[clamp(2.3rem,6.8vw,2.8rem)] sm:text-sm lg:size-[3.15rem] lg:text-base xl:size-[3.35rem]";
+  const familyLabel = options.puzzleFamily === "classic" ? "classic mix" : options.puzzleFamily === "mini" ? "mini run" : "themed run";
+  const difficultyLabel = options.challenge === "breeze" ? "breeze" : options.challenge === "quest" ? "standard" : "mythic";
+  const boardModeLabel = options.boardView === "quest" ? "trace path" : "crossword";
   const archiveRailClass = rightSidebarOpen
     ? activePlay
       ? "opacity-70 xl:opacity-75"
@@ -1308,9 +1315,9 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 </div>
                 <nav className="flex flex-wrap gap-2 text-sm text-slate-300">
                   <button type="button" onClick={() => jumpToStudioSection("board")} className="rounded-full border border-fuchsia-400/30 bg-fuchsia-500/10 px-4 py-2 text-fuchsia-100">Play</button>
-                  <button type="button" onClick={startTodayDailyRun} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 transition hover:border-white/20 hover:text-white">Daily</button>
-                  <button type="button" onClick={() => jumpToStudioSection("archive")} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 transition hover:border-white/20 hover:text-white">History</button>
-                  <button type="button" onClick={() => setLeftSidebarOpen((current) => !current)} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 transition hover:border-white/20 hover:text-white">New Quest</button>
+                  <button type="button" onClick={startTodayDailyRun} className={secondaryPillClass}>Daily</button>
+                  <button type="button" onClick={() => jumpToStudioSection("archive")} className={secondaryPillClass}>History</button>
+                  <button type="button" onClick={() => setLeftSidebarOpen((current) => !current)} className={secondaryPillClass}>Open Setup</button>
                 </nav>
               </div>
 
@@ -1384,10 +1391,10 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => setLeftSidebarOpen((current) => !current)} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100 transition hover:border-white/20">
+            <button type="button" onClick={() => setLeftSidebarOpen((current) => !current)} className={secondaryActionClass}>
               {leftSidebarOpen ? "Hide setup" : "Tune setup"}
             </button>
-            <button type="button" onClick={() => startNewRun()} disabled={isStarting} className="accent-chip rounded-full px-4 py-2 text-sm font-semibold disabled:opacity-60">
+            <button type="button" onClick={() => startNewRun()} disabled={isStarting} className="accent-chip inline-flex items-center justify-center rounded-2xl px-4 py-2.5 text-sm font-semibold disabled:opacity-60">
               {isStarting ? "Starting..." : "Fresh run"}
             </button>
           </div>
@@ -1396,15 +1403,18 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
         <section className={`glass-card rounded-[2rem] p-4 sm:p-5 ${leftSidebarOpen ? "block" : "hidden"}`}>
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
-              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Quest setup</div>
+              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Puzzle setup</div>
               <h2 className="mt-1 text-lg font-semibold text-white">Build a new puzzle</h2>
-              <p className="mt-1 text-sm text-slate-400">Choose a quick run style, then fine-tune only if you want extra control.</p>
+              <p className="mt-1 text-sm text-slate-400">Choose a quick run style, then fine-tune the next puzzle before you start it.</p>
             </div>
-            <button data-testid="toggle-left-panel" type="button" aria-expanded={leftSidebarOpen} aria-controls="studio-setup-rail" aria-label={leftSidebarOpen ? "Collapse setup rail" : "Expand setup rail"} onClick={() => setLeftSidebarOpen((current) => !current)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs text-slate-200">
+            <button data-testid="toggle-left-panel" type="button" aria-expanded={leftSidebarOpen} aria-controls="studio-setup-rail" aria-label={leftSidebarOpen ? "Collapse setup rail" : "Expand setup rail"} onClick={() => setLeftSidebarOpen((current) => !current)} className={compactPillClass}>
               Collapse setup
             </button>
           </div>
           <div id="studio-setup-rail" className="space-y-5">
+              <div className="rounded-2xl border border-dashed border-white/10 bg-slate-950/35 px-4 py-3 text-sm text-slate-300">
+                Most selections apply to the <span className="font-medium text-white">next run</span>. <span className="font-medium text-white">Board interaction</span> and <span className="font-medium text-white">Learning mode</span> update the current puzzle immediately.
+              </div>
               <div className="space-y-2">
                 <label className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Mode</label>
                 <div className="grid grid-cols-2 gap-2">
@@ -1448,7 +1458,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Current setup</div>
-                    <div className="mt-1 text-slate-200">{options.puzzleFamily} · {options.challenge} · {options.puzzleSize} words · {options.learningMode ? "learning on" : "learning off"} · {options.boardView}</div>
+                    <div className="mt-1 text-slate-200">{familyLabel} · {difficultyLabel} · {options.puzzleSize} words · {options.learningMode ? "learning on" : "learning off"} · {boardModeLabel}</div>
                     <div className="mt-2 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.18em] text-slate-400">
                       <span className="rounded-full border border-white/10 px-2.5 py-1">{options.mode}</span>
                       <span className="rounded-full border border-white/10 px-2.5 py-1">{options.topics.length} topics</span>
@@ -1466,7 +1476,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
 
               <div className={`${builderAdvancedOpen ? "grid" : "hidden"} gap-4`}>
                 <div className="space-y-2">
-                  <label className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Challenge</label>
+                  <label className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Difficulty</label>
                   <div className="grid grid-cols-3 gap-2">
                     {(["breeze", "quest", "mythic"] as const).map((level) => (
                       <button key={level} type="button" onClick={() => updateOptions("challenge", level)} className={`rounded-2xl border px-3 py-2 text-sm capitalize transition ${options.challenge === level ? "accent-chip" : "border-white/10 bg-white/4 text-slate-200"}`}>
@@ -1477,25 +1487,26 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Puzzle family</label>
+                  <label className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Quest type</label>
                   <div className="grid grid-cols-3 gap-2">
                     {(["classic", "mini", "themed"] as const).map((family) => (
                       <button key={family} type="button" onClick={() => updateOptions("puzzleFamily", family)} className={`rounded-2xl border px-3 py-2 text-sm capitalize transition ${options.puzzleFamily === family ? "accent-chip" : "border-white/10 bg-white/4 text-slate-200"}`}>
-                        {family}
+                        {family === "classic" ? "Classic" : family === "mini" ? "Mini" : "Themed"}
                       </button>
                     ))}
                   </div>
+                  <div className="text-xs text-slate-400">Classic mixes broader words, Mini makes a tighter board, and Themed locks onto a curated content lane.</div>
                 </div>
 
                 <label className="space-y-2 text-sm text-slate-300">
-                  <span className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Content pack</span>
+                  <span className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Themed content lane</span>
                   <select disabled={options.puzzleFamily !== "themed"} value={options.contentPackId} onChange={(event) => updateOptions("contentPackId", event.target.value as PuzzleOptions["contentPackId"])} className="w-full rounded-2xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none disabled:cursor-not-allowed disabled:opacity-50">
                     <option value="auto">Auto choose</option>
                     {availableContentPacks.map((pack) => (
                       <option key={pack.id} value={pack.id}>{pack.label}</option>
                     ))}
                   </select>
-                  <span className="text-xs text-slate-400">{options.puzzleFamily !== "themed" ? "Content packs are used by themed runs." : selectedContentPack?.summary ?? (availableContentPacks.length > 0 ? "Pick a tighter content lane or let the generator choose for you." : "Select topics that support curated packs.")}</span>
+                  <span className="text-xs text-slate-400">{options.puzzleFamily !== "themed" ? "Themed content lanes unlock when Quest type is set to Themed." : selectedContentPack?.summary ?? (availableContentPacks.length > 0 ? "Pick a tighter content lane or let the generator choose for you." : "Select topics that support curated packs.")}</span>
                 </label>
 
                 <label className="space-y-2 text-sm text-slate-300">
@@ -1523,10 +1534,10 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 </label>
 
                 <label className="space-y-2 text-sm text-slate-300">
-                  <span className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Board mode</span>
+                  <span className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Board interaction</span>
                   <select aria-label="Board mode" value={options.boardView} onChange={(event) => updateOptions("boardView", event.target.value as PuzzleOptions["boardView"])} className="w-full rounded-2xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none">
                     <option value="crossword">Crossword</option>
-                    <option value="quest">Quest View</option>
+                    <option value="quest">Trace path</option>
                   </select>
                 </label>
 
@@ -1548,15 +1559,15 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
 
               <div className="space-y-3">
                 <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Quick start</div>
-              <button type="button" onClick={() => startNewRun()} disabled={isStarting} className="accent-chip w-full rounded-2xl px-4 py-3 text-sm font-semibold disabled:opacity-60">
+              <button type="button" onClick={() => startNewRun()} disabled={isStarting} className="accent-chip inline-flex w-full items-center justify-center rounded-2xl px-4 py-3 text-sm font-semibold disabled:opacity-60">
                 {isStarting ? "Starting..." : "Start Fresh Run"}
               </button>
 
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
-                <button type="button" onClick={startTodayDailyRun} className="rounded-2xl border border-white/10 bg-white/4 px-4 py-3 text-sm text-slate-100 transition hover:border-white/20">
+                <button type="button" onClick={startTodayDailyRun} className={secondaryActionClass}>
                   Play today&apos;s daily
                 </button>
-                <button type="button" onClick={startRandomCustomRun} className="rounded-2xl border border-white/10 bg-white/4 px-4 py-3 text-sm text-slate-100 transition hover:border-white/20">
+                <button type="button" onClick={startRandomCustomRun} className={secondaryActionClass}>
                   Spin random custom
                 </button>
               </div>
@@ -1566,7 +1577,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
           </div>
         </section>
 
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.65fr)_22rem]">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.9fr)_21rem]">
           <section className="space-y-6">
             <div className="glass-card rounded-[2rem] p-5 sm:p-6">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -1583,13 +1594,13 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 <div className="space-y-3 lg:max-w-md lg:text-right">
                   <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Run controls</div>
                   <div className="flex flex-wrap gap-2 lg:justify-end">
-                    <button type="button" onClick={togglePause} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">{state.paused ? "Resume" : "Pause"}</button>
-                    <button type="button" onClick={() => startNewRun(state.run.options)} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">Restart</button>
+                    <button type="button" onClick={togglePause} className={secondaryPillClass}>{state.paused ? "Resume" : "Pause"}</button>
+                    <button type="button" onClick={() => startNewRun(state.run.options)} className={secondaryPillClass}>Restart</button>
                   </div>
                   <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Review tools</div>
                   <div className="flex flex-wrap gap-2 lg:justify-end">
-                    <button type="button" onClick={confirmRevealWord} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">Review Word</button>
-                    <button type="button" onClick={confirmRevealPuzzle} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">Review Puzzle</button>
+                    <button type="button" onClick={confirmRevealWord} className={secondaryPillClass}>Review Word</button>
+                    <button type="button" onClick={confirmRevealPuzzle} className={secondaryPillClass}>Review Puzzle</button>
                   </div>
                 </div>
               </div>
@@ -1645,7 +1656,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                           const selectedQuestCell = questPath.cells.includes(key);
 
                           if (!cell && !isQuestView) {
-                            return <div key={key} className={`size-9 rounded-md sm:size-10 ${classicEmptyCellClass}`} />;
+                            return <div key={key} className={`${boardCellSizeClass} ${classicEmptyCellClass}`} />;
                           }
 
                           const displayLetter = cell
@@ -1702,7 +1713,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                                   handleBoardCellKeyDown(event, cell);
                                 }
                               }}
-                              className={`relative size-9 rounded-md border text-sm font-semibold uppercase transition sm:size-10 ${selectedQuestCell ? "border-cyan-300/55 bg-cyan-400/18 text-white" : buttonClass} ${solvedCell ? "shadow-[0_0_18px_rgba(255,255,255,0.06)]" : ""} ${cell && boardFocusKey === key ? "ring-2 ring-white/55" : ""}`}
+                              className={`relative border font-semibold uppercase transition ${boardCellSizeClass} ${selectedQuestCell ? "border-cyan-300/55 bg-cyan-400/18 text-white" : buttonClass} ${solvedCell ? "shadow-[0_0_18px_rgba(255,255,255,0.06)]" : ""} ${cell && boardFocusKey === key ? "ring-2 ring-white/55" : ""}`}
                             >
                               {!isQuestView && cell?.clueNumbers[0] ? <span className="absolute left-1 top-0.5 text-[9px] font-medium text-slate-400">{cell.clueNumbers[0]}</span> : null}
                               <span>{displayLetter}</span>
