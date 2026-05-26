@@ -40,14 +40,28 @@ const defaultOptions: PuzzleOptions = {
   seed: "",
 };
 
+function clampBuilderPuzzleSize(size: number, family: PuzzleOptions["puzzleFamily"]) {
+  return family === "mini" ? Math.max(4, Math.min(6, size)) : Math.max(4, Math.min(12, size));
+}
+
 function normalizeOptions(input?: Partial<PuzzleOptions>): PuzzleOptions {
+  const puzzleFamily = input?.puzzleFamily ?? defaultOptions.puzzleFamily;
+  const topics = input?.topics?.length ? input.topics : defaultOptions.topics;
+  const availablePackIds = contentCatalog.filter((pack) => topics.includes(pack.topicId)).map((pack) => pack.id);
+  const requestedContentPackId = input?.contentPackId ?? defaultOptions.contentPackId;
+  const contentPackId = puzzleFamily !== "themed"
+    ? "auto"
+    : requestedContentPackId === "auto" || availablePackIds.includes(requestedContentPackId)
+      ? requestedContentPackId
+      : "auto";
+
   return {
     mode: input?.mode ?? defaultOptions.mode,
     challenge: input?.challenge ?? defaultOptions.challenge,
-    puzzleFamily: input?.puzzleFamily ?? defaultOptions.puzzleFamily,
-    topics: input?.topics?.length ? input.topics : defaultOptions.topics,
-    contentPackId: input?.contentPackId ?? defaultOptions.contentPackId,
-    puzzleSize: input?.puzzleSize ?? defaultOptions.puzzleSize,
+    puzzleFamily,
+    topics,
+    contentPackId,
+    puzzleSize: clampBuilderPuzzleSize(input?.puzzleSize ?? defaultOptions.puzzleSize, puzzleFamily),
     boardView: input?.boardView ?? defaultOptions.boardView,
     style: input?.style ?? defaultOptions.style,
     clueDensity: input?.clueDensity ?? defaultOptions.clueDensity,
@@ -541,7 +555,7 @@ export function WordPuzzleStudio() {
   const weeklyFinishedRunCount = countFinishedRunsSince(progress.history, 7);
   const selectedTopicLabels = topicCatalog.filter((topic) => options.topics.includes(topic.id)).map((topic) => topic.label);
   const availableContentPacks = contentCatalog.filter((pack) => options.topics.includes(pack.topicId));
-  const selectedContentPack = contentCatalog.find((pack) => pack.id === options.contentPackId) ?? null;
+  const selectedContentPack = options.contentPackId === "auto" ? null : contentCatalog.find((pack) => pack.id === options.contentPackId) ?? null;
   const classicBoardCellClass = state.run.options.style === "classic" ? "border-slate-300/18 bg-slate-50/8 text-slate-50" : "border-white/10 bg-white/6 text-slate-100";
   const classicEmptyCellClass = state.run.options.style === "classic" ? "bg-slate-950/90 border border-slate-700/60" : "bg-transparent";
   const classicBoardShellClass = state.run.options.style === "classic" ? "border-slate-300/18 bg-[#111827]/90 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]" : "border-white/10 bg-slate-950/30 p-3";
@@ -581,7 +595,7 @@ export function WordPuzzleStudio() {
   }
 
   function updateOptions<K extends keyof PuzzleOptions>(key: K, value: PuzzleOptions[K]) {
-    setOptions((current) => ({ ...current, [key]: value }));
+    setOptions((current) => normalizeOptions({ ...current, [key]: value }));
 
     if (key === "learningMode" || key === "boardView") {
       setState((current) => {
@@ -1438,11 +1452,11 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                     <div className="mt-2 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.18em] text-slate-400">
                       <span className="rounded-full border border-white/10 px-2.5 py-1">{options.mode}</span>
                       <span className="rounded-full border border-white/10 px-2.5 py-1">{options.topics.length} topics</span>
-                      <span className="rounded-full border border-white/10 px-2.5 py-1">{options.contentPackId === "auto" ? "auto pack" : selectedContentPack?.label ?? options.contentPackId}</span>
+                      {options.puzzleFamily === "themed" ? <span className="rounded-full border border-white/10 px-2.5 py-1">{options.contentPackId === "auto" ? "auto pack" : selectedContentPack?.label ?? options.contentPackId}</span> : null}
                       <span className="rounded-full border border-white/10 px-2.5 py-1">{options.seed.trim() ? `seeded` : `fresh seed`}</span>
                       <span className="rounded-full border border-white/10 px-2.5 py-1">{options.timerEnabled ? "timer on" : "timer off"}</span>
                     </div>
-                    <div className="mt-2 text-xs text-slate-400">{selectedTopicLabels.slice(0, 3).join(" • ")}{selectedTopicLabels.length > 3 ? ` +${selectedTopicLabels.length - 3}` : ""}{selectedContentPack ? ` · ${selectedContentPack.label}` : ""}{options.seed.trim() ? ` · ${options.seed}` : ""}</div>
+                    <div className="mt-2 text-xs text-slate-400">{selectedTopicLabels.slice(0, 3).join(" • ")}{selectedTopicLabels.length > 3 ? ` +${selectedTopicLabels.length - 3}` : ""}{options.puzzleFamily === "themed" && selectedContentPack ? ` · ${selectedContentPack.label}` : ""}{options.seed.trim() ? ` · ${options.seed}` : ""}</div>
                   </div>
                   <button type="button" onClick={() => setBuilderAdvancedOpen((current) => !current)} className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-100">
                     {builderAdvancedOpen ? "Hide advanced" : "Show advanced"}
@@ -1475,19 +1489,19 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
 
                 <label className="space-y-2 text-sm text-slate-300">
                   <span className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Content pack</span>
-                  <select value={options.contentPackId} onChange={(event) => updateOptions("contentPackId", event.target.value as PuzzleOptions["contentPackId"])} className="w-full rounded-2xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none">
+                  <select disabled={options.puzzleFamily !== "themed"} value={options.contentPackId} onChange={(event) => updateOptions("contentPackId", event.target.value as PuzzleOptions["contentPackId"])} className="w-full rounded-2xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none disabled:cursor-not-allowed disabled:opacity-50">
                     <option value="auto">Auto choose</option>
                     {availableContentPacks.map((pack) => (
                       <option key={pack.id} value={pack.id}>{pack.label}</option>
                     ))}
                   </select>
-                  <span className="text-xs text-slate-400">{selectedContentPack?.summary ?? (availableContentPacks.length > 0 ? "Pick a tighter content lane or let the generator choose for you." : "Select topics that support curated packs.")}</span>
+                  <span className="text-xs text-slate-400">{options.puzzleFamily !== "themed" ? "Content packs are used by themed runs." : selectedContentPack?.summary ?? (availableContentPacks.length > 0 ? "Pick a tighter content lane or let the generator choose for you." : "Select topics that support curated packs.")}</span>
                 </label>
 
                 <label className="space-y-2 text-sm text-slate-300">
                   <span className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Target count</span>
-                  <input type="range" min={4} max={12} value={options.puzzleSize} onChange={(event) => updateOptions("puzzleSize", Number(event.target.value))} className="w-full" />
-                  <span>{options.puzzleSize} words</span>
+                  <input type="range" min={4} max={options.puzzleFamily === "mini" ? 6 : 12} value={options.puzzleSize} onChange={(event) => updateOptions("puzzleSize", Number(event.target.value))} className="w-full" />
+                  <span>{options.puzzleSize} words{options.puzzleFamily === "mini" ? " max 6" : ""}</span>
                 </label>
 
                 <label className="space-y-2 text-sm text-slate-300">

@@ -116,3 +116,28 @@ test("themed family keeps answers inside the selected content pack", () => {
   assert.ok(run.words.length >= 5);
   assert.ok(run.words.every((word) => word.contentPackIds.includes("ocean-life")));
 });
+
+test("non-themed families ignore explicit content pack filters", () => {
+  const run = buildPuzzleRun({
+    puzzleFamily: "classic",
+    contentPackId: "ocean-life",
+    topics: ["ocean", "city"],
+    puzzleSize: 6,
+  });
+
+  assert.equal(run.options.puzzleFamily, "classic");
+  assert.equal(run.options.contentPackId, "auto");
+  assert.ok(run.words.some((word) => word.topicId === "city" || word.contentPackIds.length === 0));
+});
+
+test("themed family falls back when selected topics have no supported pack", () => {
+  const run = buildPuzzleRun({
+    puzzleFamily: "themed",
+    topics: ["greek"],
+    contentPackId: "auto",
+    puzzleSize: 6,
+  });
+
+  assert.equal(run.options.puzzleFamily, "classic");
+  assert.equal(run.options.contentPackId, "auto");
+});

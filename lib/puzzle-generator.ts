@@ -113,12 +113,12 @@ function scoreEntry(entry: PuzzleWord, options: PuzzleOptions, chosen: PuzzleWor
 }
 
 function resolveContentPack(options: PuzzleOptions, seed: string) {
-  if (options.contentPackId !== "auto") {
-    return contentCatalog.find((pack) => pack.id === options.contentPackId) ?? null;
-  }
-
   if (options.puzzleFamily !== "themed") {
     return null;
+  }
+
+  if (options.contentPackId !== "auto") {
+    return contentCatalog.find((pack) => pack.id === options.contentPackId) ?? null;
   }
 
   const candidates = contentCatalog.filter((pack) => options.topics.includes(pack.topicId));
@@ -358,8 +358,20 @@ export function buildPuzzleRun(input: Partial<PuzzleOptions> = {}): PuzzleRun {
     options.seed = getDailySeedValue(options.seed);
   }
 
+  if (options.puzzleFamily !== "themed") {
+    options.contentPackId = "auto";
+  }
+
   const resolvedSeed = resolveModeSeed(options.mode, options.seed);
-  const resolvedContentPack = resolveContentPack(options, resolvedSeed);
+  let resolvedContentPack = resolveContentPack(options, resolvedSeed);
+
+  if (options.puzzleFamily === "themed" && !resolvedContentPack) {
+    options.puzzleFamily = "classic";
+    options.contentPackId = "auto";
+    options.puzzleSize = clampPuzzleSizeForFamily(options.puzzleSize, options.puzzleFamily);
+  }
+
+  resolvedContentPack = resolveContentPack(options, resolvedSeed);
 
   const topicSet = new Set(options.topics);
   const candidates = wordBank.filter((entry) => {
