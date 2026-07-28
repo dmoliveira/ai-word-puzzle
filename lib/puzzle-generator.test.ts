@@ -1,194 +1,216 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildPuzzleRun, createHintLadder, sanitizeGuess } from "@/lib/puzzle-generator";
-import { contentCatalog } from "@/lib/word-bank";
+import type { PuzzleOptions, PuzzleRun } from "@/lib/game-types";
+import { crosswordContentPackIds, crosswordTopicIds, getEditorialClueCount } from "@/lib/clue-catalog";
+import { buildPuzzleRun, createHintLadder, PuzzleGenerationError, sanitizeGuess, scoreDifficultyMatch } from "@/lib/puzzle-generator";
+import { contentCatalog, topicCatalog, wordBank } from "@/lib/word-bank";
 
-test("buildPuzzleRun returns requested puzzle size when enough candidates exist", () => {
-  const run = buildPuzzleRun({
-    challenge: "quest",
-    topics: ["cosmos", "myth", "greek"],
-    puzzleSize: 8,
-    clueDensity: 2,
-    style: "alpha",
-    timerEnabled: true,
+const challenges = ["breeze", "quest", "mythic"] as const;
+const matrixSeedCount = Number(process.env.GENERATOR_MATRIX_SEEDS ?? 4);
+
+function getPlacementCells(run: PuzzleRun, wordId: string) {
+  const word = run.words.find((candidate) => candidate.id === wordId)!;
+  const placement = run.board.placements.find((candidate) => candidate.wordId === wordId)!;
+  return Array.from({ length: word.length }, (_, index) => ({
+    row: placement.row + (placement.direction === "down" ? index : 0),
+    col: placement.col + (placement.direction === "across" ? index : 0),
+    letter: word.answer[index],
+  }));
+}
+
+function assertCrosswordInvariants(run: PuzzleRun) {
+  assert.equal(run.generatorVersion, 3);
+  assert.equal(run.words.length, run.options.puzzleSize);
+  assert.equal(run.board.placements.length, run.options.puzzleSize);
+  assert.equal(new Set(run.words.map((word) => word.normalized)).size, run.words.length);
+  assert.ok(run.words.every((word) => run.options.topics.includes(word.topicId)));
+  assert.ok(run.words.every((word) => word.qualityStatus === "approved" && word.clue));
+  for (const clueWord of run.words) {
+    const clueTokens = clueWord.clue!.toLowerCase().split(/[^a-z]+/);
+    assert.ok(run.words.every((targetWord) => !clueTokens.includes(targetWord.normalized)), "a clue must not name another answer in the run");
+  }
+  assert.ok(run.board.size <= 17);
+  assert.deepEqual(new Set(run.board.placements.map((placement) => placement.direction)), new Set(["across", "down"]));
+
+  const graph = new Map(run.words.map((word) => [word.id, new Set<string>()]));
+  for (const cell of run.board.cells) {
+    if (cell.wordIds.length > 1) {
+      const directions = cell.wordIds.map((wordId) => run.board.placements.find((placement) => placement.wordId === wordId)!.direction);
+      assert.equal(new Set(directions).size, directions.length, "crossing words must be perpendicular");
+      for (const left of cell.wordIds) {
+        for (const right of cell.wordIds) {
+          if (left !== right) {
+            graph.get(left)!.add(right);
+          }
+        }
+      }
+    }
+  }
+
+  const visited = new Set<string>();
+  const pending = [run.words[0].id];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (visited.has(current)) {
+      continue;
+    }
+    visited.add(current);
+    pending.push(...graph.get(current)!);
+  }
+  assert.equal(visited.size, run.words.length, "crossword placement graph must be connected");
+
+  for (const word of run.words) {
+    const cells = getPlacementCells(run, word.id);
+    assert.equal(cells.map((cell) => run.board.cells.find((boardCell) => boardCell.row === cell.row && boardCell.col === cell.col)?.solution).join(""), word.answer);
+  }
+}
+
+test("certified crossword matrix returns exact, connected, clue-safe boards", () => {
+  const topicSubsets = Array.from({ length: 15 }, (_, maskIndex) => {
+    const mask = maskIndex + 1;
+    return crosswordTopicIds.filter((_, index) => (mask & (1 << index)) !== 0);
   });
 
-  assert.equal(run.words.length, 8);
+  for (const topics of topicSubsets) {
+    for (const challenge of challenges) {
+      for (const puzzleSize of [4, 6, 8]) {
+        for (let seedIndex = 0; seedIndex < matrixSeedCount; seedIndex += 1) {
+          const run = buildPuzzleRun({
+            mode: "custom",
+            seed: `matrix-${topics.join("-")}-${challenge}-${puzzleSize}-${seedIndex}`,
+            topics: [...topics],
+            challenge,
+            puzzleSize,
+            boardView: "crossword",
+          });
+          assertCrosswordInvariants(run);
+        }
+      }
+    }
+  }
 });
 
-test("selected topics dominate generated puzzle", () => {
-  const run = buildPuzzleRun({
-    challenge: "breeze",
-    topics: ["ocean"],
-    puzzleSize: 6,
-    clueDensity: 2,
-    style: "nebula",
-    timerEnabled: false,
-  });
-
-  const oceanWords = run.words.filter((word) => word.topicId === "ocean").length;
-  assert.ok(oceanWords >= 4);
+test("each certified themed pack satisfies every crossword challenge and size", () => {
+  for (const contentPackId of crosswordContentPackIds) {
+    const pack = contentCatalog.find((candidate) => candidate.id === contentPackId)!;
+    for (const challenge of challenges) {
+      for (const puzzleSize of [4, 5, 6]) {
+        for (let seedIndex = 0; seedIndex < matrixSeedCount; seedIndex += 1) {
+          const run = buildPuzzleRun({
+            mode: "custom",
+            seed: `pack-${contentPackId}-${challenge}-${puzzleSize}-${seedIndex}`,
+            topics: [pack.topicId],
+            challenge,
+            puzzleFamily: "themed",
+            contentPackId,
+            puzzleSize,
+            boardView: "crossword",
+          });
+          assertCrosswordInvariants(run);
+          assert.ok(run.words.every((word) => word.topicId === pack.topicId && word.contentPackIds.includes(contentPackId)));
+        }
+      }
+    }
+  }
 });
 
-test("hint ladder reveals length and final answer", () => {
-  const run = buildPuzzleRun({ topics: ["greek"], puzzleSize: 4 });
+test("daily generation is deterministic across representative calendar seeds", () => {
+  for (const seed of ["2026-01-01", "2026-02-28", "2028-02-29", "2026-12-31"]) {
+    const options: Partial<PuzzleOptions> = { mode: "daily", seed, topics: ["myth", "cosmos", "greek"], puzzleSize: 7, boardView: "crossword" };
+    const left = buildPuzzleRun(options);
+    const right = buildPuzzleRun(options);
+
+    assert.equal(left.puzzleId, right.puzzleId);
+    assert.deepEqual(left.words.map((word) => word.id), right.words.map((word) => word.id));
+    assert.deepEqual(left.board, right.board);
+    assertCrosswordInvariants(left);
+  }
+});
+
+test("trace-path mode preserves the broad topic catalog with exact 14×14 boards", () => {
+  for (const topic of topicCatalog) {
+    const run = buildPuzzleRun({
+      mode: "custom",
+      seed: `trace-${topic.id}`,
+      topics: [topic.id],
+      puzzleSize: 6,
+      boardView: "quest",
+    });
+
+    assert.equal(run.words.length, 6);
+    assert.equal(run.board.placements.length, 6);
+    assert.equal(run.board.size, 14);
+    assert.equal(new Set(run.words.map((word) => word.normalized)).size, 6);
+    assert.ok(run.words.every((word) => word.topicId === topic.id));
+  }
+});
+
+test("every content pack can produce an exact themed trace run", () => {
+  for (const pack of contentCatalog) {
+    const puzzleSize = Math.min(12, pack.answers.length);
+    const run = buildPuzzleRun({
+      mode: "custom",
+      seed: `trace-pack-${pack.id}`,
+      topics: [pack.topicId],
+      puzzleFamily: "themed",
+      contentPackId: pack.id,
+      puzzleSize,
+      boardView: "quest",
+    });
+
+    assert.equal(run.words.length, puzzleSize);
+    assert.ok(run.words.every((word) => word.topicId === pack.topicId && word.contentPackIds.includes(pack.id)));
+  }
+});
+
+test("unsupported crossword options fail explicitly instead of mutating the request", () => {
+  assert.throws(
+    () => buildPuzzleRun({ topics: ["city"], boardView: "crossword", puzzleSize: 6 }),
+    (error: unknown) => error instanceof PuzzleGenerationError && error.code === "unsupported-content",
+  );
+  assert.throws(
+    () => buildPuzzleRun({ topics: ["myth"], boardView: "crossword", puzzleSize: 9 }),
+    (error: unknown) => error instanceof PuzzleGenerationError && error.code === "unsupported-content",
+  );
+  assert.throws(
+    () => buildPuzzleRun({ puzzleFamily: "themed", contentPackId: "ocean-life", topics: ["myth"], puzzleSize: 6 }),
+    (error: unknown) => error instanceof PuzzleGenerationError && error.code === "unsupported-content",
+  );
+});
+
+test("content-pack membership is scoped by owning topic", () => {
+  const signals = wordBank.filter((word) => word.normalized === "signal" && ["cosmos", "city", "invent"].includes(word.topicId));
+  assert.ok(signals.length >= 3);
+  for (const signal of signals) {
+    const packTopics = signal.contentPackIds.map((packId) => contentCatalog.find((pack) => pack.id === packId)!.topicId);
+    assert.ok(packTopics.every((topicId) => topicId === signal.topicId));
+  }
+});
+
+test("crossword catalog is editorial while broad trace content remains available", () => {
+  assert.equal(getEditorialClueCount(), 54);
+  assert.equal(new Set(wordBank.filter((word) => word.qualityStatus === "approved").map((word) => `${word.topicId}:${word.normalized}`)).size, 52, "two-letter Greek entries stay out of the playable bank");
+  assert.ok(wordBank.length >= 2_500, "trace mode retains the extended local lexicon");
+  assert.ok(wordBank.some((word) => word.source === "synthetic"));
+});
+
+test("exact challenge match scores above adjacent and distant entries", () => {
+  assert.ok(scoreDifficultyMatch("quest", "quest") > scoreDifficultyMatch("breeze", "quest"));
+  assert.ok(scoreDifficultyMatch("breeze", "quest") > scoreDifficultyMatch("breeze", "mythic"));
+});
+
+test("hints, clue copy, and theme copy keep the answer gated", () => {
+  const run = buildPuzzleRun({ topics: ["greek"], puzzleSize: 4, boardView: "crossword" });
   const hints = createHintLadder(run.words[0]);
   assert.equal(hints.length, 4);
   assert.match(hints[0], /letters/);
   assert.equal(hints[3], run.words[0].answer.toUpperCase());
-});
-
-test("theme blurb does not leak exact answer words", () => {
-  const run = buildPuzzleRun({ topics: ["garden", "wild"], puzzleSize: 5 });
   for (const word of run.words) {
     assert.equal(run.blurb.toLowerCase().includes(word.answer.toLowerCase()), false);
+    assert.equal(word.prompt, word.clue);
   }
 });
 
 test("sanitizeGuess strips punctuation and case", () => {
   assert.equal(sanitizeGuess(" Alpha-7! "), "alpha");
-});
-
-test("daily seeded runs are deterministic", () => {
-  const left = buildPuzzleRun({ mode: "daily", seed: "2026-04-22", topics: ["myth", "greek"], puzzleSize: 7 });
-  const right = buildPuzzleRun({ mode: "daily", seed: "2026-04-22", topics: ["myth", "greek"], puzzleSize: 7 });
-
-  assert.deepEqual(left.words.map((word) => word.answer), right.words.map((word) => word.answer));
-  assert.equal(left.seed, right.seed);
-});
-
-test("lexicon scales into the thousands", async () => {
-  const { wordBank } = await import("@/lib/word-bank");
-  assert.ok(wordBank.length >= 2500);
-});
-
-test("new topic packs participate in generation", () => {
-  const run = buildPuzzleRun({
-    topics: ["desert", "festival", "winter"],
-    puzzleSize: 7,
-    challenge: "quest",
-  });
-
-  assert.ok(run.words.some((word) => word.topicId === "desert" || word.topicId === "festival" || word.topicId === "winter"));
-});
-
-test("breeze runs avoid rare entries", () => {
-  const run = buildPuzzleRun({
-    challenge: "breeze",
-    topics: ["myth", "cosmos", "winter"],
-    puzzleSize: 8,
-  });
-
-  assert.equal(run.words.some((word) => word.frequencyBand === "rare"), false);
-});
-
-test("quest runs keep rare entries limited", () => {
-  const run = buildPuzzleRun({
-    challenge: "quest",
-    topics: ["myth", "cosmos", "desert"],
-    puzzleSize: 8,
-  });
-
-  assert.ok(run.words.filter((word) => word.frequencyBand === "rare").length <= 1);
-});
-
-test("mini family clamps puzzle size to a tighter run", () => {
-  const run = buildPuzzleRun({
-    puzzleFamily: "mini",
-    puzzleSize: 9,
-    topics: ["city", "winter"],
-  });
-
-  assert.equal(run.options.puzzleFamily, "mini");
-  assert.equal(run.options.puzzleSize, 6);
-  assert.ok(run.words.every((word) => word.length <= 8));
-});
-
-test("themed family keeps answers inside the selected content pack", () => {
-  const run = buildPuzzleRun({
-    puzzleFamily: "themed",
-    contentPackId: "ocean-life",
-    topics: ["ocean"],
-    puzzleSize: 6,
-    challenge: "quest",
-  });
-
-  assert.equal(run.options.contentPackId, "ocean-life");
-  assert.ok(run.words.length >= 5);
-  assert.ok(run.words.every((word) => word.contentPackIds.includes("ocean-life")));
-});
-
-test("non-themed families ignore explicit content pack filters", () => {
-  const run = buildPuzzleRun({
-    puzzleFamily: "classic",
-    contentPackId: "ocean-life",
-    topics: ["ocean", "city"],
-    puzzleSize: 6,
-  });
-
-  assert.equal(run.options.puzzleFamily, "classic");
-  assert.equal(run.options.contentPackId, "auto");
-  assert.ok(run.words.some((word) => word.topicId === "city" || word.contentPackIds.length === 0));
-});
-
-test("themed family stays themed when supported topics have curated packs", () => {
-  const run = buildPuzzleRun({
-    puzzleFamily: "themed",
-    topics: ["greek"],
-    contentPackId: "auto",
-    puzzleSize: 6,
-  });
-
-  assert.equal(run.options.puzzleFamily, "themed");
-  assert.ok(run.words.every((word) => word.contentPackIds.length > 0));
-});
-
-test("themed family falls back when explicit content pack conflicts with selected topics", () => {
-  const run = buildPuzzleRun({
-    puzzleFamily: "themed",
-    contentPackId: "ocean-life",
-    topics: ["city"],
-    puzzleSize: 6,
-  });
-
-  assert.equal(run.options.puzzleFamily, "classic");
-  assert.equal(run.options.contentPackId, "auto");
-});
-
-test("themed family falls back when a pack cannot satisfy requested challenge and size", () => {
-  const run = buildPuzzleRun({
-    puzzleFamily: "themed",
-    contentPackId: "wild-creatures",
-    topics: ["wild"],
-    challenge: "mythic",
-    puzzleSize: 6,
-  });
-
-  assert.equal(run.options.puzzleFamily, "classic");
-  assert.equal(run.options.contentPackId, "auto");
-  assert.ok(run.words.length >= 4);
-});
-
-test("content catalog now covers a broader set of curated lanes", () => {
-  assert.ok(contentCatalog.length >= 24);
-});
-
-test("themed auto selection rotates across packs for different seeds", () => {
-  const titles = new Set(
-    ["2026-05-01", "2026-05-02", "2026-05-03", "2026-05-04", "2026-05-05", "2026-05-06"].map((seed) =>
-      buildPuzzleRun({ puzzleFamily: "themed", mode: "daily", seed, topics: ["myth", "ocean", "winter"] }).title,
-    ),
-  );
-
-  assert.ok(titles.size >= 2);
-});
-
-test("classic auto selection gains seeded featured-lane variety", () => {
-  const titles = new Set(
-    ["seed-a", "seed-b", "seed-c", "seed-d", "seed-e"].map((seed) =>
-      buildPuzzleRun({ puzzleFamily: "classic", seed, topics: ["city", "winter", "ocean"], puzzleSize: 7 }).title,
-    ),
-  );
-
-  assert.ok(titles.size >= 2);
 });

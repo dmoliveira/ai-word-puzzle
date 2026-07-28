@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
+import { createSiteConfig } from "./lib/site-config";
 
-const repoBasePath = "/ai-word-puzzle";
-const isPagesBuild = process.env.GITHUB_ACTIONS === "true" || process.env.STATIC_EXPORT === "true";
+const { basePath } = createSiteConfig(process.env);
 
 const nextConfig: NextConfig = {
   output: "export",
@@ -9,8 +9,7 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: true,
   },
-  basePath: isPagesBuild ? repoBasePath : "",
-  assetPrefix: isPagesBuild ? `${repoBasePath}/` : undefined,
+  basePath,
 };
 
 export default nextConfig;

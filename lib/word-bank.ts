@@ -1,4 +1,5 @@
 import type { ChallengeLevel, ContentPack, ContentPackId, PuzzleWord, TopicId, TopicPack } from "@/lib/game-types";
+import { getEditorialClue } from "@/lib/clue-catalog";
 import { curatedEnglishLexicon } from "@/lib/lexicon-seeds";
 
 const greekMarks = [
@@ -387,12 +388,13 @@ const contentPackAnswerMap = new Map<string, ContentPackId[]>();
 for (const pack of contentPacks) {
   for (const answer of pack.answers) {
     const normalized = normalizeWord(answer);
-    contentPackAnswerMap.set(normalized, [...(contentPackAnswerMap.get(normalized) ?? []), pack.id]);
+    const key = `${pack.topicId}:${normalized}`;
+    contentPackAnswerMap.set(key, [...(contentPackAnswerMap.get(key) ?? []), pack.id]);
   }
 }
 
-function getContentPackIds(answer: string) {
-  return contentPackAnswerMap.get(answer) ?? [];
+function getContentPackIds(topicId: TopicId, answer: string) {
+  return contentPackAnswerMap.get(`${topicId}:${answer}`) ?? [];
 }
 
 const topicCompoundSpecs: Record<TopicId, { prefixes: string[]; suffixes: string[] }> = {
@@ -685,6 +687,9 @@ function createGeneralWords(level: ChallengeLevel, existingCount: number): Puzzl
       id: `general-${level}-${index}`,
       answer: word,
       normalized: word,
+      source: "general",
+      qualityStatus: "unreviewed",
+      clue: null,
       topicId: "story",
       topicLabel: "General English",
       contentPackIds: [],
@@ -735,6 +740,9 @@ function createCuratedLexiconWords(startIndex: number): PuzzleWord[] {
         id: `curated-${band}-${startIndex + bandIndex * 1000 + index}`,
         answer,
         normalized: answer,
+        source: "lexicon",
+        qualityStatus: "unreviewed",
+        clue: null,
         topicId: "story",
         topicLabel: "General English",
         contentPackIds: [],
@@ -788,9 +796,12 @@ function createGeneratedCompoundWords(): PuzzleWord[] {
             id: `${pack.id}-generated-${prefixIndex}-${suffixIndex}-${index}`,
             answer,
             normalized: answer,
+            source: "synthetic",
+            qualityStatus: "unreviewed",
+            clue: null,
             topicId: pack.id,
             topicLabel: pack.label,
-            contentPackIds: getContentPackIds(answer),
+            contentPackIds: getContentPackIds(pack.id, answer),
             difficulty,
             frequencyBand: difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare",
             length: answer.length,
@@ -830,18 +841,22 @@ export const wordBank: PuzzleWord[] = (() => {
         .filter((word) => word.length >= 3)
         .map((answer, index) => {
           const frequencyBand: PuzzleWord["frequencyBand"] = difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare";
+          const clue = getEditorialClue(pack.id, answer);
 
           return {
             id: `${pack.id}-${difficulty}-${index}`,
             answer,
             normalized: answer,
+            source: "topic",
+            qualityStatus: clue ? "approved" : "unreviewed",
+            clue,
             topicId: pack.id,
             topicLabel: pack.label,
-            contentPackIds: getContentPackIds(answer),
+            contentPackIds: getContentPackIds(pack.id, answer),
             difficulty,
             frequencyBand,
             length: answer.length,
-            prompt: createPrompt(pack, answer, frequencyBand),
+            prompt: clue ?? createPrompt(pack, answer, frequencyBand),
             microHint: createMicroHint(pack, answer, frequencyBand),
             teaser: createTeaser(pack, answer, frequencyBand),
             learningNote: createLearningNote(pack, answer, frequencyBand),

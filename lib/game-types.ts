@@ -60,6 +60,9 @@ export type PuzzleWord = {
   id: string;
   answer: string;
   normalized: string;
+  source: "topic" | "general" | "synthetic" | "lexicon";
+  qualityStatus: "approved" | "unreviewed";
+  clue: string | null;
   topicId: TopicId;
   topicLabel: string;
   contentPackIds: ContentPackId[];
@@ -113,7 +116,6 @@ export type PuzzleOptions = {
   puzzleSize: number;
   boardView: BoardView;
   style: ThemeStyleId;
-  clueDensity: 1 | 2 | 3;
   timerEnabled: boolean;
   learningMode: boolean;
   seed: string;
@@ -121,6 +123,8 @@ export type PuzzleOptions = {
 
 export type PuzzleRun = {
   id: string;
+  puzzleId: string;
+  generatorVersion: number;
   createdAt: string;
   seed: string;
   options: PuzzleOptions;
@@ -128,6 +132,14 @@ export type PuzzleRun = {
   blurb: string;
   words: PuzzleWord[];
   board: PuzzleBoard;
+};
+
+export type AssistLedger = {
+  hintStepsByWord: Record<string, number>;
+  revealedCellKeys: string[];
+  anagramWordIds: string[];
+  revealedWordIds: string[];
+  puzzleRevealed: boolean;
 };
 
 export type TopicPack = {
@@ -159,18 +171,33 @@ export type ContentPack = {
 };
 
 export type PersistedRunState = {
+  schemaVersion: 2;
+  attemptId: string;
+  startedAt: string;
+  completedAt: string | null;
   run: PuzzleRun;
   guesses: Record<string, string>;
   cellEntries: Record<string, string>;
   solvedIds: string[];
   activeWordId: string | null;
-  hintLevels: Record<string, number>;
+  assists: AssistLedger;
   paused: boolean;
   elapsedMs: number;
   lastTickAt: number | null;
 };
 
+export type AssistSummary = {
+  total: number;
+  hintSteps: number;
+  revealedLetters: number;
+  anagrams: number;
+  revealedWords: number;
+  puzzleRevealed: boolean;
+};
+
 export type RunSummary = {
+  attemptId: string;
+  puzzleId: string;
   runId: string;
   title: string;
   seed: string;
@@ -181,14 +208,24 @@ export type RunSummary = {
   solvedCount: number;
   totalWords: number;
   finished: boolean;
+  canonicalDaily: boolean;
+  elapsedMs: number;
+  assists: AssistSummary;
   createdAt: string;
   completedAt: string | null;
 };
 
 export type ProgressSnapshot = {
+  schemaVersion: 2;
   streak: number;
   bestStreak: number;
   lastDailySeed: string | null;
   lastCompletedAt: string | null;
   history: RunSummary[];
+};
+
+export type PersistedGame = {
+  schemaVersion: 2;
+  currentAttempt: PersistedRunState;
+  progress: ProgressSnapshot;
 };

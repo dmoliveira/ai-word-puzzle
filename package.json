@@ -8,15 +8,19 @@
     "npm": ">=10 <12"
   },
   "scripts": {
+    "audit:dependencies": "node scripts/audit-dependencies.mjs",
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
     "lint": "eslint .",
     "test": "tsx --test",
-    "test:e2e": "playwright test"
+    "test:generator": "GENERATOR_MATRIX_SEEDS=32 tsx --test lib/board-generator.test.ts lib/puzzle-generator.test.ts",
+    "test:e2e": "playwright test",
+    "test:export": "playwright test --config=playwright.export.config.ts",
+    "smoke:deployment": "node scripts/smoke-deployment.mjs",
+    "validate:export": "node scripts/validate-static-export.mjs"
   },
   "dependencies": {
-    "next": "16.2.2",
+    "next": "16.2.12",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
@@ -27,9 +31,13 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.2",
+    "eslint-config-next": "16.2.12",
     "tailwindcss": "^4",
-    "tsx": "^4.20.6",
+    "tsx": "^4.23.1",
     "typescript": "^5"
+  },
+  "overrides": {
+    "postcss": "8.5.24",
+    "sharp": "0.35.3"
   }
 }

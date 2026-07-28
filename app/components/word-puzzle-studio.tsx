@@ -1,13 +1,28 @@
 "use client";
 
 import { startTransition, useEffect, useRef, useState } from "react";
-import type { PersistedRunState, ProgressSnapshot, PuzzleBoardCell, PuzzlePlacement, PuzzleOptions, PuzzleWord, RunSummary, TopicId } from "@/lib/game-types";
-import { buildPuzzleRun, createHintLadder, getDefaultDailySeed, sanitizeGuess } from "@/lib/puzzle-generator";
-import { buildDailyArchive, createEmptyProgress, readProgressSnapshot, recordRunProgress, writeProgressSnapshot } from "@/lib/progress";
+import type { AssistSummary, PersistedRunState, ProgressSnapshot, PuzzleBoardCell, PuzzlePlacement, PuzzleOptions, PuzzleWord, RunSummary, TopicId } from "@/lib/game-types";
+import { buildPuzzleRun, createHintLadder, PuzzleGenerationError, sanitizeGuess } from "@/lib/puzzle-generator";
+import { isCrosswordContentPack, isCrosswordTopic } from "@/lib/clue-catalog";
+import { getCanonicalDailyOptions, getPuzzleSizeRange, getUtcDay, isCanonicalDailyOptions, normalizePuzzleOptions, parseSharedOptions } from "@/lib/puzzle-options";
+import { buildDailyArchive, createEmptyProgress, recordRunProgress } from "@/lib/progress";
+import {
+  canMutateAttempt,
+  createAttemptFromRun,
+  finalizeAttempt,
+  getDisplayedElapsedMs,
+  recordAnagram,
+  recordHintStep,
+  recordPuzzleReveal,
+  recordRevealedCell,
+  recordWordReveal,
+  setAttemptPaused,
+  setAttemptVisibility,
+  summarizeAssists,
+} from "@/lib/run-state";
+import { prepareStoredAttempt, readStoredGame, shouldRestoreAttempt, writeStoredGame } from "@/lib/session-storage";
 import { getThemeStyle, themeStyles } from "@/lib/themes";
 import { contentCatalog, topicCatalog, wordBank } from "@/lib/word-bank";
-
-const storageKey = "astra-lexa-session";
 
 type ToastState = {
   tone: "success" | "muted";
@@ -17,92 +32,27 @@ type ToastState = {
 type ToastTone = NonNullable<ToastState>["tone"];
 type HistoryFilterMode = "all" | "daily" | "custom";
 type HistoryFilterStatus = "all" | "finished" | "active";
-type RevealConfirmState = "none" | "word" | "puzzle";
+type ReviewTarget =
+  | { kind: "none" }
+  | { kind: "word"; attemptId: string; wordId: string }
+  | { kind: "puzzle"; attemptId: string };
 type BuilderPresetId = "gentle" | "balanced" | "study" | "deep";
 type MobilePanel = "board" | "clues" | "review" | "archive";
+type WordSelectionIntent = "answer" | "cell";
 type QuestPathState = {
   anchor: string | null;
   cells: string[];
 };
 
-const defaultOptions: PuzzleOptions = {
-  mode: "custom",
-  challenge: "quest",
-  puzzleFamily: "classic",
-  topics: ["myth", "cosmos", "greek"],
-  contentPackId: "auto",
-  puzzleSize: 7,
-  boardView: "crossword",
-  style: "alpha",
-  clueDensity: 2,
-  timerEnabled: true,
-  learningMode: false,
-  seed: "",
-};
-
-function clampBuilderPuzzleSize(size: number, family: PuzzleOptions["puzzleFamily"]) {
-  return family === "mini" ? Math.max(4, Math.min(6, size)) : Math.max(4, Math.min(12, size));
-}
-
-function normalizeOptions(input?: Partial<PuzzleOptions>): PuzzleOptions {
-  const puzzleFamily = input?.puzzleFamily ?? defaultOptions.puzzleFamily;
-  const topics = input?.topics?.length ? input.topics : defaultOptions.topics;
-  const availablePackIds = contentCatalog.filter((pack) => topics.includes(pack.topicId)).map((pack) => pack.id);
-  const requestedContentPackId = input?.contentPackId ?? defaultOptions.contentPackId;
-  const contentPackId = puzzleFamily !== "themed"
-    ? "auto"
-    : requestedContentPackId === "auto" || availablePackIds.includes(requestedContentPackId)
-      ? requestedContentPackId
-      : "auto";
-
-  return {
-    mode: input?.mode ?? defaultOptions.mode,
-    challenge: input?.challenge ?? defaultOptions.challenge,
-    puzzleFamily,
-    topics,
-    contentPackId,
-    puzzleSize: clampBuilderPuzzleSize(input?.puzzleSize ?? defaultOptions.puzzleSize, puzzleFamily),
-    boardView: input?.boardView ?? defaultOptions.boardView,
-    style: input?.style ?? defaultOptions.style,
-    clueDensity: input?.clueDensity ?? defaultOptions.clueDensity,
-    timerEnabled: input?.timerEnabled ?? defaultOptions.timerEnabled,
-    learningMode: input?.learningMode ?? defaultOptions.learningMode,
-    seed: input?.seed ?? (input?.mode === "daily" ? getDefaultDailySeed() : defaultOptions.seed),
-  };
-}
+const defaultOptions = getCanonicalDailyOptions();
+const normalizeOptions = normalizePuzzleOptions;
 
 function createRuntimeSeed() {
   return `custom-${Date.now()}`;
 }
 
-function readSharedOptionsFromUrl() {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  const params = new URLSearchParams(window.location.search);
-  const mode = params.get("mode");
-  const seed = params.get("seed");
-  const topics = params.get("topics")?.split(",").filter(Boolean) as TopicId[] | undefined;
-
-  if (!mode && !seed && !topics?.length) {
-    return null;
-  }
-
-  return normalizeOptions({
-    mode: mode === "daily" ? "daily" : "custom",
-    seed: seed ?? "",
-    challenge: (params.get("challenge") as PuzzleOptions["challenge"] | null) ?? undefined,
-    puzzleFamily: (params.get("puzzleFamily") as PuzzleOptions["puzzleFamily"] | null) ?? undefined,
-    contentPackId: (params.get("contentPackId") as PuzzleOptions["contentPackId"] | null) ?? undefined,
-    style: (params.get("style") as PuzzleOptions["style"] | null) ?? undefined,
-    clueDensity: Number(params.get("clueDensity") ?? "") as 1 | 2 | 3,
-    puzzleSize: Number(params.get("puzzleSize") ?? "") || undefined,
-    boardView: (params.get("boardView") as PuzzleOptions["boardView"] | null) ?? undefined,
-    timerEnabled: params.get("timerEnabled") ? params.get("timerEnabled") === "true" : undefined,
-    learningMode: params.get("learningMode") ? params.get("learningMode") === "true" : undefined,
-    topics,
-  });
+function readNow() {
+  return Date.now();
 }
 
 function buildShareUrl(options: PuzzleOptions) {
@@ -110,6 +60,7 @@ function buildShareUrl(options: PuzzleOptions) {
   url.search = "";
   url.hash = "";
   const shareSeed = options.mode === "daily" ? options.seed.replace(/^daily:/, "") : options.seed;
+  url.searchParams.set("generatorVersion", "3");
   url.searchParams.set("mode", options.mode);
   url.searchParams.set("seed", shareSeed);
   url.searchParams.set("challenge", options.challenge);
@@ -118,63 +69,14 @@ function buildShareUrl(options: PuzzleOptions) {
   url.searchParams.set("boardView", options.boardView);
   url.searchParams.set("style", options.style);
   url.searchParams.set("puzzleSize", String(options.puzzleSize));
-  url.searchParams.set("clueDensity", String(options.clueDensity));
   url.searchParams.set("timerEnabled", String(options.timerEnabled));
   url.searchParams.set("learningMode", String(options.learningMode));
   url.searchParams.set("topics", options.topics.join(","));
   return url.toString();
 }
 
-function createStateFromRun(run: PersistedRunState["run"]): PersistedRunState {
-  return {
-    run,
-    guesses: {},
-    cellEntries: {},
-    solvedIds: [],
-    activeWordId: run.words[0]?.id ?? null,
-    hintLevels: {},
-    paused: false,
-    elapsedMs: 0,
-    lastTickAt: run.options.timerEnabled ? Date.now() : null,
-  };
-}
-
-function createFreshState(options: PuzzleOptions): PersistedRunState {
-  return createStateFromRun(buildPuzzleRun(options));
-}
-
-function readStoredState() {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  try {
-    const raw = localStorage.getItem(storageKey);
-    if (!raw) {
-      return null;
-    }
-
-    const parsed = JSON.parse(raw) as PersistedRunState;
-    const normalized = normalizeOptions(parsed.run?.options);
-
-    return {
-      options: normalized,
-      state: {
-        ...parsed,
-        guesses: parsed.guesses ?? {},
-        cellEntries: parsed.cellEntries ?? {},
-        run: {
-          ...parsed.run,
-          options: normalized,
-          seed: parsed.run.seed ?? normalized.seed,
-          board: parsed.run.board ?? buildPuzzleRun(normalized).board,
-        },
-        lastTickAt: parsed.paused || !normalized.timerEnabled ? null : Date.now(),
-      },
-    };
-  } catch {
-    return null;
-  }
+function createFreshState(options: PuzzleOptions, nowMs = Date.now()): PersistedRunState {
+  return createAttemptFromRun(buildPuzzleRun(options), nowMs);
 }
 
 function formatElapsed(ms: number) {
@@ -182,6 +84,22 @@ function formatElapsed(ms: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatAssistBreakdown(assists: AssistSummary) {
+  if (assists.total === 0) {
+    return "No assists";
+  }
+
+  const parts = [
+    assists.hintSteps > 0 ? `${assists.hintSteps} hint ${assists.hintSteps === 1 ? "step" : "steps"}` : null,
+    assists.revealedLetters > 0 ? `${assists.revealedLetters} ${assists.revealedLetters === 1 ? "letter" : "letters"}` : null,
+    assists.anagrams > 0 ? `${assists.anagrams} ${assists.anagrams === 1 ? "anagram" : "anagrams"}` : null,
+    assists.revealedWords > 0 ? `${assists.revealedWords} ${assists.revealedWords === 1 ? "word" : "words"} revealed` : null,
+    assists.puzzleRevealed ? "full puzzle revealed" : null,
+  ].filter((part): part is string => Boolean(part));
+
+  return parts.join(" · ");
 }
 
 function getCellKey(row: number, col: number) {
@@ -211,6 +129,34 @@ function getWordCells(state: PersistedRunState, placement: PuzzlePlacement) {
     const col = placement.col + (placement.direction === "across" ? index : 0);
     return state.run.board.cells.find((cell) => cell.row === row && cell.col === col);
   }).filter((cell): cell is PuzzleBoardCell => Boolean(cell));
+}
+
+function getCrosswordCellLabel(state: PersistedRunState, cell: PuzzleBoardCell, activeWordId: string | null) {
+  const clueReferences = cell.wordIds
+    .map((wordId) => getPlacementByWordId(state, wordId))
+    .filter((placement): placement is PuzzlePlacement => Boolean(placement))
+    .map((placement) => `${placement.clueNumber} ${placement.direction}`);
+  const entry = state.cellEntries[getCellKey(cell.row, cell.col)];
+  const activePlacement = activeWordId ? getPlacementByWordId(state, activeWordId) : null;
+  const selected = Boolean(activeWordId && cell.wordIds.includes(activeWordId));
+  const solved = cell.wordIds.every((wordId) => state.solvedIds.includes(wordId));
+  const parts = [
+    `Row ${cell.row + 1} column ${cell.col + 1}`,
+    clueReferences.length > 0 ? clueReferences.join(" and ") : "playable cell",
+    entry ? `letter ${entry.toUpperCase()}` : "blank",
+    selected && activePlacement ? `${activePlacement.clueNumber} ${activePlacement.direction} selected` : null,
+    solved ? "solved" : null,
+  ].filter((part): part is string => Boolean(part));
+
+  return parts.join(", ");
+}
+
+function getQuestCellLabel(row: number, col: number, letter: string, selected: boolean, anchor: boolean) {
+  return [
+    `Row ${row + 1} column ${col + 1}`,
+    `letter ${letter.toUpperCase()}`,
+    anchor ? "start selected" : selected ? "selected path" : null,
+  ].filter((part): part is string => Boolean(part)).join(", ");
 }
 
 function deriveGuessFromCells(state: PersistedRunState, wordId: string) {
@@ -259,7 +205,9 @@ function buildStateWithEntries(current: PersistedRunState, nextCellEntries: Reco
     cellEntries: nextCellEntries,
   };
   const solvedIds = computeSolvedIds(provisional);
-  const nextActive = current.run.words.find((entry) => !solvedIds.includes(entry.id))?.id ?? fallbackWordId;
+  const nextActive = solvedIds.includes(fallbackWordId)
+    ? current.run.words.find((entry) => !solvedIds.includes(entry.id))?.id ?? fallbackWordId
+    : fallbackWordId;
 
   return {
     ...provisional,
@@ -399,65 +347,82 @@ function getFrequencyLabel(frequencyBand: PuzzleWord["frequencyBand"]) {
   }
 }
 
-function getActiveClueSummary(word: PuzzleWord) {
-  return `${word.topicLabel} word · ${word.length} letters · starts with ${word.answer[0]?.toUpperCase() ?? "?"}`;
+function getActiveClueSummary(word: PuzzleWord, challenge: PuzzleOptions["challenge"]) {
+  if (challenge === "breeze") {
+    return `${word.topicLabel} · ${word.length} letters · starts with ${word.answer[0]?.toUpperCase() ?? "?"}`;
+  }
+  if (challenge === "quest") {
+    return `${word.topicLabel} · ${word.length} letters`;
+  }
+  return `${word.topicLabel} · clue only`;
 }
 
-function getClueCardValue(word: PuzzleWord, index: number) {
+function getClueCardValue(word: PuzzleWord, index: number, challenge: PuzzleOptions["challenge"]) {
   if (index === 0) {
     return word.topicLabel;
   }
 
   if (index === 1) {
-    return `${word.answer[0]?.toUpperCase() ?? "?"} starter`;
+    return getFrequencyLabel(word.frequencyBand);
   }
 
-  return `${word.length} letters`;
+  return challenge === "breeze" ? `${word.length} letters` : challenge === "quest" ? "Length in clue header" : "No free letter hint";
 }
 
 function buildAnagram(answer: string) {
-  if (answer.length < 4) {
-    return answer.toUpperCase();
+  const chars = answer.toUpperCase().split("");
+  if (chars.length < 2) {
+    return null;
   }
 
-  const chars = answer.toUpperCase().split("");
-  const rotated = [...chars.slice(1), chars[0]].join("");
-  return rotated === answer.toUpperCase() ? chars.reverse().join("") : rotated;
+  for (let offset = 1; offset < chars.length; offset += 1) {
+    const rotated = [...chars.slice(offset), ...chars.slice(0, offset)].join("");
+    if (rotated !== answer.toUpperCase()) {
+      return rotated;
+    }
+  }
+
+  const reversed = [...chars].reverse().join("");
+  return reversed === answer.toUpperCase() ? null : reversed;
 }
 
-function countFinishedRunsSince(history: ProgressSnapshot["history"], days: number, mode?: RunSummary["mode"]) {
-  const now = new Date();
-  const cutoff = new Date(now);
-  cutoff.setDate(now.getDate() - (days - 1));
-  cutoff.setHours(0, 0, 0, 0);
+function isWordReviewAuthorized(state: PersistedRunState, target: Extract<ReviewTarget, { kind: "word" }>) {
+  return target.attemptId === state.attemptId
+    && state.run.words.some((word) => word.id === target.wordId)
+    && (state.solvedIds.includes(target.wordId)
+      || state.assists.revealedWordIds.includes(target.wordId)
+      || state.assists.puzzleRevealed);
+}
 
-  return history.filter((entry) => {
-    if (!entry.finished || !entry.completedAt) {
-      return false;
-    }
-
-    if (mode && entry.mode !== mode) {
-      return false;
-    }
-
-    return new Date(entry.completedAt) >= cutoff;
-  }).length;
+function isPuzzleReviewAuthorized(state: PersistedRunState, target: Extract<ReviewTarget, { kind: "puzzle" }>) {
+  return target.attemptId === state.attemptId && (state.completedAt !== null || state.assists.puzzleRevealed);
 }
 
 export function WordPuzzleStudio() {
   const activeAnswerInputRef = useRef<HTMLInputElement | null>(null);
   const boardCellRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const revealDialogRef = useRef<HTMLDialogElement | null>(null);
+  const revealCancelRef = useRef<HTMLButtonElement | null>(null);
+  const revealInvokerRef = useRef<HTMLElement | null>(null);
+  const reviewOriginRef = useRef<{ element: HTMLElement | null; panel: MobilePanel }>({ element: null, panel: "board" });
+  const reviewHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const completionHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const completionTransitionRef = useRef({ hydrated: false, finished: false });
+  const workspaceTabRefs = useRef<Record<MobilePanel, HTMLButtonElement | null>>({ board: null, clues: null, review: null, archive: null });
+  const questPointerStartRef = useRef<string | null>(null);
+  const questPointerMovedRef = useRef(false);
+  const questPointerPreviousPathRef = useRef<QuestPathState>({ anchor: null, cells: [] });
+  const suppressQuestClickRef = useRef(false);
   const [options, setOptions] = useState<PuzzleOptions>(defaultOptions);
   const [state, setState] = useState<PersistedRunState>(() => createFreshState(defaultOptions));
-  const [reviewMode, setReviewMode] = useState<"none" | "word" | "puzzle">("none");
+  const [reviewTarget, setReviewTarget] = useState<ReviewTarget>({ kind: "none" });
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>("board");
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(false);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
   const [builderAdvancedOpen, setBuilderAdvancedOpen] = useState(false);
-  const [revealConfirm, setRevealConfirm] = useState<RevealConfirmState>("none");
+  const [revealConfirm, setRevealConfirm] = useState<ReviewTarget>({ kind: "none" });
   const [shownAnagrams, setShownAnagrams] = useState<Record<string, string>>({});
   const [questPath, setQuestPath] = useState<QuestPathState>({ anchor: null, cells: [] });
-  const [questSelecting, setQuestSelecting] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState>(null);
@@ -465,104 +430,171 @@ export function WordPuzzleStudio() {
   const [historyStatusFilter, setHistoryStatusFilter] = useState<HistoryFilterStatus>("all");
   const [progress, setProgress] = useState<ProgressSnapshot>(createEmptyProgress());
   const [focusedCellKey, setFocusedCellKey] = useState<string | null>(null);
+  const [hydrated, setHydrated] = useState(false);
+  const [compactWorkspace, setCompactWorkspace] = useState(false);
+  const [announcement, setAnnouncement] = useState("Puzzle ready.");
+  const [clockNow, setClockNow] = useState(readNow);
+  const stateRef = useRef(state);
+  const progressRef = useRef(progress);
   const lexiconSize = wordBank.length;
   const theme = getThemeStyle(state.run.options.style);
 
   useEffect(() => {
     const handle = window.setTimeout(() => {
-      const stored = readStoredState();
-      const shared = readSharedOptionsFromUrl();
-      const snapshot = readProgressSnapshot();
+      const nowMs = readNow();
+      const canonicalOptions = getCanonicalDailyOptions(nowMs);
+      const canonicalState = createFreshState(canonicalOptions, nowMs);
+      const stored = readStoredGame(window.localStorage, nowMs);
+      const shared = parseSharedOptions(window.location.search, nowMs);
+      const nextProgress = stored.game?.progress ?? createEmptyProgress();
+      let nextState = canonicalState;
 
-      setProgress(snapshot);
-
-      if (shared) {
-        const nextState = createFreshState(shared);
-        startTransition(() => {
-          setOptions(shared);
-          setState(nextState);
-          setFocusedCellKey(getFirstOpenCellKey(nextState, nextState.activeWordId));
-        });
-      } else if (stored) {
-        startTransition(() => {
-          setOptions(stored.options);
-          setState(stored.state);
-        });
+      try {
+        if (shared.kind === "valid") {
+          nextState = createFreshState(shared.options, nowMs);
+        } else if (shared.kind === "invalid") {
+          setRunError("That shared puzzle link was invalid, so today’s puzzle was opened instead.");
+        } else if (stored.game && shouldRestoreAttempt(stored.game.currentAttempt, canonicalState.run.puzzleId)) {
+          nextState = prepareStoredAttempt(stored.game.currentAttempt, nowMs);
+        }
+      } catch {
+        nextState = canonicalState;
+        setRunError("That saved puzzle could not be opened, so today’s puzzle was opened instead.");
       }
+
+      setOptions(nextState.run.options);
+      setState(nextState);
+      setProgress(nextProgress);
+      setFocusedCellKey(getFirstOpenCellKey(nextState, nextState.activeWordId));
+      setMobilePanel(nextState.run.options.boardView === "crossword" ? "clues" : "board");
+      setClockNow(nowMs);
+      setHydrated(true);
     }, 0);
 
     return () => window.clearTimeout(handle);
   }, []);
 
-  function persistState(nextState: PersistedRunState) {
-    localStorage.setItem(storageKey, JSON.stringify(nextState));
-  }
-
-  function syncProgress(nextState: PersistedRunState) {
-    const snapshot = recordRunProgress(readProgressSnapshot(), nextState);
-    writeProgressSnapshot(snapshot);
-    setProgress(snapshot);
-  }
-
   useEffect(() => {
-    persistState(state);
+    stateRef.current = state;
   }, [state]);
 
   useEffect(() => {
-    if (state.paused || !state.run.options.timerEnabled) {
+    progressRef.current = progress;
+  }, [progress]);
+
+  useEffect(() => {
+    if (!hydrated) {
+      return;
+    }
+
+    const handle = window.setTimeout(() => {
+      const nowMs = readNow();
+      const nextProgress = recordRunProgress(progressRef.current, state, nowMs);
+      progressRef.current = nextProgress;
+      setProgress(nextProgress);
+      writeStoredGame(window.localStorage, state, nextProgress, nowMs);
+    }, 120);
+
+    return () => window.clearTimeout(handle);
+  }, [hydrated, state]);
+
+  useEffect(() => {
+    if (!hydrated) {
+      return;
+    }
+
+    const handleVisibilityChange = () => {
+      const nowMs = readNow();
+      setState((current) => setAttemptVisibility(current, !document.hidden, nowMs));
+      setClockNow(nowMs);
+    };
+    const handlePageHide = () => {
+      const nowMs = readNow();
+      const current = setAttemptVisibility(stateRef.current, false, nowMs);
+      const nextProgress = recordRunProgress(progressRef.current, current, nowMs);
+      writeStoredGame(window.localStorage, current, nextProgress, nowMs);
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pagehide", handlePageHide);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pagehide", handlePageHide);
+    };
+  }, [hydrated]);
+
+  useEffect(() => {
+    if (!hydrated || state.paused || state.completedAt || !state.run.options.timerEnabled) {
       return;
     }
 
     const interval = window.setInterval(() => {
-      setState((current) => ({
-        ...current,
-        elapsedMs: current.elapsedMs + 1000,
-      }));
+      setClockNow(readNow());
     }, 1000);
 
     return () => window.clearInterval(interval);
-  }, [state.paused, state.run.options.timerEnabled]);
+  }, [hydrated, state.completedAt, state.paused, state.run.options.timerEnabled]);
 
   useEffect(() => {
-    if (state.paused) {
+    const query = window.matchMedia("(max-width: 1279px)");
+    const updateCompactWorkspace = () => setCompactWorkspace(query.matches);
+    updateCompactWorkspace();
+    query.addEventListener("change", updateCompactWorkspace);
+    return () => query.removeEventListener("change", updateCompactWorkspace);
+  }, []);
+
+  useEffect(() => {
+    const dialog = revealDialogRef.current;
+    if (!dialog) {
       return;
     }
 
-    activeAnswerInputRef.current?.focus();
-  }, [state.activeWordId, state.paused]);
+    if (revealConfirm.kind !== "none" && !dialog.open) {
+      dialog.showModal();
+      window.requestAnimationFrame(() => revealCancelRef.current?.focus());
+    } else if (revealConfirm.kind === "none" && dialog.open) {
+      dialog.close();
+    }
+  }, [revealConfirm]);
 
   const solvedCount = state.solvedIds.length;
   const activeWord = state.run.words.find((word) => word.id === state.activeWordId) ?? state.run.words[0] ?? null;
   const activePlacement = activeWord ? getWordPlacement(state, activeWord.id) : null;
   const activeGuess = activeWord ? deriveGuessFromCells(state, activeWord.id) : "";
-  const finished = solvedCount === state.run.words.length && state.run.words.length > 0;
+  const finished = Boolean(state.completedAt) || (solvedCount === state.run.words.length && state.run.words.length > 0);
   const activePlay = !finished;
   const progressLabel = `${solvedCount}/${state.run.words.length} solved`;
   const runStateLabel = finished ? "Done" : state.paused ? "Paused" : "Live";
   const cellMap = new Map(state.run.board.cells.map((cell) => [getCellKey(cell.row, cell.col), cell]));
-  const archive = buildDailyArchive(progress.history, 10);
+  const archive = buildDailyArchive(progress.history, 10, clockNow);
   const activeFilledCount = countFilledLetters(activeGuess);
   const boardFocusKey = focusedCellKey ?? getFirstOpenCellKey(state, state.activeWordId);
-  const hintsUsed = Object.values(state.hintLevels).reduce((total, level) => total + level, 0);
+  const assistSummary = summarizeAssists(state);
+  const assistsUsed = assistSummary.total;
+  const displayedElapsedMs = getDisplayedElapsedMs(state, clockNow, typeof document === "undefined" || !document.hidden);
   const rareSolvedCount = state.run.words.filter((word) => word.frequencyBand === "rare").length;
   const uncommonSolvedCount = state.run.words.filter((word) => word.frequencyBand === "uncommon").length;
   const commonSolvedCount = state.run.words.filter((word) => word.frequencyBand === "common").length;
   const finishedHistoryCount = progress.history.filter((entry) => entry.finished).length;
-  const activeHistoryCount = progress.history.filter((entry) => !entry.finished).length;
-  const dailyClearCount = progress.history.filter((entry) => entry.mode === "daily" && entry.finished).length;
-  const weeklyDailyClearCount = countFinishedRunsSince(progress.history, 7, "daily");
-  const monthlyDailyClearCount = countFinishedRunsSince(progress.history, 30, "daily");
-  const weeklyFinishedRunCount = countFinishedRunsSince(progress.history, 7);
-  const selectedTopicLabels = topicCatalog.filter((topic) => options.topics.includes(topic.id)).map((topic) => topic.label);
-  const availableContentPacks = contentCatalog.filter((pack) => options.topics.includes(pack.topicId));
+  const dailyClearCount = progress.history.filter((entry) => entry.canonicalDaily && entry.finished).length;
+  const historicalAssistCount = progress.history.reduce((total, entry) => total + entry.assists.total, 0);
+  const availableTopics = topicCatalog.filter((topic) => options.boardView === "quest" || isCrosswordTopic(topic.id));
+  const selectedTopicLabels = availableTopics.filter((topic) => options.topics.includes(topic.id)).map((topic) => topic.label);
+  const availableContentPacks = contentCatalog.filter((pack) => options.topics.includes(pack.topicId) && (options.boardView === "quest" || isCrosswordContentPack(pack.id)));
   const selectedContentPack = options.contentPackId === "auto" ? null : contentCatalog.find((pack) => pack.id === options.contentPackId) ?? null;
+  const basePuzzleSizeRange = getPuzzleSizeRange(options.puzzleFamily, options.boardView);
+  const puzzleSizeRange = {
+    ...basePuzzleSizeRange,
+    max: options.puzzleFamily === "themed" && selectedContentPack
+      ? Math.min(basePuzzleSizeRange.max, selectedContentPack.answers.length)
+      : basePuzzleSizeRange.max,
+  };
   const classicBoardCellClass = state.run.options.style === "classic" ? "border-slate-300/18 bg-slate-50/8 text-slate-50" : "border-white/10 bg-white/6 text-slate-100";
   const classicEmptyCellClass = state.run.options.style === "classic" ? "bg-slate-950/90 border border-slate-700/60" : "bg-transparent";
   const classicBoardShellClass = state.run.options.style === "classic" ? "border-slate-300/18 bg-[#111827]/90 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]" : "border-white/10 bg-slate-950/30 p-3";
   const progressPercent = state.run.words.length === 0 ? 0 : (solvedCount / state.run.words.length) * 100;
   const progressRingCircumference = 2 * Math.PI * 42;
   const progressRingOffset = progressRingCircumference - (progressRingCircumference * progressPercent) / 100;
-  const dailyRewardPercent = Math.min(100, (dailyClearCount % 7) * (100 / 7));
   const secondaryActionClass = "inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/4 px-4 py-2.5 text-sm font-medium text-slate-100 transition hover:border-white/20";
   const secondaryPillClass = "inline-flex items-center justify-center rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm font-medium text-slate-100 transition hover:border-white/20";
   const compactPillClass = "inline-flex items-center justify-center rounded-full border border-white/10 bg-white/4 px-3.5 py-2 text-sm font-medium text-slate-100 transition hover:border-white/20";
@@ -578,9 +610,73 @@ export function WordPuzzleStudio() {
       ? "opacity-85"
       : "opacity-100";
   const isQuestView = state.run.options.boardView === "quest";
+  const runDay = state.run.seed.replace(/^daily:/, "");
+  const today = getUtcDay(clockNow);
+  const isCanonicalDailyAttempt = isCanonicalDailyOptions(state.run.options, state.run.seed) && state.startedAt.slice(0, 10) === runDay;
+  const isCanonicalDailyCompletion = isCanonicalDailyAttempt && state.completedAt?.slice(0, 10) === runDay;
+  const runContextLabel = state.run.options.mode === "custom"
+    ? "Custom puzzle"
+    : runDay === today
+      ? "Today’s daily"
+      : `${runDay} daily replay`;
+  const todayArchiveEntry = archive.find((entry) => entry.day === today)?.summary ?? null;
+  const currentIsTodayDaily = isCanonicalDailyAttempt && runDay === today;
+  const todayDailyFinished = Boolean(todayArchiveEntry?.finished || (currentIsTodayDaily && finished));
+  const todayDailySolved = currentIsTodayDaily
+    ? solvedCount
+    : todayArchiveEntry?.solvedCount ?? 0;
+  const todayDailyTotal = currentIsTodayDaily
+    ? state.run.words.length
+    : todayArchiveEntry?.totalWords ?? getCanonicalDailyOptions(clockNow).puzzleSize;
+  const reviewedWord = reviewTarget.kind === "word" && isWordReviewAuthorized(state, reviewTarget)
+    ? getWordById(state, reviewTarget.wordId)
+    : null;
+  const puzzleReviewAuthorized = reviewTarget.kind === "puzzle" && isPuzzleReviewAuthorized(state, reviewTarget);
+  const visibleReviewKind = reviewedWord ? "word" : puzzleReviewAuthorized ? "puzzle" : null;
+  const activeVocabularyUnlocked = isQuestView || Boolean(activeWord && (
+    state.solvedIds.includes(activeWord.id)
+    || state.assists.revealedWordIds.includes(activeWord.id)
+    || state.assists.puzzleRevealed
+  ));
+  const activeGuessIncorrect = !isQuestView
+    && Boolean(activeWord)
+    && activeFilledCount === activeWord?.length
+    && !state.solvedIds.includes(activeWord?.id ?? "");
+  const activeClueName = activePlacement ? `${activePlacement.clueNumber} ${activePlacement.direction}` : "Active clue";
+  const activeCluePromptId = activeWord ? `clue-prompt-${activeWord.id}` : undefined;
+  const activeClueFeedbackId = activeWord ? `clue-feedback-${activeWord.id}` : undefined;
+  const liveMessage = finished
+    ? `Puzzle cleared. ${solvedCount} of ${state.run.words.length} words solved.`
+    : state.paused
+      ? "Puzzle paused. Entries and new assists are locked."
+      : activeGuessIncorrect
+        ? `${activeClueName} is not correct yet.`
+        : announcement;
+  const workspacePanels = [
+    { id: "board", label: "Board" },
+    { id: "clues", label: "Clues" },
+    ...(visibleReviewKind ? [{ id: "review", label: visibleReviewKind === "word" ? "Word" : "Puzzle" } as const] : []),
+    { id: "archive", label: "Archive" },
+  ] as const;
   const filteredHistory = progress.history
     .filter((entry) => (historyModeFilter === "all" ? true : entry.mode === historyModeFilter))
     .filter((entry) => (historyStatusFilter === "all" ? true : historyStatusFilter === "finished" ? entry.finished : !entry.finished));
+
+  useEffect(() => {
+    if (!hydrated) {
+      return;
+    }
+
+    if (!completionTransitionRef.current.hydrated) {
+      completionTransitionRef.current = { hydrated: true, finished };
+      return;
+    }
+
+    if (finished && !completionTransitionRef.current.finished) {
+      window.requestAnimationFrame(() => completionHeadingRef.current?.focus());
+    }
+    completionTransitionRef.current.finished = finished;
+  }, [finished, hydrated]);
 
   function showToast(message: string, tone: ToastTone = "success") {
     setToast({ message, tone });
@@ -602,24 +698,16 @@ export function WordPuzzleStudio() {
   }
 
   function updateOptions<K extends keyof PuzzleOptions>(key: K, value: PuzzleOptions[K]) {
-    setOptions((current) => normalizeOptions({ ...current, [key]: value }));
-
-    if (key === "learningMode" || key === "boardView") {
-      setState((current) => {
-        const nextState = {
-          ...current,
-          run: {
-            ...current.run,
-            options: {
-              ...current.run.options,
-              ...(key === "learningMode" ? { learningMode: value as boolean } : { boardView: value as PuzzleOptions["boardView"] }),
-            },
-          },
-        };
-        syncProgress(nextState);
-        return nextState;
+    setOptions((current) => {
+      const selectedPack = key === "contentPackId" && value !== "auto"
+        ? contentCatalog.find((pack) => pack.id === value)
+        : null;
+      return normalizeOptions({
+        ...current,
+        [key]: value,
+        ...(selectedPack ? { puzzleSize: Math.min(current.puzzleSize, selectedPack.answers.length) } : {}),
       });
-    }
+    });
   }
 
   function applyPreset(preset: BuilderPresetId) {
@@ -627,25 +715,21 @@ export function WordPuzzleStudio() {
       gentle: {
         challenge: "breeze",
         puzzleSize: 6,
-        clueDensity: 3,
         learningMode: true,
       },
       balanced: {
         challenge: "quest",
         puzzleSize: 7,
-        clueDensity: 2,
         learningMode: false,
       },
       study: {
         challenge: "quest",
         puzzleSize: 8,
-        clueDensity: 3,
         learningMode: true,
       },
       deep: {
         challenge: "mythic",
         puzzleSize: 9,
-        clueDensity: 2,
         learningMode: true,
       },
     };
@@ -655,13 +739,6 @@ export function WordPuzzleStudio() {
       ...presetOptions[preset],
     });
     setOptions(nextOptions);
-    setState((current) => ({
-      ...current,
-      run: {
-        ...current.run,
-        options: nextOptions,
-      },
-    }));
   }
 
   function toggleTopic(topicId: TopicId) {
@@ -689,20 +766,22 @@ export function WordPuzzleStudio() {
     try {
       const run = buildPuzzleRun(requestOptions);
       startTransition(() => {
-        const nextState = createStateFromRun(run);
+        const nextState = createAttemptFromRun(run);
         setOptions(run.options);
         setState(nextState);
         setFocusedCellKey(getFirstOpenCellKey(nextState, nextState.activeWordId));
-        setMobilePanel("board");
-        setRevealConfirm("none");
+        setMobilePanel(run.options.boardView === "crossword" ? "clues" : "board");
+        setRevealConfirm({ kind: "none" });
         setShownAnagrams({});
         setQuestPath({ anchor: null, cells: [] });
-        setQuestSelecting(false);
-        syncProgress(nextState);
-        setReviewMode("none");
+        questPointerStartRef.current = null;
+        questPointerMovedRef.current = false;
+        suppressQuestClickRef.current = false;
+        setReviewTarget({ kind: "none" });
+        setAnnouncement("New puzzle ready.");
       });
-    } catch {
-      setRunError("Could not start a new local run.");
+    } catch (error) {
+      setRunError(error instanceof PuzzleGenerationError ? error.message : "Could not start a new local run.");
     } finally {
       setIsStarting(false);
     }
@@ -718,11 +797,7 @@ export function WordPuzzleStudio() {
   }
 
   function startTodayDailyRun() {
-    void startNewRun({
-      ...options,
-      mode: "daily",
-      seed: getDefaultDailySeed(),
-    });
+    void startNewRun(getCanonicalDailyOptions());
   }
 
   function startRandomCustomRun() {
@@ -737,8 +812,8 @@ export function WordPuzzleStudio() {
     const summary = [
       `Astra Lexa`,
       `${state.run.title}`,
-      `${state.run.words.length} words cleared in ${formatElapsed(state.elapsedMs)}`,
-      `${hintsUsed} hints used`,
+      `${state.run.words.length} words cleared in ${formatElapsed(displayedElapsedMs)}`,
+      `${assistsUsed} assists (${formatAssistBreakdown(assistSummary)})`,
       `seed ${state.run.seed.replace(/^daily:/, "")}`,
     ].join(" | ");
 
@@ -755,8 +830,8 @@ export function WordPuzzleStudio() {
     return [
       `Astra Lexa Daily ${dailySeed}`,
       `${state.run.words.length} words`,
-      `${formatElapsed(state.elapsedMs)}`,
-      `${hintsUsed} hints`,
+      `${formatElapsed(displayedElapsedMs)}`,
+      `${assistsUsed} assists`,
       `${commonSolvedCount}/${uncommonSolvedCount}/${rareSolvedCount} mix`,
     ].join(" | ");
   }
@@ -808,60 +883,184 @@ export function WordPuzzleStudio() {
   }
 
   function togglePause() {
-    setState((current) => {
-      const nextState = {
-        ...current,
-        paused: !current.paused,
-      };
-      syncProgress(nextState);
-      return nextState;
-    });
+    if (finished) {
+      return;
+    }
+
+    const nowMs = readNow();
+    const willPause = !state.paused;
+    if (willPause && isQuestView) {
+      clearQuestPathSelection();
+    }
+    setState((current) => setAttemptPaused(current, willPause, nowMs));
+    setAnnouncement(willPause ? "Puzzle paused. Entries and new assists are locked." : `${activeClueName} selected. Puzzle resumed.`);
+    setClockNow(nowMs);
   }
 
   function revealHint(wordId: string) {
-    setState((current) => {
-      const nextState = {
-        ...current,
-        hintLevels: {
-          ...current.hintLevels,
-          [wordId]: Math.min(3, getHintLevel(wordId, current.hintLevels) + 1),
-        },
-      };
-      syncProgress(nextState);
-      return nextState;
-    });
+    setState((current) => recordHintStep(current, wordId));
   }
 
   function revealAnagram(word: PuzzleWord) {
+    if (!canMutateAttempt(state)) {
+      return;
+    }
+
+    const anagram = buildAnagram(word.answer);
+    if (!anagram) {
+      showToast("A safe scramble is unavailable for this word.", "muted");
+      return;
+    }
+
+    setState((current) => recordAnagram(current, word.id));
     setShownAnagrams((current) => ({
       ...current,
-      [word.id]: buildAnagram(word.answer),
+      [word.id]: anagram,
     }));
   }
 
   function confirmRevealWord() {
-    setMobilePanel("review");
-    setRevealConfirm("word");
+    if (!activeWord) {
+      return;
+    }
+
+    const target = { kind: "word", attemptId: state.attemptId, wordId: activeWord.id } as const;
+    revealInvokerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    reviewOriginRef.current = { element: revealInvokerRef.current, panel: mobilePanel };
+    if (isWordReviewAuthorized(state, target)) {
+      openAuthorizedReview(target);
+      return;
+    }
+
+    if (!state.paused && canMutateAttempt(state)) {
+      setRevealConfirm(target);
+    }
   }
 
   function confirmRevealPuzzle() {
-    setMobilePanel("review");
-    setRevealConfirm("puzzle");
+    const target = { kind: "puzzle", attemptId: state.attemptId } as const;
+    revealInvokerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    reviewOriginRef.current = { element: revealInvokerRef.current, panel: mobilePanel };
+    if (isPuzzleReviewAuthorized(state, target)) {
+      openAuthorizedReview(target);
+      return;
+    }
+
+    if (!state.paused && canMutateAttempt(state)) {
+      setRevealConfirm(target);
+    }
   }
 
-  function clearQuestPathSelection() {
+  function closeRevealDialog(restoreFocus = true) {
+    if (revealDialogRef.current?.open) {
+      revealDialogRef.current.close();
+    }
+    setRevealConfirm({ kind: "none" });
+
+    if (restoreFocus) {
+      window.requestAnimationFrame(() => revealInvokerRef.current?.focus());
+    }
+  }
+
+  function openAuthorizedReview(target: Exclude<ReviewTarget, { kind: "none" }>) {
+    setReviewTarget(target);
+    setMobilePanel("review");
+    closeRevealDialog(false);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => reviewHeadingRef.current?.focus());
+    });
+  }
+
+  function closeReview() {
+    const origin = reviewOriginRef.current;
+    setReviewTarget({ kind: "none" });
+    setMobilePanel(origin.panel === "review" ? "board" : origin.panel);
+    window.requestAnimationFrame(() => {
+      if (origin.element?.isConnected) {
+        origin.element.focus();
+      }
+      reviewOriginRef.current = { element: null, panel: "board" };
+    });
+  }
+
+  function acceptReveal() {
+    const target = revealConfirm;
+    if (target.kind === "none" || target.attemptId !== state.attemptId) {
+      closeRevealDialog();
+      return;
+    }
+
+    if (target.kind === "word") {
+      if (!state.run.words.some((word) => word.id === target.wordId)) {
+        closeRevealDialog();
+        return;
+      }
+
+      if (!isWordReviewAuthorized(state, target)) {
+        if (!canMutateAttempt(state)) {
+          closeRevealDialog();
+          return;
+        }
+        setState((current) => current.attemptId === target.attemptId ? recordWordReveal(current, target.wordId) : current);
+      }
+    } else if (!isPuzzleReviewAuthorized(state, target)) {
+      if (!canMutateAttempt(state)) {
+        closeRevealDialog();
+        return;
+      }
+      setState((current) => current.attemptId === target.attemptId ? recordPuzzleReveal(current) : current);
+    }
+
+    openAuthorizedReview(target);
+  }
+
+  function trapRevealDialogFocus(event: React.KeyboardEvent<HTMLDialogElement>) {
+    if (event.key !== "Tab") {
+      return;
+    }
+
+    const controls = [...event.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled)")];
+    const first = controls[0];
+    const last = controls.at(-1);
+    if (!first || !last) {
+      return;
+    }
+
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  function clearQuestPathSelection(message = "Quest selection cleared.") {
     setQuestPath({ anchor: null, cells: [] });
-    setQuestSelecting(false);
+    questPointerStartRef.current = null;
+    questPointerMovedRef.current = false;
+    if (isQuestView) {
+      setAnnouncement(message);
+    }
   }
 
   function solveWordById(wordId: string) {
-    const word = getWordById(state, wordId);
-    const placement = getPlacementByWordId(state, wordId);
-    if (!word || !placement) {
+    if (!canMutateAttempt(state)) {
       return false;
     }
 
+    const nowMs = readNow();
     setState((current) => {
+      if (!canMutateAttempt(current)) {
+        return current;
+      }
+
+      const word = getWordById(current, wordId);
+      const placement = getPlacementByWordId(current, wordId);
+      if (!word || !placement) {
+        return current;
+      }
+
       const nextCellEntries = { ...current.cellEntries };
       const cells = getWordCells(current, placement);
 
@@ -869,9 +1068,7 @@ export function WordPuzzleStudio() {
         nextCellEntries[getCellKey(cell.row, cell.col)] = word.answer[index];
       });
 
-      const nextState = buildStateWithEntries(current, nextCellEntries, wordId);
-      syncProgress(nextState);
-      return nextState;
+      return finalizeAttempt(buildStateWithEntries(current, nextCellEntries, wordId), nowMs);
     });
 
     return true;
@@ -883,7 +1080,7 @@ export function WordPuzzleStudio() {
     return path?.map((entry) => getCellKey(entry.row, entry.col)) ?? null;
   }
 
-  function finalizeQuestPath(pathKeys: string[], fallbackKey: string) {
+  function findQuestPathMatch(pathKeys: string[]) {
     const forward = pathKeys
       .map((pathKey) => {
         const [pathRow, pathCol] = pathKey.split(":").map(Number);
@@ -892,117 +1089,210 @@ export function WordPuzzleStudio() {
       .join("")
       .toLowerCase();
     const backward = forward.split("").reverse().join("");
-    const match = state.run.words.find((word) => !state.solvedIds.includes(word.id) && (word.answer === forward || word.answer === backward));
+    return state.run.words.find((word) => !state.solvedIds.includes(word.id) && (word.answer === forward || word.answer === backward)) ?? null;
+  }
+
+  function transitionQuestEndpoint(row: number, col: number, anchorOverride?: string | null) {
+    if (!canMutateAttempt(state)) {
+      setAnnouncement(state.paused ? "Puzzle paused. Quest selection is locked." : "Puzzle complete. Quest selection is read only.");
+      return false;
+    }
+
+    const key = getCellKey(row, col);
+    const anchor = anchorOverride === undefined ? questPath.anchor : anchorOverride;
+    const letter = getQuestDisplayLetter(cellMap.get(key), state.run.seed, row, col).toUpperCase();
+    if (!anchor || anchor === key) {
+      setQuestPath({ anchor: key, cells: [key] });
+      setAnnouncement(`Quest start selected at row ${row + 1} column ${col + 1}, letter ${letter}. Choose a straight-line endpoint.`);
+      return false;
+    }
+
+    const pathKeys = getQuestPathKeys(anchor, row, col);
+    if (!pathKeys || pathKeys.length <= 1) {
+      clearQuestPathSelection("That endpoint is not aligned with the start. Quest selection cleared.");
+      return false;
+    }
+
+    const match = findQuestPathMatch(pathKeys);
 
     if (match) {
       solveWordById(match.id);
-      setQuestPath({ anchor: null, cells: [] });
-      setQuestSelecting(false);
+      clearQuestPathSelection(`${match.answer.toUpperCase()} found. ${Math.min(state.run.words.length, solvedCount + 1)} of ${state.run.words.length} complete.`);
       showToast(`Found ${match.answer.toUpperCase()}.`);
       return true;
     }
 
-    setQuestPath({ anchor: fallbackKey, cells: [fallbackKey] });
-    setQuestSelecting(false);
+    clearQuestPathSelection("No unsolved target matches that path. Quest selection cleared.");
     return false;
   }
 
-  function beginQuestSelection(row: number, col: number) {
-    const key = getCellKey(row, col);
-
-    if (questPath.anchor && !questSelecting && questPath.anchor !== key) {
-      const pathKeys = getQuestPathKeys(questPath.anchor, row, col);
-      if (pathKeys) {
-        setQuestPath({ anchor: questPath.anchor, cells: pathKeys });
-      }
-      setQuestSelecting(true);
-      return;
-    }
-
-    setQuestPath({ anchor: key, cells: [key] });
-    setQuestSelecting(true);
+  function getQuestPointerCell(event: React.PointerEvent<HTMLButtonElement>, fallbackRow: number, fallbackCol: number) {
+    const element = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-quest-cell='true']");
+    const row = Number(element?.dataset.row);
+    const col = Number(element?.dataset.col);
+    return Number.isInteger(row) && Number.isInteger(col) ? { row, col } : { row: fallbackRow, col: fallbackCol };
   }
 
-  function extendQuestSelection(row: number, col: number) {
-    if (!questSelecting || !questPath.anchor) {
+  function beginQuestPointer(event: React.PointerEvent<HTMLButtonElement>, row: number, col: number) {
+    if (!canMutateAttempt(state)) {
       return;
     }
 
-    const pathKeys = getQuestPathKeys(questPath.anchor, row, col);
+    questPointerStartRef.current = getCellKey(row, col);
+    questPointerMovedRef.current = false;
+    questPointerPreviousPathRef.current = questPath;
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture is an enhancement; endpoint clicks remain available.
+    }
+  }
+
+  function moveQuestPointer(event: React.PointerEvent<HTMLButtonElement>, fallbackRow: number, fallbackCol: number) {
+    const startKey = questPointerStartRef.current;
+    if (!canMutateAttempt(state) || !startKey) {
+      return;
+    }
+
+    const endpoint = getQuestPointerCell(event, fallbackRow, fallbackCol);
+    const endpointKey = getCellKey(endpoint.row, endpoint.col);
+    if (endpointKey === startKey) {
+      return;
+    }
+
+    questPointerMovedRef.current = true;
+    const pathKeys = getQuestPathKeys(startKey, endpoint.row, endpoint.col);
     if (!pathKeys) {
       return;
     }
 
-    setQuestPath({ anchor: questPath.anchor, cells: pathKeys });
+    setQuestPath({ anchor: startKey, cells: pathKeys });
   }
 
-  function finishQuestSelection(row: number, col: number) {
-    if (!questPath.anchor) {
+  function finishQuestPointer(event: React.PointerEvent<HTMLButtonElement>, fallbackRow: number, fallbackCol: number) {
+    const startKey = questPointerStartRef.current;
+    if (!startKey) {
       return;
     }
 
-    const key = getCellKey(row, col);
-    const pathKeys = getQuestPathKeys(questPath.anchor, row, col) ?? [questPath.anchor];
-
-    if (pathKeys.length <= 1) {
-      setQuestPath({ anchor: key, cells: [key] });
-      setQuestSelecting(false);
-      return;
+    const moved = questPointerMovedRef.current;
+    const endpoint = getQuestPointerCell(event, fallbackRow, fallbackCol);
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // The pointer may already have been released by the browser.
     }
+    questPointerStartRef.current = null;
+    questPointerMovedRef.current = false;
 
-    finalizeQuestPath(pathKeys, key);
+    if (moved) {
+      suppressQuestClickRef.current = true;
+      window.setTimeout(() => {
+        suppressQuestClickRef.current = false;
+      }, 0);
+      transitionQuestEndpoint(endpoint.row, endpoint.col, startKey);
+    }
   }
 
-  function handleQuestSelection(row: number, col: number) {
-    const key = getCellKey(row, col);
-
-    if (!questPath.anchor) {
-      setQuestPath({ anchor: key, cells: [key] });
-      return;
+  function cancelQuestPointer(event: React.PointerEvent<HTMLButtonElement>) {
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // The pointer may already have been released by the browser.
     }
-
-    const [startRow, startCol] = questPath.anchor.split(":").map(Number);
-    const path = buildLinearQuestPath({ row: startRow, col: startCol }, { row, col });
-    if (!path) {
-      setQuestPath({ anchor: key, cells: [key] });
-      return;
-    }
-
-    const pathKeys = path.map((cell) => getCellKey(cell.row, cell.col));
-    setQuestPath({ anchor: questPath.anchor, cells: pathKeys });
-
-    const forward = path.map((cell) => getQuestDisplayLetter(cellMap.get(getCellKey(cell.row, cell.col)), state.run.seed, cell.row, cell.col)).join("").toLowerCase();
-    const backward = forward.split("").reverse().join("");
-    const match = state.run.words.find((word) => !state.solvedIds.includes(word.id) && (word.answer === forward || word.answer === backward));
-
-    if (match) {
-      solveWordById(match.id);
-      setQuestPath({ anchor: null, cells: [] });
-      showToast(`Found ${match.answer.toUpperCase()}.`);
-      return;
-    }
-
-    setQuestPath({ anchor: key, cells: [key] });
+    setQuestPath(questPointerPreviousPathRef.current);
+    questPointerStartRef.current = null;
+    questPointerMovedRef.current = false;
+    setAnnouncement("Quest drag canceled.");
   }
 
-  function selectWord(wordId: string) {
+  function handleQuestClick(row: number, col: number) {
+    if (suppressQuestClickRef.current) {
+      suppressQuestClickRef.current = false;
+      return;
+    }
+    transitionQuestEndpoint(row, col);
+  }
+
+  function moveQuestCellFocus(row: number, col: number, rowStep: number, colStep: number) {
+    const nextRow = row + rowStep;
+    const nextCol = col + colStep;
+    if (nextRow < 0 || nextCol < 0 || nextRow >= state.run.board.size || nextCol >= state.run.board.size) {
+      return;
+    }
+    focusBoardCellKey(getCellKey(nextRow, nextCol));
+  }
+
+  function handleQuestCellKeyDown(event: React.KeyboardEvent<HTMLButtonElement>, row: number, col: number) {
+    const movement = {
+      ArrowUp: [-1, 0],
+      ArrowDown: [1, 0],
+      ArrowLeft: [0, -1],
+      ArrowRight: [0, 1],
+    }[event.key];
+    if (movement) {
+      event.preventDefault();
+      moveQuestCellFocus(row, col, movement[0], movement[1]);
+      return;
+    }
+
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      transitionQuestEndpoint(row, col);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      clearQuestPathSelection();
+    }
+  }
+
+  function selectWord(wordId: string, intent: WordSelectionIntent = "answer", selectedCellKey?: string) {
+    if (!state.run.words.some((word) => word.id === wordId)) {
+      return;
+    }
+
     setState((current) => {
-      const nextState = {
+      if (!current.run.words.some((word) => word.id === wordId)) {
+        return current;
+      }
+
+      return {
         ...current,
         activeWordId: wordId,
       };
-      setFocusedCellKey(getFirstOpenCellKey(nextState, wordId));
-      setMobilePanel("board");
-      syncProgress(nextState);
-      return nextState;
+    });
+    const questMode = state.run.options.boardView === "quest";
+    const resolvedIntent = questMode ? "cell" : intent;
+    const targetCellKey = selectedCellKey ?? getFirstOpenCellKey(state, wordId);
+    setFocusedCellKey(targetCellKey);
+    setMobilePanel("board");
+    const placement = getPlacementByWordId(state, wordId);
+    const word = getWordById(state, wordId);
+    if (placement && word) {
+      if (questMode) {
+        setQuestPath({ anchor: null, cells: [] });
+        setAnnouncement(`${word.answer.toUpperCase()} selected, ${word.length} letters. Its first board cell is focused.`);
+      } else {
+        setAnnouncement(`${placement.clueNumber} ${placement.direction} selected, ${word.length} letters.`);
+      }
+    }
+
+    window.requestAnimationFrame(() => {
+      if (resolvedIntent === "answer" && canMutateAttempt(state) && !state.solvedIds.includes(wordId)) {
+        activeAnswerInputRef.current?.focus();
+      } else if (targetCellKey) {
+        boardCellRefs.current[targetCellKey]?.focus();
+      }
     });
   }
 
   function focusBoardCellKey(cellKey: string) {
     setFocusedCellKey(cellKey);
-    window.requestAnimationFrame(() => {
-      boardCellRefs.current[cellKey]?.focus();
-    });
+    const cell = boardCellRefs.current[cellKey];
+    if (cell) {
+      cell.focus();
+    } else {
+      window.requestAnimationFrame(() => boardCellRefs.current[cellKey]?.focus());
+    }
   }
 
   function jumpToStudioSection(panel: MobilePanel) {
@@ -1011,22 +1301,76 @@ export function WordPuzzleStudio() {
       setRightSidebarOpen(true);
       window.setTimeout(() => {
         const section = document.getElementById(sectionId);
-        section?.scrollIntoView({ behavior: "smooth", block: "start" });
+        const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        section?.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
       }, 0);
       return;
     }
 
     const section = typeof document !== "undefined" ? document.getElementById(sectionId) : null;
-    section?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    section?.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
+  }
+
+  function handleWorkspaceTabKey(event: React.KeyboardEvent<HTMLButtonElement>, currentPanel: MobilePanel) {
+    if (!compactWorkspace || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+      return;
+    }
+
+    event.preventDefault();
+    const currentIndex = workspacePanels.findIndex((panel) => panel.id === currentPanel);
+    const nextIndex = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? workspacePanels.length - 1
+        : (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + workspacePanels.length) % workspacePanels.length;
+    const nextPanel = workspacePanels[nextIndex]?.id;
+    if (nextPanel) {
+      setMobilePanel(nextPanel);
+      window.requestAnimationFrame(() => workspaceTabRefs.current[nextPanel]?.focus());
+    }
   }
 
   function updateBoardCellEntry(cell: PuzzleBoardCell, nextLetter: string, options?: { moveBackward?: boolean }) {
+    if (!canMutateAttempt(state)) {
+      return;
+    }
+
     const preferredWordId = getPreferredWordIdForCell(state, cell, state.activeWordId);
     if (!preferredWordId) {
       return;
     }
 
+    const nowMs = readNow();
+    const previewPlacement = getPlacementByWordId(state, preferredWordId);
+    const previewWord = getWordById(state, preferredWordId);
+    if (previewPlacement && previewWord) {
+      const previewEntries = { ...state.cellEntries, [getCellKey(cell.row, cell.col)]: nextLetter };
+      if (!nextLetter) {
+        delete previewEntries[getCellKey(cell.row, cell.col)];
+      }
+      const previewGuess = getWordCells(state, previewPlacement).map((entry) => previewEntries[getCellKey(entry.row, entry.col)] ?? "").join("");
+      const clueLabel = `${previewPlacement.clueNumber} ${previewPlacement.direction}`;
+      if (previewGuess.length === previewWord.length && sanitizeGuess(previewGuess) === previewWord.normalized) {
+        setAnnouncement(`${clueLabel} solved. ${Math.min(state.run.words.length, solvedCount + 1)} of ${state.run.words.length} complete.`);
+      } else if (previewGuess.length === previewWord.length) {
+        setAnnouncement(`${clueLabel} is not correct yet.`);
+      } else {
+        setAnnouncement(`${clueLabel} selected, ${previewWord.length} letters.`);
+      }
+    }
+
     setState((current) => {
+      if (!canMutateAttempt(current)) {
+        return current;
+      }
+
+      const currentCell = current.run.board.cells.find((entry) => entry.row === cell.row && entry.col === cell.col);
+      const currentWordId = currentCell ? getPreferredWordIdForCell(current, currentCell, current.activeWordId) : null;
+      if (!currentWordId) {
+        return current;
+      }
+
       const nextCellEntries = { ...current.cellEntries };
       const cellKey = getCellKey(cell.row, cell.col);
 
@@ -1039,14 +1383,13 @@ export function WordPuzzleStudio() {
       const nextState = buildStateWithEntries(
         {
           ...current,
-          activeWordId: preferredWordId,
+          activeWordId: currentWordId,
         },
         nextCellEntries,
-        preferredWordId,
+        currentWordId,
       );
 
-      syncProgress(nextState);
-      return nextState;
+      return finalizeAttempt(nextState, nowMs);
     });
 
     const placement = getPlacementByWordId(state, preferredWordId);
@@ -1072,7 +1415,8 @@ export function WordPuzzleStudio() {
 
     const nextWordId = getPreferredWordIdForCell(state, nextCell, state.activeWordId);
     if (nextWordId) {
-      selectWord(nextWordId);
+      selectWord(nextWordId, "cell", getCellKey(nextCell.row, nextCell.col));
+      return;
     }
 
     focusBoardCellKey(getCellKey(nextCell.row, nextCell.col));
@@ -1109,6 +1453,13 @@ export function WordPuzzleStudio() {
       return;
     }
 
+    if (!canMutateAttempt(state)) {
+      if (event.key === "Backspace" || event.key === "Delete" || /^[a-zA-Z]$/.test(event.key)) {
+        event.preventDefault();
+      }
+      return;
+    }
+
     if (event.key === "Backspace" || event.key === "Delete") {
       event.preventDefault();
       updateBoardCellEntry(cell, "", { moveBackward: event.key === "Backspace" });
@@ -1122,101 +1473,109 @@ export function WordPuzzleStudio() {
   }
 
   function jumpToAdjacentClue(step: 1 | -1) {
-    setState((current) => {
-      const nextWordId = getNextWordId(current, current.activeWordId, step);
-      if (!nextWordId) {
-        return current;
-      }
-
-      const nextState = {
-        ...current,
-        activeWordId: nextWordId,
-      };
-      setFocusedCellKey(getFirstOpenCellKey(nextState, nextWordId));
-      syncProgress(nextState);
-      return nextState;
-    });
+    const nextWordId = getNextWordId(state, state.activeWordId, step, canMutateAttempt(state));
+    if (nextWordId) {
+      selectWord(nextWordId, "answer");
+    }
   }
 
   function clearActiveWord() {
-    if (!activeWord) {
-      return;
-    }
-
-    const placement = getPlacementByWordId(state, activeWord.id);
-    if (!placement) {
+    if (!activeWord || !canMutateAttempt(state)) {
       return;
     }
 
     setState((current) => {
+      if (!canMutateAttempt(current) || !current.activeWordId) {
+        return current;
+      }
+
+      const placement = getPlacementByWordId(current, current.activeWordId);
+      if (!placement) {
+        return current;
+      }
+
       const nextCellEntries = { ...current.cellEntries };
       const cells = getWordCells(current, placement);
 
       for (const cell of cells) {
         const key = getCellKey(cell.row, cell.col);
-        const hasSolvedNeighbor = cell.wordIds.some((wordId) => wordId !== activeWord.id && current.solvedIds.includes(wordId));
+        const hasSolvedNeighbor = cell.wordIds.some((wordId) => wordId !== current.activeWordId && current.solvedIds.includes(wordId));
 
         if (!hasSolvedNeighbor) {
           delete nextCellEntries[key];
         }
       }
 
-      const nextState = buildStateWithEntries(current, nextCellEntries, activeWord.id);
-      syncProgress(nextState);
-      return nextState;
+      return buildStateWithEntries(current, nextCellEntries, current.activeWordId);
     });
   }
 
   function revealActiveLetter() {
-    if (!activeWord) {
+    if (!activeWord || !canMutateAttempt(state)) {
       return;
     }
 
-    const placement = getPlacementByWordId(state, activeWord.id);
-    if (!placement) {
-      return;
-    }
-
+    const nowMs = readNow();
     setState((current) => {
+      if (!canMutateAttempt(current) || !current.activeWordId) {
+        return current;
+      }
+
+      const currentWord = getWordById(current, current.activeWordId);
+      const placement = getPlacementByWordId(current, current.activeWordId);
+      if (!currentWord || !placement) {
+        return current;
+      }
+
       const nextCellEntries = { ...current.cellEntries };
       const cells = getWordCells(current, placement);
-      const revealIndex = cells.findIndex((cell, index) => (nextCellEntries[getCellKey(cell.row, cell.col)] ?? "") !== activeWord.answer[index]);
+      const revealIndex = cells.findIndex((cell, index) => (nextCellEntries[getCellKey(cell.row, cell.col)] ?? "") !== currentWord.answer[index]);
 
       if (revealIndex === -1) {
         return current;
       }
 
       const revealCell = cells[revealIndex];
-      nextCellEntries[getCellKey(revealCell.row, revealCell.col)] = activeWord.answer[revealIndex];
-
-      const nextState = buildStateWithEntries(
-        {
-          ...current,
-          hintLevels: {
-            ...current.hintLevels,
-            [activeWord.id]: Math.min(3, getHintLevel(activeWord.id, current.hintLevels) + 1),
-          },
-        },
-        nextCellEntries,
-        activeWord.id,
-      );
-      syncProgress(nextState);
-      return nextState;
+      const revealedCellKey = getCellKey(revealCell.row, revealCell.col);
+      nextCellEntries[revealedCellKey] = currentWord.answer[revealIndex];
+      const assistedState = recordRevealedCell(current, revealedCellKey);
+      return finalizeAttempt(buildStateWithEntries(assistedState, nextCellEntries, currentWord.id), nowMs);
     });
   }
 
   function updateWordGuess(word: PuzzleWord, value: string) {
-    const placement = getWordPlacement(state, word.id);
-    if (!placement) {
+    if (!canMutateAttempt(state)) {
       return;
     }
 
     const cleaned = sanitizeGuess(value).slice(0, word.answer.length);
+    const placement = getPlacementByWordId(state, word.id);
+    if (placement) {
+      const clueLabel = `${placement.clueNumber} ${placement.direction}`;
+      if (cleaned.length === word.length && cleaned === word.normalized) {
+        setAnnouncement(`${clueLabel} solved. ${Math.min(state.run.words.length, solvedCount + 1)} of ${state.run.words.length} complete.`);
+      } else if (cleaned.length === word.length) {
+        setAnnouncement(`${clueLabel} is not correct yet.`);
+      } else {
+        setAnnouncement(`${clueLabel} selected, ${word.length} letters.`);
+      }
+    }
 
+    const nowMs = readNow();
     setState((current) => {
+      if (!canMutateAttempt(current)) {
+        return current;
+      }
+
+      const currentWord = getWordById(current, word.id);
+      const placement = currentWord ? getWordPlacement(current, currentWord.id) : null;
+      if (!currentWord || !placement) {
+        return current;
+      }
+
       const nextCellEntries = { ...current.cellEntries };
 
-      for (let index = 0; index < word.answer.length; index += 1) {
+      for (let index = 0; index < currentWord.answer.length; index += 1) {
         const row = placement.row + (placement.direction === "down" ? index : 0);
         const col = placement.col + (placement.direction === "across" ? index : 0);
         const key = getCellKey(row, col);
@@ -1229,10 +1588,7 @@ export function WordPuzzleStudio() {
         }
       }
 
-      const nextState = buildStateWithEntries(current, nextCellEntries, word.id);
-
-      syncProgress(nextState);
-      return nextState;
+      return finalizeAttempt(buildStateWithEntries(current, nextCellEntries, currentWord.id), nowMs);
     });
   }
 
@@ -1243,8 +1599,7 @@ export function WordPuzzleStudio() {
 
     const currentIndex = cell.wordIds.findIndex((wordId) => wordId === state.activeWordId);
     const nextWordId = currentIndex === -1 ? cell.wordIds[0] : cell.wordIds[(currentIndex + 1) % cell.wordIds.length];
-    setFocusedCellKey(getCellKey(cell.row, cell.col));
-    selectWord(nextWordId);
+    selectWord(nextWordId, "cell", getCellKey(cell.row, cell.col));
   }
 
 function getClueTone(word: PuzzleWord) {
@@ -1300,7 +1655,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
 }
 
   return (
-    <main className={`scroll-shell ${theme.className} min-h-screen px-4 py-6 sm:px-6 lg:px-8`}>
+    <main id="puzzle-studio" aria-busy={!hydrated} data-hydrated={hydrated ? "true" : "false"} className={`scroll-shell ${theme.className} min-h-screen scroll-mt-4 px-4 py-6 sm:px-6 lg:px-8 ${hydrated ? "" : "pointer-events-none opacity-70"}`}>
       <div className="mx-auto flex w-full max-w-[96rem] flex-col gap-6">
         <section className="glass-card quest-card-frame quest-card-glow overflow-hidden rounded-[2rem] px-5 py-5 sm:px-6">
           <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
@@ -1309,8 +1664,8 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 <div className="flex items-center gap-3 rounded-full border border-white/10 bg-slate-950/45 px-3 py-2">
                   <div className="grid size-8 place-items-center rounded-full border border-white/10 bg-[linear-gradient(135deg,rgba(168,85,247,0.22),rgba(96,165,250,0.18))] text-sm">✦</div>
                   <div>
-                    <div className="quest-logo text-sm font-black uppercase tracking-[0.12em]">Word Quest</div>
-                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Quest studio</div>
+                    <div className="quest-logo text-sm font-black uppercase tracking-[0.12em]">Astra Lexa</div>
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Word puzzle studio</div>
                   </div>
                 </div>
                 <nav className="flex flex-wrap gap-2 text-sm text-slate-300">
@@ -1323,13 +1678,13 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
 
               <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_8.5rem] lg:items-center">
                 <div className="space-y-3">
-                  <div className="text-sm font-semibold text-fuchsia-300">Today&apos;s Quest</div>
-                  <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">{state.run.title}</h1>
+                  <div className="text-sm font-semibold text-fuchsia-300">{runContextLabel}</div>
+                  <h2 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">{state.run.title}</h2>
                   <p className="max-w-3xl text-sm leading-6 text-slate-300">{state.run.blurb}</p>
                   <div className="flex flex-wrap gap-2 text-xs text-slate-200">
                     <span data-testid="progress-label" className="accent-chip rounded-full px-3 py-1 font-semibold uppercase tracking-[0.22em]">{progressLabel}</span>
                     <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1 uppercase tracking-[0.2em] text-slate-300">{runStateLabel}</span>
-                    <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1 text-slate-300">{formatElapsed(state.elapsedMs)}</span>
+                    <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1 text-slate-300">{formatElapsed(displayedElapsedMs)}</span>
                     <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1 text-slate-300">streak {progress.streak}</span>
                     <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1 text-slate-300">{state.run.words[0]?.topicLabel ?? "Mixed"}</span>
                   </div>
@@ -1370,9 +1725,9 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 </div>
               </div>
               <div className="rounded-[1.5rem] border border-white/10 bg-white/4 px-4 py-3 text-sm text-slate-200">
-                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Hints</div>
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Assists</div>
                 <div className="mt-2 flex items-center justify-between gap-2">
-                  <span className="text-lg font-semibold text-white">{hintsUsed}</span>
+                  <span className="text-lg font-semibold text-white">{assistsUsed}</span>
                   <span className="text-xl">💡</span>
                 </div>
               </div>
@@ -1413,7 +1768,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
           </div>
           <div id="studio-setup-rail" className="space-y-5">
               <div className="rounded-2xl border border-dashed border-white/10 bg-slate-950/35 px-4 py-3 text-sm text-slate-300">
-                Most selections apply to the <span className="font-medium text-white">next run</span>. <span className="font-medium text-white">Board interaction</span> and <span className="font-medium text-white">Learning mode</span> update the current puzzle immediately.
+                Setup changes apply to the <span className="font-medium text-white">next run</span>, so the active puzzle keeps one stable identity and rule set.
               </div>
               <div className="space-y-2">
                 <label className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Mode</label>
@@ -1446,12 +1801,13 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
               <div className="space-y-2">
                 <label className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Topics</label>
                 <div className="flex flex-wrap gap-2">
-                  {topicCatalog.map((topic) => (
+                  {availableTopics.map((topic) => (
                     <button key={topic.id} type="button" onClick={() => toggleTopic(topic.id)} className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${options.topics.includes(topic.id) ? "accent-chip" : "border-white/10 bg-white/4 text-slate-200"}`}>
                       {topic.label}
                     </button>
                   ))}
                 </div>
+                <p className="text-xs leading-5 text-slate-400">{options.boardView === "crossword" ? "Crossword topics use reviewed, answer-specific clues." : "Trace path unlocks every local topic and words that fit its 14×14 board."}</p>
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-white/4 px-4 py-3 text-sm text-slate-300">
@@ -1511,17 +1867,8 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
 
                 <label className="space-y-2 text-sm text-slate-300">
                   <span className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Target count</span>
-                  <input type="range" min={4} max={options.puzzleFamily === "mini" ? 6 : 12} value={options.puzzleSize} onChange={(event) => updateOptions("puzzleSize", Number(event.target.value))} className="w-full" />
-                  <span>{options.puzzleSize} words{options.puzzleFamily === "mini" ? " max 6" : ""}</span>
-                </label>
-
-                <label className="space-y-2 text-sm text-slate-300">
-                  <span className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Clue Density</span>
-                  <select value={options.clueDensity} onChange={(event) => updateOptions("clueDensity", Number(event.target.value) as 1 | 2 | 3)} className="w-full rounded-2xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none">
-                    <option value={1}>Lean</option>
-                    <option value={2}>Balanced</option>
-                    <option value={3}>Rich</option>
-                  </select>
+                  <input type="range" min={puzzleSizeRange.min} max={puzzleSizeRange.max} value={options.puzzleSize} onChange={(event) => updateOptions("puzzleSize", Number(event.target.value))} className="w-full" />
+                  <span>{options.puzzleSize} words · supported range {puzzleSizeRange.min}–{puzzleSizeRange.max}</span>
                 </label>
 
                 <label className="space-y-2 text-sm text-slate-300">
@@ -1543,7 +1890,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
 
                 <label className="space-y-2 text-sm text-slate-300">
                   <span className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{options.mode === "daily" ? "Daily Date" : "Custom Seed"}</span>
-                  <input type={options.mode === "daily" ? "date" : "text"} value={options.seed} onChange={(event) => updateOptions("seed", event.target.value)} placeholder={options.mode === "daily" ? getDefaultDailySeed() : "Optional seed"} className="w-full rounded-2xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500" />
+                  <input type={options.mode === "daily" ? "date" : "text"} value={options.seed} onChange={(event) => updateOptions("seed", event.target.value)} placeholder={options.mode === "daily" ? getUtcDay() : "Optional seed"} className="w-full rounded-2xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500" />
                 </label>
 
                 <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/4 px-4 py-3 text-sm text-slate-200">
@@ -1577,8 +1924,8 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
           </div>
         </section>
 
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.9fr)_21rem]">
-          <section className="space-y-6">
+        <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.9fr)_21rem]">
+          <section className="min-w-0 space-y-6">
             <div className="glass-card rounded-[2rem] p-5 sm:p-6">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div className="space-y-2">
@@ -1594,29 +1941,33 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 <div className="space-y-3 lg:max-w-md lg:text-right">
                   <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Run controls</div>
                   <div className="flex flex-wrap gap-2 lg:justify-end">
-                    <button type="button" onClick={togglePause} className={secondaryPillClass}>{state.paused ? "Resume" : "Pause"}</button>
+                    {!finished ? <button type="button" onClick={togglePause} className={secondaryPillClass}>{state.paused ? "Resume" : "Pause"}</button> : null}
                     <button type="button" onClick={() => startNewRun(state.run.options)} className={secondaryPillClass}>Restart</button>
                   </div>
                   <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Review tools</div>
                   <div className="flex flex-wrap gap-2 lg:justify-end">
-                    <button type="button" onClick={confirmRevealWord} className={secondaryPillClass}>Review Word</button>
-                    <button type="button" onClick={confirmRevealPuzzle} className={secondaryPillClass}>Review Puzzle</button>
+                    <button type="button" onClick={confirmRevealWord} disabled={state.paused && !Boolean(activeWord && (state.solvedIds.includes(activeWord.id) || state.assists.revealedWordIds.includes(activeWord.id) || state.assists.puzzleRevealed))} className={`${secondaryPillClass} disabled:cursor-not-allowed disabled:opacity-40`}>Review Word</button>
+                    <button type="button" onClick={confirmRevealPuzzle} disabled={state.paused && !state.assists.puzzleRevealed} className={`${secondaryPillClass} disabled:cursor-not-allowed disabled:opacity-40`}>Review Puzzle</button>
                   </div>
                 </div>
               </div>
 
-              <div className={`mt-4 grid gap-2 lg:hidden ${reviewMode === "none" ? "grid-cols-3" : "grid-cols-4"}`}>
-                {([
-                  ["board", "Board"],
-                  ["clues", "Clues"],
-                  ...(reviewMode === "none" ? [] : [["review", reviewMode === "word" ? "Word" : "Puzzle"] as const]),
-                  ["archive", "Archive"],
-                ] as const).map(([panelId, label]) => (
+              <div role={compactWorkspace ? "tablist" : undefined} aria-label={compactWorkspace ? "Puzzle workspace views" : undefined} className={`mt-4 grid gap-2 xl:hidden ${visibleReviewKind ? "grid-cols-4" : "grid-cols-3"}`}>
+                {workspacePanels.map(({ id: panelId, label }) => (
                   <button
                     key={panelId}
+                    id={`workspace-tab-${panelId}`}
+                    ref={(node) => {
+                      workspaceTabRefs.current[panelId] = node;
+                    }}
                     type="button"
                     onClick={() => setMobilePanel(panelId)}
-                    className={`rounded-2xl border px-3 py-2 text-sm transition ${mobilePanel === panelId ? "accent-chip" : "border-white/10 bg-white/4 text-slate-200"}`}
+                    onKeyDown={(event) => handleWorkspaceTabKey(event, panelId)}
+                    role={compactWorkspace ? "tab" : undefined}
+                    aria-selected={compactWorkspace ? mobilePanel === panelId : undefined}
+                    aria-controls={compactWorkspace ? `studio-${panelId}` : undefined}
+                    tabIndex={compactWorkspace ? (mobilePanel === panelId ? 0 : -1) : 0}
+                    className={`min-h-11 rounded-2xl border px-3 py-2 text-sm transition ${mobilePanel === panelId ? "accent-chip" : "border-white/10 bg-white/4 text-slate-200"}`}
                   >
                     {label}
                   </button>
@@ -1624,8 +1975,8 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
               </div>
             </div>
 
-            <div className="space-y-6">
-              <div id="studio-board" className={`${mobilePanel === "board" ? "block" : "hidden"} glass-card rounded-[2rem] p-4 sm:p-6 lg:block`}>
+            <div className="min-w-0 space-y-6">
+              <div id="studio-board" role={compactWorkspace ? "tabpanel" : "region"} aria-label={compactWorkspace ? undefined : "Puzzle board workspace"} aria-labelledby={compactWorkspace ? "workspace-tab-board" : undefined} hidden={compactWorkspace && mobilePanel !== "board"} className={`${mobilePanel === "board" ? "block" : "hidden"} min-w-0 max-w-full overflow-hidden glass-card rounded-[2rem] p-4 sm:p-6 xl:block`}>
                 <div className="mb-4 flex items-center justify-between">
                   <div>
                     <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Puzzle</div>
@@ -1638,15 +1989,84 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                   </div>
                 </div>
                 <div className="mb-4 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.18em] text-slate-400">
-                  <span className="rounded-full border border-white/10 px-3 py-1.5">tap board to jump</span>
-                  <span className="rounded-full border border-white/10 px-3 py-1.5">active clue stays highlighted</span>
-                  <span className="rounded-full border border-white/10 px-3 py-1.5">review stays separate</span>
+                  <span className="rounded-full border border-white/10 px-3 py-1.5">{isQuestView ? "tap two endpoints" : "tap board to jump"}</span>
+                  <span className="rounded-full border border-white/10 px-3 py-1.5">{isQuestView ? "drag a straight path" : "active clue stays highlighted"}</span>
+                  <span className="rounded-full border border-white/10 px-3 py-1.5">{isQuestView ? "arrows move · enter selects" : "review stays separate"}</span>
                 </div>
 
-                <div className="overflow-auto pb-2">
-                  <div className={`mx-auto grid w-max gap-1 rounded-[1.5rem] border ${classicBoardShellClass}`}>
+                {isQuestView ? (
+                  <div className="mb-5 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(14rem,0.7fr)]">
+                    <div id="quest-grid-instructions" className="rounded-2xl border border-white/10 bg-white/4 px-4 py-3 text-sm leading-6 text-slate-300">
+                      Tap a start and endpoint, drag a straight path, or use arrows with Enter or Space. Escape clears the current selection.
+                    </div>
+                    <div id="quest-grid-status" data-testid="quest-status" className="rounded-2xl border border-cyan-400/20 bg-cyan-500/8 px-4 py-3 text-sm font-medium leading-6 text-cyan-100">
+                      {liveMessage}
+                    </div>
+                  </div>
+                ) : null}
+
+                {!isQuestView && activeWord ? (
+                  <div data-testid="active-clue-panel" className={`mb-5 rounded-[1.5rem] border bg-white/4 p-4 ${activeGuessIncorrect ? "border-rose-400/45" : "border-white/10"}`}>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Active clue</div>
+                        <div className="mt-1 text-lg font-semibold text-white">{activeClueName} · {activeWord.length} letters</div>
+                        <p id={activeCluePromptId} className="mt-2 text-sm text-slate-300">{activeWord.prompt}</p>
+                      </div>
+                      <div className={`rounded-full border px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] ${getClueTone(activeWord)}`}>{getFrequencyLabel(activeWord.frequencyBand)}</div>
+                    </div>
+                    <label htmlFor="active-answer-input" className="mt-4 block text-[11px] uppercase tracking-[0.22em] text-slate-400">Answer for {activeClueName}</label>
+                    <input
+                      id="active-answer-input"
+                      ref={activeAnswerInputRef}
+                      data-testid="active-answer-input"
+                      aria-label={`Answer for ${activeClueName}, ${activeWord.length} letters`}
+                      aria-describedby={[activeCluePromptId, activeClueFeedbackId].filter(Boolean).join(" ")}
+                      aria-invalid={activeGuessIncorrect || undefined}
+                      value={activeGuess}
+                      onChange={(event) => updateWordGuess(activeWord, event.target.value)}
+                      onKeyDown={(event) => {
+                        const target = event.currentTarget;
+                        const cursorAtStart = (target.selectionStart ?? 0) === 0 && (target.selectionEnd ?? 0) === 0;
+                        const cursorAtEnd = (target.selectionStart ?? target.value.length) === target.value.length && (target.selectionEnd ?? target.value.length) === target.value.length;
+
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          jumpToAdjacentClue(event.shiftKey ? -1 : 1);
+                          return;
+                        }
+                        if ((event.key === "ArrowRight" || event.key === "ArrowDown") && cursorAtEnd) {
+                          event.preventDefault();
+                          jumpToAdjacentClue(1);
+                          return;
+                        }
+                        if ((event.key === "ArrowLeft" || event.key === "ArrowUp") && cursorAtStart) {
+                          event.preventDefault();
+                          jumpToAdjacentClue(-1);
+                          return;
+                        }
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          const targetCellKey = boardFocusKey ?? getFirstOpenCellKey(state, activeWord.id);
+                          if (targetCellKey) {
+                            focusBoardCellKey(targetCellKey);
+                          }
+                        }
+                      }}
+                      disabled={!canMutateAttempt(state) || state.solvedIds.includes(activeWord.id)}
+                      placeholder={state.paused ? "Paused" : `${activeWord.length} letters`}
+                      className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm uppercase tracking-[0.25em] text-white placeholder:text-slate-500 disabled:opacity-60"
+                    />
+                    <div id={activeClueFeedbackId} className={`mt-3 text-sm font-medium ${activeGuessIncorrect ? "text-rose-200" : state.solvedIds.includes(activeWord.id) ? "text-emerald-200" : "text-slate-400"}`}>
+                      {state.solvedIds.includes(activeWord.id) ? "✓ Solved" : activeGuessIncorrect ? "Not correct yet" : `${activeFilledCount}/${activeWord.length} letters filled`}
+                    </div>
+                  </div>
+                ) : null}
+
+                <div data-testid="board-scroller" className="max-w-full overflow-auto pb-2">
+                  <div role="grid" aria-label={isQuestView ? "Quest word search board" : "Crossword puzzle board"} aria-describedby={isQuestView ? "quest-grid-instructions quest-grid-status" : undefined} aria-rowcount={state.run.board.size} aria-colcount={state.run.board.size} className={`mx-auto grid w-max gap-1 rounded-[1.5rem] border ${classicBoardShellClass}`}>
                     {Array.from({ length: state.run.board.size }, (_, row) => (
-                      <div key={row} className="flex gap-1">
+                      <div key={row} role="row" aria-rowindex={row + 1} className="flex gap-1">
                         {Array.from({ length: state.run.board.size }, (_, col) => {
                           const key = getCellKey(row, col);
                           const cell = cellMap.get(key);
@@ -1656,7 +2076,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                           const selectedQuestCell = questPath.cells.includes(key);
 
                           if (!cell && !isQuestView) {
-                            return <div key={key} className={`${boardCellSizeClass} ${classicEmptyCellClass}`} />;
+                            return <div key={key} role="gridcell" aria-colindex={col + 1} aria-label={`Row ${row + 1} column ${col + 1}, blocked`} className={`${boardCellSizeClass} ${classicEmptyCellClass}`} />;
                           }
 
                           const displayLetter = cell
@@ -1679,41 +2099,56 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                               }}
                               data-testid={`board-cell-${row}-${col}`}
                               data-active-cell={activeCell ? "true" : "false"}
+                              data-quest-cell={isQuestView ? "true" : undefined}
+                              data-row={isQuestView ? row : undefined}
+                              data-col={isQuestView ? col : undefined}
                               type="button"
-                              tabIndex={cell && boardFocusKey === key ? 0 : -1}
+                              role="gridcell"
+                              aria-colindex={col + 1}
+                              aria-label={isQuestView ? getQuestCellLabel(row, col, displayLetter, selectedQuestCell, questPath.anchor === key) : cell ? getCrosswordCellLabel(state, cell, state.activeWordId) : undefined}
+                              aria-selected={isQuestView ? selectedQuestCell : activeCell}
+                              aria-readonly={!canMutateAttempt(state)}
+                              tabIndex={(isQuestView || cell) && boardFocusKey === key ? 0 : -1}
                               onClick={() => {
                                 if (isQuestView) {
-                                  handleQuestSelection(row, col);
+                                  handleQuestClick(row, col);
                                 } else if (cell) {
                                   selectWordFromCell(cell);
                                 }
                               }}
-                              onPointerDown={() => {
+                              onPointerDown={(event) => {
                                 if (isQuestView) {
-                                  beginQuestSelection(row, col);
+                                  beginQuestPointer(event, row, col);
                                 }
                               }}
-                              onPointerEnter={() => {
+                              onPointerMove={(event) => {
                                 if (isQuestView) {
-                                  extendQuestSelection(row, col);
+                                  moveQuestPointer(event, row, col);
                                 }
                               }}
-                              onPointerUp={() => {
+                              onPointerUp={(event) => {
                                 if (isQuestView) {
-                                  finishQuestSelection(row, col);
+                                  finishQuestPointer(event, row, col);
+                                }
+                              }}
+                              onPointerCancel={(event) => {
+                                if (isQuestView) {
+                                  cancelQuestPointer(event);
                                 }
                               }}
                               onFocus={() => {
-                                if (cell) {
+                                if (isQuestView || cell) {
                                   setFocusedCellKey(key);
                                 }
                               }}
                               onKeyDown={(event) => {
-                                if (cell) {
+                                if (isQuestView) {
+                                  handleQuestCellKeyDown(event, row, col);
+                                } else if (cell) {
                                   handleBoardCellKeyDown(event, cell);
                                 }
                               }}
-                              className={`relative border font-semibold uppercase transition ${boardCellSizeClass} ${selectedQuestCell ? "border-cyan-300/55 bg-cyan-400/18 text-white" : buttonClass} ${solvedCell ? "shadow-[0_0_18px_rgba(255,255,255,0.06)]" : ""} ${cell && boardFocusKey === key ? "ring-2 ring-white/55" : ""}`}
+                              className={`relative border font-semibold uppercase transition ${boardCellSizeClass} ${selectedQuestCell ? "border-cyan-300/55 bg-cyan-400/18 text-white" : buttonClass} ${solvedCell ? "shadow-[0_0_18px_rgba(255,255,255,0.06)]" : ""} ${(isQuestView || cell) && boardFocusKey === key ? "ring-2 ring-white/55" : ""}`}
                             >
                               {!isQuestView && cell?.clueNumbers[0] ? <span className="absolute left-1 top-0.5 text-[9px] font-medium text-slate-400">{cell.clueNumbers[0]}</span> : null}
                               <span>{displayLetter}</span>
@@ -1729,8 +2164,8 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                   <div className="mt-5 rounded-[1.5rem] border border-white/10 bg-white/4 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <div className="text-xs uppercase tracking-[0.24em] text-slate-400">{isQuestView ? "Solve focus" : "Active clue"}</div>
-                        <div className="mt-1 text-lg font-semibold text-white">{isQuestView ? activeWord.answer.length + " letters · starts with " + (activeWord.answer[0]?.toUpperCase() ?? "?") : `${activePlacement?.clueNumber}. ${getActiveClueSummary(activeWord)}`}</div>
+                        <div className="text-xs uppercase tracking-[0.24em] text-slate-400">{isQuestView ? "Solve focus" : "Clue support"}</div>
+                        <div className="mt-1 text-lg font-semibold text-white">{isQuestView ? activeWord.answer.length + " letters · starts with " + (activeWord.answer[0]?.toUpperCase() ?? "?") : `${activePlacement?.clueNumber}. ${getActiveClueSummary(activeWord, state.run.options.challenge)}`}</div>
                         <div className="mt-2 text-sm text-slate-300">{activeWord.prompt}</div>
                         <div className="mt-2 text-xs uppercase tracking-[0.2em] text-slate-400">{isQuestView ? `${questPath.cells.length || 1}/${activeWord.length} trail cells` : `${activeFilledCount}/${activeWord.length} letters filled`}</div>
                       </div>
@@ -1739,52 +2174,9 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
 
                     {isQuestView ? (
                       <div className="mt-4 rounded-2xl border border-dashed border-white/12 bg-slate-950/45 px-4 py-3 text-sm text-slate-200">
-                        Trace the word directly on the board. Start on the first letter, drag in a straight line, and release on the last letter.
+                        Trace directly on the board: drag a straight line, tap its two endpoints, or use arrows and Enter to mark the same path.
                       </div>
-                    ) : (
-                      <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/45 p-4">
-                        <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Answer lane</div>
-                        <p className="mt-2 text-sm text-slate-300">Type straight through, then use the shortcut row to keep momentum across neighboring clues.</p>
-                        <input
-                          ref={activeAnswerInputRef}
-                          data-testid="active-answer-input"
-                          aria-label="Active clue answer"
-                          value={activeGuess}
-                          onChange={(event) => updateWordGuess(activeWord, event.target.value)}
-                          onKeyDown={(event) => {
-                            const target = event.currentTarget;
-                            const cursorAtStart = (target.selectionStart ?? 0) === 0 && (target.selectionEnd ?? 0) === 0;
-                            const cursorAtEnd = (target.selectionStart ?? target.value.length) === target.value.length && (target.selectionEnd ?? target.value.length) === target.value.length;
-
-                            if (event.key === "Enter") {
-                              event.preventDefault();
-                              jumpToAdjacentClue(event.shiftKey ? -1 : 1);
-                              return;
-                            }
-
-                            if ((event.key === "ArrowRight" || event.key === "ArrowDown") && cursorAtEnd) {
-                              event.preventDefault();
-                              jumpToAdjacentClue(1);
-                              return;
-                            }
-
-                            if ((event.key === "ArrowLeft" || event.key === "ArrowUp") && cursorAtStart) {
-                              event.preventDefault();
-                              jumpToAdjacentClue(-1);
-                              return;
-                            }
-
-                            if (event.key === "Escape") {
-                              event.preventDefault();
-                              clearActiveWord();
-                            }
-                          }}
-                          disabled={state.paused || state.solvedIds.includes(activeWord.id)}
-                          placeholder={state.paused ? "Paused" : `${activeWord.length} letters`}
-                          className="mt-4 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm uppercase tracking-[0.25em] text-white outline-none placeholder:text-slate-500 disabled:opacity-60"
-                        />
-                      </div>
-                    )}
+                    ) : null}
 
                     <div className="mt-4 grid gap-3 sm:grid-cols-3">
                       {activeWord.visuals.slice(0, 3).map((visual, index) => (
@@ -1792,12 +2184,12 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                           <div className={`absolute inset-0 bg-gradient-to-br ${getClueArtTone(activeWord.topicId, activeWord.frequencyBand).baseTone}`} />
                           <div className="absolute inset-x-0 top-0 h-px bg-white/10" />
                           <div className="relative text-[10px] uppercase tracking-[0.28em] text-slate-500">{getClueArtLabel(index)}</div>
-                          <div className="relative mt-2 text-sm font-medium capitalize text-white">{getClueCardValue(activeWord, index)}</div>
+                          <div className="relative mt-2 text-sm font-medium capitalize text-white">{getClueCardValue(activeWord, index, state.run.options.challenge)}</div>
                         </div>
                       ))}
                     </div>
 
-                    {state.run.options.learningMode ? (
+                    {state.run.options.learningMode ? activeVocabularyUnlocked ? (
                       <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_16rem]">
                         <div className="rounded-2xl border border-white/10 bg-slate-950/45 p-4">
                           <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Vocabulary help</div>
@@ -1837,15 +2229,19 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                           <p className="mt-3 text-xs leading-5 text-slate-400">{activeWord.translationAid}</p>
                         </div>
                       </div>
+                    ) : (
+                      <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/45 p-4 text-sm text-slate-300">
+                        Vocabulary examples, pronunciation, and translation notes unlock after you solve this answer or deliberately open its review.
+                      </div>
                     ) : null}
 
                     <div className="mt-4">
                       <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Keyboard flow</div>
                       <div className="mt-3 flex flex-wrap gap-2">
-                      <span className="rounded-full border border-white/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-slate-300">Enter next</span>
-                      <span className="rounded-full border border-white/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-slate-300">Shift+Enter back</span>
-                      <span className="rounded-full border border-white/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-slate-300">Arrows move clues</span>
-                      <span className="rounded-full border border-white/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-slate-300">Esc exits clue</span>
+                      {(isQuestView
+                        ? ["Arrows move cells", "Enter selects endpoints", "Esc clears trail"]
+                        : ["Enter next", "Shift+Enter back", "Arrows move clues", "Esc exits clue"]
+                      ).map((label) => <span key={label} className="rounded-full border border-white/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-slate-300">{label}</span>)}
                       </div>
                     </div>
 
@@ -1858,13 +2254,13 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                       <button type="button" onClick={() => jumpToAdjacentClue(1)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100">
                         Next clue
                       </button>
-                      <button type="button" onClick={revealActiveLetter} disabled={state.paused || state.solvedIds.includes(activeWord.id)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
+                      <button type="button" onClick={revealActiveLetter} disabled={!canMutateAttempt(state) || state.solvedIds.includes(activeWord.id)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
                         Reveal letter
                       </button>
-                      <button type="button" onClick={isQuestView ? clearQuestPathSelection : clearActiveWord} disabled={state.paused || state.solvedIds.includes(activeWord.id)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
+                      <button type="button" onClick={() => isQuestView ? clearQuestPathSelection() : clearActiveWord()} disabled={!canMutateAttempt(state) || state.solvedIds.includes(activeWord.id)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
                         {isQuestView ? "Clear trail" : "Clear word"}
                       </button>
-                      <button type="button" onClick={() => revealAnagram(activeWord)} disabled={state.paused || state.solvedIds.includes(activeWord.id)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
+                      <button type="button" onClick={() => revealAnagram(activeWord)} disabled={!canMutateAttempt(state) || state.solvedIds.includes(activeWord.id)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
                         Show scramble
                       </button>
                       </div>
@@ -1873,20 +2269,20 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                     {shownAnagrams[activeWord.id] ? <div className="mt-3 rounded-2xl border border-dashed border-white/12 bg-slate-950/45 px-3 py-2 text-sm uppercase tracking-[0.25em] text-slate-200">Scramble: {shownAnagrams[activeWord.id]}</div> : null}
 
                     <div className="mt-4 flex items-center justify-between gap-3">
-                      <button type="button" onClick={() => revealHint(activeWord.id)} disabled={state.paused || getHintLevel(activeWord.id, state.hintLevels) >= 3} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
-                        {getHintLevel(activeWord.id, state.hintLevels) >= 3 ? "Hints maxed" : "Get tip"}
+                      <button type="button" onClick={() => revealHint(activeWord.id)} disabled={!canMutateAttempt(state) || getHintLevel(activeWord.id, state.assists.hintStepsByWord) >= 3} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
+                        {getHintLevel(activeWord.id, state.assists.hintStepsByWord) >= 3 ? "Hints maxed" : "Get tip"}
                       </button>
                       <span className={`text-xs font-semibold uppercase tracking-[0.2em] ${state.solvedIds.includes(activeWord.id) ? "text-emerald-300" : "text-slate-400"}`}>{state.solvedIds.includes(activeWord.id) ? "Solved" : "In play"}</span>
                     </div>
 
-                    {createHintLadder(activeWord).slice(0, getHintLevel(activeWord.id, state.hintLevels)).map((hint) => (
+                    {createHintLadder(activeWord).slice(0, getHintLevel(activeWord.id, state.assists.hintStepsByWord)).map((hint) => (
                       <div key={hint} className="mt-3 rounded-2xl border border-white/10 bg-white/4 px-3 py-2 text-sm text-slate-200">{hint}</div>
                     ))}
                   </div>
                 ) : null}
               </div>
 
-              <div id="studio-clues" className={`${mobilePanel === "clues" ? "block" : "hidden"} glass-card rounded-[2rem] p-5 sm:p-6 lg:block`}>
+              <div id="studio-clues" role={compactWorkspace ? "tabpanel" : "region"} aria-label={compactWorkspace ? undefined : "Puzzle clues"} aria-labelledby={compactWorkspace ? "workspace-tab-clues" : undefined} hidden={compactWorkspace && mobilePanel !== "clues"} className={`${mobilePanel === "clues" ? "block" : "hidden"} glass-card rounded-[2rem] p-5 sm:p-6 xl:block`}>
                 <div>
                   <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Across &amp; down</div>
                   <h3 className="mt-1 text-lg font-semibold text-white">Clues</h3>
@@ -1907,11 +2303,13 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                           if (!word) {
                             return null;
                           }
+                          const solved = state.solvedIds.includes(word.id);
+                          const active = state.activeWordId === placement.wordId;
 
                           return (
-                            <button key={placement.wordId} type="button" onClick={() => selectWord(placement.wordId)} className={`w-full rounded-2xl border p-3 text-left transition ${state.activeWordId === placement.wordId ? "accent-ring bg-white/6" : "border-white/10 bg-white/4"}`}>
+                            <button key={placement.wordId} type="button" aria-current={active ? "true" : undefined} onClick={() => selectWord(placement.wordId, "answer")} className={`w-full rounded-2xl border p-3 text-left transition ${active ? "accent-ring bg-white/6" : "border-white/10 bg-white/4"}`}>
                               <div className="mb-2 flex items-center justify-between gap-2 text-[11px] uppercase tracking-[0.18em] text-slate-400">
-                                <span>{state.activeWordId === placement.wordId ? "active clue" : "ready"}</span>
+                                <span className={solved ? "text-emerald-300" : undefined}>{solved ? "✓ solved" : active ? "active clue" : "ready"}</span>
                                 <span>{word.topicLabel}</span>
                               </div>
                               <div className="flex items-start justify-between gap-3">
@@ -1931,44 +2329,44 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
               </div>
             </div>
 
-            {reviewMode !== "none" ? (
-              <div id="studio-review" className={`${mobilePanel === "review" ? "block" : "hidden"} glass-card rounded-[2rem] p-5 sm:p-6 lg:block`}>
+            {visibleReviewKind ? (
+              <div id="studio-review" role={compactWorkspace ? "tabpanel" : "region"} aria-label={compactWorkspace ? undefined : "Puzzle review"} aria-labelledby={compactWorkspace ? "workspace-tab-review" : undefined} hidden={compactWorkspace && mobilePanel !== "review"} className={`${mobilePanel === "review" ? "block" : "hidden"} glass-card rounded-[2rem] p-5 sm:p-6 xl:block`}>
                 <div className="mb-4 flex items-center justify-between">
                   <div>
                     <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Review</div>
-                    <h3 className="mt-1 text-lg font-semibold text-white">{reviewMode === "word" ? "Word Review" : "Puzzle Review"}</h3>
+                    <h3 ref={reviewHeadingRef} tabIndex={-1} className="mt-1 text-lg font-semibold text-white">{visibleReviewKind === "word" ? "Word Review" : "Puzzle Review"}</h3>
                   </div>
-                  <button type="button" onClick={() => { setReviewMode("none"); setMobilePanel("board"); }} className="rounded-full border border-white/10 px-3 py-1 text-sm text-slate-300">Close</button>
+                  <button type="button" onClick={closeReview} className="rounded-full border border-white/10 px-3 py-1 text-sm text-slate-300">Close</button>
                 </div>
 
-                {reviewMode === "word" && activeWord ? (
+                {visibleReviewKind === "word" && reviewedWord ? (
                   <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
                     <div className="rounded-3xl border border-white/10 bg-white/4 p-5">
                       <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Answer unlocked</div>
-                      <div className="mt-2 text-[11px] uppercase tracking-[0.18em] text-slate-400">{activeWord.topicLabel} · {getFrequencyLabel(activeWord.frequencyBand)}</div>
-                      <div data-testid="review-word-answer" className="mt-2 text-3xl font-semibold uppercase tracking-[0.16em] text-white">{activeWord.answer}</div>
-                      <p className="mt-3 text-sm text-slate-300">{activeWord.prompt}</p>
+                      <div className="mt-2 text-[11px] uppercase tracking-[0.18em] text-slate-400">{reviewedWord.topicLabel} · {getFrequencyLabel(reviewedWord.frequencyBand)}</div>
+                      <div data-testid="review-word-answer" className="mt-2 text-3xl font-semibold uppercase tracking-[0.16em] text-white">{reviewedWord.answer}</div>
+                      <p className="mt-3 text-sm text-slate-300">{reviewedWord.prompt}</p>
                       {state.run.options.learningMode ? (
                         <div data-testid="review-vocabulary-support" className="mt-4 rounded-2xl border border-white/10 bg-slate-950/40 p-4 text-left">
                           <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Vocabulary support</div>
                           <div className="mt-2 text-[11px] uppercase tracking-[0.22em] text-slate-500">Meaning cue</div>
-                          <p className="mt-1 text-sm text-slate-200">{activeWord.learningNote}</p>
+                          <p className="mt-1 text-sm text-slate-200">{reviewedWord.learningNote}</p>
                           <div className="mt-3 text-[11px] uppercase tracking-[0.22em] text-slate-500">Plain meaning</div>
-                          <p className="mt-1 text-sm text-slate-200">{activeWord.plainMeaning}</p>
+                          <p className="mt-1 text-sm text-slate-200">{reviewedWord.plainMeaning}</p>
                           <div className="mt-3 text-[11px] uppercase tracking-[0.22em] text-slate-500">Example</div>
-                          <p className="mt-1 text-sm text-slate-300">{activeWord.usageExample}</p>
+                          <p className="mt-1 text-sm text-slate-300">{reviewedWord.usageExample}</p>
                           <div className="mt-3 text-[11px] uppercase tracking-[0.22em] text-slate-500">Pronunciation</div>
                           <div className="mt-3 flex items-center gap-2">
-                            <p className="text-sm text-slate-300">{activeWord.pronunciationHint}</p>
-                            <button type="button" onClick={() => speakWord(activeWord.answer)} className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] text-slate-100">
+                            <p className="text-sm text-slate-300">{reviewedWord.pronunciationHint}</p>
+                            <button type="button" onClick={() => speakWord(reviewedWord.answer)} className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] text-slate-100">
                               Speak
                             </button>
                           </div>
                           <div className="mt-3 text-[11px] uppercase tracking-[0.22em] text-slate-500">Extra cue</div>
-                          <p className="mt-1 text-sm text-slate-400">{activeWord.microHint}</p>
-                          <p className="mt-3 text-sm text-slate-400">{activeWord.translationAid}</p>
+                          <p className="mt-1 text-sm text-slate-400">{reviewedWord.microHint}</p>
+                          <p className="mt-3 text-sm text-slate-400">{reviewedWord.translationAid}</p>
                           <div className="mt-3 flex flex-wrap gap-2">
-                            {activeWord.relatedWords.map((related) => (
+                            {reviewedWord.relatedWords.map((related) => (
                               <span key={related} className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] capitalize text-slate-200">
                                 {related}
                               </span>
@@ -1981,13 +2379,13 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                       <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Hint ladder</div>
                       <p className="mt-2 text-sm text-slate-300">A clean recap of the clue trail that led to this answer.</p>
                       <div className="mt-3 space-y-2 text-sm text-slate-200">
-                        {createHintLadder(activeWord).map((hint, index) => <div key={hint} className="rounded-2xl border border-white/10 px-3 py-2">{index + 1}. {hint}</div>)}
+                        {createHintLadder(reviewedWord).map((hint, index) => <div key={hint} className="rounded-2xl border border-white/10 px-3 py-2">{index + 1}. {hint}</div>)}
                       </div>
                     </div>
                   </div>
                 ) : null}
 
-                {reviewMode === "puzzle" ? (
+                {visibleReviewKind === "puzzle" ? (
                   <div>
                     <p className="mb-4 text-sm text-slate-300">Every solved answer, clue reference, and direction in one quick scan.</p>
                     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -2023,19 +2421,20 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                   <span className="h-2 w-2 rounded-full bg-amber-300 animate-pulse [animation-delay:360ms]" />
                 </div>
                 <div className="text-xs uppercase tracking-[0.28em] text-slate-400">Run complete</div>
-                <h3 className="mt-2 text-3xl font-semibold text-white">Puzzle cleared.</h3>
-                <p className="mt-3 text-sm text-slate-300">Your archive and streaks are updated. Replay this exact seed, take a quick review pass, or share the finished run.</p>
+                <h3 ref={completionHeadingRef} tabIndex={-1} className="mt-2 text-3xl font-semibold text-white">Puzzle cleared.</h3>
+                <p className="mt-3 text-sm text-slate-300">{isCanonicalDailyCompletion ? "This canonical clear is saved in your local archive and streak." : "This run is saved in your local history without changing the canonical daily streak."} Replay this exact seed, review the board, or share the result.</p>
 
                 <div className="mt-5">
                   <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Run recap</div>
                   <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                   <div className="rounded-3xl border border-white/10 bg-white/4 p-4 text-left">
                     <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Finish time</div>
-                    <div className="mt-2 text-2xl font-semibold text-white">{formatElapsed(state.elapsedMs)}</div>
+                    <div className="mt-2 text-2xl font-semibold text-white">{formatElapsed(displayedElapsedMs)}</div>
                   </div>
                   <div className="rounded-3xl border border-white/10 bg-white/4 p-4 text-left">
-                    <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Hints used</div>
-                    <div className="mt-2 text-2xl font-semibold text-white">{hintsUsed}</div>
+                    <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Assists used</div>
+                    <div className="mt-2 text-2xl font-semibold text-white">{assistsUsed}</div>
+                    <div className="mt-1 text-xs leading-5 text-slate-400">{formatAssistBreakdown(assistSummary)}</div>
                   </div>
                   <div className="rounded-3xl border border-white/10 bg-white/4 p-4 text-left">
                     <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Word mix</div>
@@ -2054,7 +2453,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                   <button type="button" onClick={() => startNewRun(state.run.options)} className="accent-chip rounded-full px-4 py-2 text-sm font-semibold">
                     Replay run
                   </button>
-                  <button type="button" onClick={() => { setReviewMode("puzzle"); setMobilePanel("review"); }} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">
+                  <button type="button" onClick={(event) => { reviewOriginRef.current = { element: event.currentTarget, panel: mobilePanel }; openAuthorizedReview({ kind: "puzzle", attemptId: state.attemptId }); }} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">
                     Review full puzzle
                   </button>
                   <button type="button" onClick={startTodayDailyRun} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">
@@ -2083,91 +2482,67 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
               <div className="glass-card quest-card-glow rounded-[2rem] p-5 sm:p-6">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Goals</div>
-                    <h3 className="mt-1 text-lg font-semibold text-white">Solve 1 puzzle</h3>
-                    <p className="mt-1 text-sm text-slate-300">Keep your streak alive with a full clear.</p>
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Canonical daily</div>
+                    <h3 className="mt-1 text-lg font-semibold text-white">Today&apos;s puzzle</h3>
+                    <p className="mt-1 text-sm text-slate-300">Only today&apos;s standard rules count toward your daily streak.</p>
                   </div>
-                  <div className="text-4xl opacity-80">🎯</div>
+                  <span className={`rounded-full border px-3 py-1 text-xs ${todayDailyFinished ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-200" : "border-white/10 text-slate-300"}`}>
+                    {todayDailyFinished ? "Cleared" : todayDailySolved > 0 ? "In progress" : "Ready"}
+                  </span>
                 </div>
                 <div className="mt-5 flex items-center justify-between gap-3 text-sm text-slate-300">
-                  <span>{finished ? "1/1 completed" : "0/1 in progress"}</span>
-                  <span className="rounded-full border border-white/10 px-3 py-1 text-xs">{finished ? "Done" : progressLabel}</span>
+                  <span>{todayDailySolved}/{todayDailyTotal} words solved</span>
+                  <span>{today}</span>
                 </div>
                 <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/8">
-                  <div className="h-full rounded-full bg-[linear-gradient(90deg,#818cf8,#a855f7)]" style={{ width: `${finished ? 100 : Math.min(100, progressPercent)}%` }} />
+                  <div className="h-full rounded-full bg-[linear-gradient(90deg,#60a5fa,#c084fc)]" style={{ width: `${todayDailyTotal === 0 ? 0 : Math.min(100, (todayDailySolved / todayDailyTotal) * 100)}%` }} />
                 </div>
+                <button type="button" onClick={currentIsTodayDaily && !finished ? () => jumpToStudioSection("board") : startTodayDailyRun} className="mt-5 rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm font-medium text-slate-100">
+                  {currentIsTodayDaily && !finished ? "Continue today’s daily" : todayDailyFinished ? "Replay today’s daily" : "Start today’s daily"}
+                </button>
               </div>
 
-              <div className="glass-card quest-card-glow rounded-[2rem] p-5 sm:p-6 bg-[linear-gradient(135deg,rgba(168,85,247,0.18),rgba(15,23,42,0.18))]">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Daily reward</div>
-                    <h3 className="mt-1 text-lg font-semibold text-white">Solve today&apos;s puzzle</h3>
-                    <p className="mt-1 text-sm text-slate-300">Come back every day and keep the quest chest glowing.</p>
-                  </div>
-                  <div className="text-4xl opacity-85">🎁</div>
+              <div className="glass-card quest-card-frame rounded-[2rem] p-5 sm:p-6">
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Local record</div>
+                  <h3 className="mt-1 text-lg font-semibold text-white">Facts saved on this device</h3>
+                  <p className="mt-1 text-sm text-slate-300">No account or remote leaderboard is implied; clearing browser data removes this record.</p>
                 </div>
-                <div className="mt-5 flex items-center justify-between gap-3 text-sm text-slate-300">
-                  <span>{state.run.options.mode === "daily" && finished ? "Daily cleared" : "Daily ready"}</span>
-                  <span className="rounded-full border border-white/10 px-3 py-1 text-xs">{dailyClearCount} wins</span>
-                </div>
-                <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/8">
-                  <div className="h-full rounded-full bg-[linear-gradient(90deg,#60a5fa,#c084fc)]" style={{ width: `${Math.min(100, (dailyClearCount % 7) * (100 / 7))}%` }} />
-                </div>
-              </div>
-            </div>
-
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_20rem]">
-              <div className={`glass-card quest-card-frame rounded-[2rem] p-5 sm:p-6 ${activePlay ? "opacity-95" : "opacity-100"}`}>
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Achievements</div>
-                    <h3 className="mt-1 text-lg font-semibold text-white">Achievements</h3>
-                    <p className="mt-1 text-sm text-slate-300">Milestones worth checking after the board work is done.</p>
-                  </div>
-                  <button type="button" className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-200">View all</button>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="mt-5 grid grid-cols-2 gap-3 text-center">
                   {[
-                    ["🏅", "First Clear"],
-                    ["⚡", "Speed Runner"],
-                    ["🌙", "Daily Keeper"],
-                    ["🛡", "Veteran Hunter"],
-                  ].map(([icon, label]) => (
-                    <div key={label} className="quest-card-glow quest-card-frame rounded-2xl border border-white/10 bg-white/4 px-4 py-4 text-center">
-                      <div className="quest-badge mx-auto grid size-16 place-items-center border border-white/10 bg-white/6 text-2xl">{icon}</div>
-                      <div className="mt-3 text-sm font-semibold text-white">{label}</div>
+                    [String(dailyClearCount), "Daily clears"],
+                    [String(finishedHistoryCount), "Completed runs"],
+                    [String(progress.history.length), "Attempts saved"],
+                    [String(historicalAssistCount), "Assists recorded"],
+                  ].map(([value, label]) => (
+                    <div key={label} className="rounded-2xl border border-white/10 bg-white/4 px-3 py-3">
+                      <div className="text-xl font-semibold text-white">{value}</div>
+                      <div className="mt-1 text-[10px] uppercase tracking-[0.18em] text-slate-500">{label}</div>
                     </div>
                   ))}
                 </div>
               </div>
+            </div>
 
-              <div className={`glass-card quest-card-frame rounded-[2rem] p-5 sm:p-6 bg-[linear-gradient(135deg,rgba(91,33,182,0.22),rgba(15,23,42,0.2))] ${activePlay ? "opacity-85" : "opacity-100"}`}>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">After the clear</div>
-                    <h3 className="mt-1 text-lg font-semibold text-white">Reward Chest</h3>
-                    <p className="mt-1 text-sm text-slate-300">Your streak perks wait here once the current puzzle is settled.</p>
-                  </div>
-                  <div className="relative text-5xl">
-                    🪙
-                    <span className="absolute -bottom-1 -right-2 text-2xl opacity-70">✨</span>
-                  </div>
-                </div>
-                <div className="mt-5 flex items-center gap-2">
-                  {[0, 1, 2, 3, 4].map((index) => (
-                    <div key={index} className={`h-2 flex-1 rounded-full ${index < Math.max(1, Math.min(5, progress.streak || 1)) ? "bg-fuchsia-300" : "bg-white/10"}`} />
-                  ))}
-                </div>
-                <div className="mt-4 flex items-center justify-between gap-2 text-xs text-slate-300">
-                  <span className="rounded-full border border-white/10 px-3 py-1">Daily reward</span>
-                  <span className="rounded-full border border-white/10 px-3 py-1">Chest tier {Math.max(1, Math.min(5, progress.streak || 1))}</span>
-                </div>
+            <div className={`glass-card quest-card-frame rounded-[2rem] p-5 sm:p-6 ${activePlay ? "opacity-95" : "opacity-100"}`}>
+              <div className="mb-4">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Daily activity</div>
+                <h3 className="mt-1 text-lg font-semibold text-white">Last seven UTC days</h3>
+                <p className="mt-1 text-sm text-slate-300">Completed and in-progress markers come only from canonical daily attempts saved in this browser.</p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-4 xl:grid-cols-7">
+                {archive.slice(0, 7).map((entry) => (
+                  <button key={entry.day} type="button" disabled={!entry.summary} onClick={() => entry.summary && replaySavedRun(entry.summary)} className="rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-left text-sm transition enabled:hover:border-white/20 disabled:cursor-default">
+                    <div className="text-xs font-medium text-white">{entry.day === today ? "Today" : entry.day.slice(5)}</div>
+                    <div className="mt-2 text-[11px] text-slate-400">{entry.summary?.finished ? "Cleared" : entry.summary ? `${entry.summary.solvedCount}/${entry.summary.totalWords} solved` : "No attempt"}</div>
+                    {entry.summary ? <div className="mt-2 text-[10px] uppercase tracking-[0.16em] text-fuchsia-200">Replay</div> : null}
+                  </button>
+                ))}
               </div>
             </div>
           </section>
 
-          <aside id="studio-archive" className={`${mobilePanel === "archive" ? "block" : "hidden"} space-y-6 xl:sticky xl:top-6 xl:block ${archiveRailClass}`}>
+          <aside id="studio-archive" role={compactWorkspace ? "tabpanel" : "region"} aria-label={compactWorkspace ? undefined : "Progress and history"} aria-labelledby={compactWorkspace ? "workspace-tab-archive" : undefined} hidden={compactWorkspace && mobilePanel !== "archive"} className={`${mobilePanel === "archive" ? "block" : "hidden"} min-w-0 space-y-6 xl:sticky xl:top-6 xl:block ${archiveRailClass}`}>
             <div className="hidden xl:flex justify-end">
               <button data-testid="toggle-right-panel" type="button" aria-expanded={rightSidebarOpen} aria-controls="studio-archive-rail" aria-label={rightSidebarOpen ? "Collapse archive rail" : "Expand archive rail"} onClick={() => setRightSidebarOpen((current) => !current)} className={`rounded-full border border-white/10 bg-white/4 text-slate-200 ${rightSidebarOpen ? "px-3 py-1.5 text-xs" : "size-9 text-sm"}`}>
                 <span aria-hidden="true">{rightSidebarOpen ? "Collapse archive" : "←"}</span>
@@ -2204,8 +2579,8 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2">
                     <div className="text-lg">💡</div>
-                    <div className="mt-1">{Math.max(0, state.run.words.length * 3 - hintsUsed)}</div>
-                    <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Hints left</div>
+                    <div className="mt-1">{assistsUsed}</div>
+                    <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Assists</div>
                   </div>
                 </div>
               </div>
@@ -2213,19 +2588,23 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
               <div className="glass-card rounded-[2rem] p-5 sm:p-6 bg-[linear-gradient(180deg,rgba(15,23,42,0.92),rgba(9,14,26,0.88))]">
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
-                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Word bank</div>
-                    <h3 className="mt-1 text-lg font-semibold text-white">Target words</h3>
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">{isQuestView ? "Word bank" : "Crossword"}</div>
+                    <h3 className="mt-1 text-lg font-semibold text-white">{isQuestView ? "Target words" : "Clue progress"}</h3>
                   </div>
                   <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300">{state.run.words.length - solvedCount} left</span>
                 </div>
                 <div className="space-y-2">
-                  {state.run.words.map((word) => {
-                    const solved = state.solvedIds.includes(word.id);
-                    return (
-                      <button key={word.id} type="button" onClick={() => selectWord(word.id)} className={`relative w-full overflow-hidden rounded-2xl border px-4 py-3 text-left transition ${getTargetChipClass(word, solved, state.activeWordId === word.id)}`}>
+                   {state.run.words.map((word) => {
+                     const solved = state.solvedIds.includes(word.id);
+                     const placement = getWordPlacement(state, word.id);
+                     const maskedAnswer = placement
+                       ? getWordCells(state, placement).map((cell) => (state.cellEntries[getCellKey(cell.row, cell.col)] ?? "•").toUpperCase()).join(" ")
+                       : `${word.length} letters`;
+                     return (
+                      <button key={word.id} data-testid={`target-word-${word.id}`} type="button" aria-current={state.activeWordId === word.id ? "true" : undefined} onClick={() => selectWord(word.id)} className={`relative w-full overflow-hidden rounded-2xl border px-4 py-3 text-left transition ${getTargetChipClass(word, solved, state.activeWordId === word.id)}`}>
                         <div className="absolute inset-y-0 left-0 w-1 bg-white/12" />
                         <div className="flex items-center justify-between gap-3">
-                          <span className="text-sm font-semibold uppercase tracking-[0.12em] text-white/95">{word.answer}</span>
+                          <span className="text-sm font-semibold uppercase tracking-[0.12em] text-white/95">{isQuestView || solved ? word.answer : maskedAnswer}</span>
                           <span className="text-[11px] uppercase tracking-[0.18em] text-slate-300">{solved ? "done" : `${word.length} letters`}</span>
                         </div>
                       </button>
@@ -2238,13 +2617,19 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Controls</div>
                 <h3 className="mt-1 text-lg font-semibold text-white">Play guide</h3>
                 <div className="mt-4 space-y-3 text-sm text-slate-200">
-                  {[
+                  {(isQuestView ? [
+                    ["⌗", "Choose a start", "Tap or press Enter on the first letter"],
+                    ["↔", "Choose an endpoint", "Tap, drag, or use arrows and Enter"],
+                    ["⎋", "Clear a trail", "Escape cancels the current selection"],
+                    ["💡", "Get a hint", "Use clue tips when you get stuck"],
+                    ["👁", "Review word", "Open review for the current word or puzzle"],
+                  ] : [
                     ["⌗", "Select a cell", "Tap a cell to start typing"],
                     ["⌨", "Type a letter", "Use your keyboard to fill the answer"],
                     ["⌫", "Delete", "Backspace clears the current entry"],
                     ["💡", "Get a hint", "Use hints when you get stuck"],
                     ["👁", "Reveal word", "Open review for the current word or puzzle"],
-                  ].map(([icon, title, text]) => (
+                  ]).map(([icon, title, text]) => (
                     <div key={title} className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/4 px-4 py-3">
                       <div className="grid size-10 shrink-0 place-items-center rounded-xl border border-white/10 bg-slate-950/50 text-sm">{icon}</div>
                       <div>
@@ -2255,7 +2640,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                   ))}
                 </div>
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <button type="button" onClick={togglePause} className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs text-slate-100">{state.paused ? "Resume" : "Pause"}</button>
+                  {!finished ? <button type="button" onClick={togglePause} className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs text-slate-100">{state.paused ? "Resume" : "Pause"}</button> : null}
                   <button type="button" onClick={() => startNewRun(state.run.options)} className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs text-slate-100">Restart</button>
                   <button type="button" onClick={shareCurrentRunLink} className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs text-slate-100">Share link</button>
                 </div>
@@ -2269,34 +2654,72 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                     <div className="mt-2 text-xl font-semibold text-white">{finishedHistoryCount}</div>
                   </div>
                 </div>
+                <div className="mt-6">
+                  <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Local history</div>
+                  <p className="mt-2 text-xs leading-5 text-slate-400">History cards always start a fresh replay. Only the current saved attempt resumes when you return to the app.</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {(["all", "daily", "custom"] as const).map((mode) => (
+                      <button key={mode} type="button" aria-pressed={historyModeFilter === mode} onClick={() => setHistoryModeFilter(mode)} className={`rounded-full border px-3 py-1.5 text-xs capitalize ${historyModeFilter === mode ? "border-fuchsia-400/30 bg-fuchsia-500/10 text-fuchsia-100" : "border-white/10 text-slate-300"}`}>
+                        {mode}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {(["all", "finished", "active"] as const).map((status) => (
+                      <button key={status} type="button" aria-pressed={historyStatusFilter === status} onClick={() => setHistoryStatusFilter(status)} className={`rounded-full border px-3 py-1.5 text-xs capitalize ${historyStatusFilter === status ? "border-sky-400/30 bg-sky-500/10 text-sky-100" : "border-white/10 text-slate-300"}`}>
+                        {status === "active" ? "In progress" : status}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <div className="mt-4 space-y-2">
-                  {filteredHistory.slice(0, 2).map((entry) => (
-                    <button key={entry.runId} data-testid="recent-run-card" type="button" onClick={() => replaySavedRun(entry)} className="w-full rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-left text-sm text-slate-200 transition hover:border-white/20">
+                  {filteredHistory.slice(0, 4).map((entry) => (
+                    <button key={entry.attemptId} data-testid="recent-run-card" type="button" onClick={() => replaySavedRun(entry)} className="w-full rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-left text-sm text-slate-200 transition hover:border-white/20">
                       <div className="flex items-center justify-between gap-3">
                         <span className="font-medium text-white">{entry.title}</span>
-                        <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] ${entry.finished ? "bg-emerald-500/12 text-emerald-200" : "bg-white/6 text-slate-300"}`}>{entry.finished ? "replay" : "resume"}</span>
+                        <span className="rounded-full bg-white/6 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-300">Replay</span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-400">
+                        <span>{entry.mode}{entry.canonicalDaily ? " · canonical" : ""}</span>
+                        <span>{entry.solvedCount}/{entry.totalWords} solved</span>
+                        <span>{formatElapsed(entry.elapsedMs)}</span>
+                        <span>{entry.assists.total} assists</span>
                       </div>
                     </button>
                   ))}
+                  {filteredHistory.length === 0 ? <div className="rounded-2xl border border-dashed border-white/10 px-3 py-4 text-center text-xs text-slate-400">No saved runs match these filters.</div> : null}
                 </div>
               </div>
             </div>
           </aside>
         </div>
 
-        {revealConfirm !== "none" ? (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/72 px-4">
-            <div className="glass-card w-full max-w-md rounded-[2rem] p-6">
+        <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">{liveMessage}</div>
+
+        <dialog
+          ref={revealDialogRef}
+          aria-modal="true"
+          aria-labelledby="reveal-dialog-title"
+          aria-describedby="reveal-dialog-description"
+          onCancel={(event) => {
+            event.preventDefault();
+            closeRevealDialog();
+          }}
+          onKeyDown={trapRevealDialogFocus}
+          className="glass-card fixed inset-0 m-auto w-[min(28rem,calc(100%-2rem))] rounded-[2rem] p-6 text-slate-100 backdrop:bg-slate-950/80"
+        >
+          {revealConfirm.kind !== "none" ? (
+            <div>
               <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Review gate</div>
-              <h3 className="mt-2 text-2xl font-semibold text-white">{revealConfirm === "word" ? "Reveal this word?" : "Reveal the full puzzle?"}</h3>
-              <p className="mt-3 text-sm text-slate-300">{revealConfirm === "word" ? "This will show the current answer in review mode." : "This will open the full puzzle review with every answer visible."}</p>
+              <h3 id="reveal-dialog-title" className="mt-2 text-2xl font-semibold text-white">{revealConfirm.kind === "word" ? "Reveal this word?" : "Reveal the full puzzle?"}</h3>
+              <p id="reveal-dialog-description" className="mt-3 text-sm text-slate-300">{revealConfirm.kind === "word" ? "This will record one word reveal and show only the selected answer in review." : "This will record a full-puzzle reveal and open every answer in review."}</p>
               <div className="mt-5 flex flex-wrap justify-end gap-2">
-                <button type="button" onClick={() => setRevealConfirm("none")} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">Cancel</button>
-                <button type="button" onClick={() => { setReviewMode(revealConfirm === "word" ? "word" : "puzzle"); setMobilePanel("review"); setRevealConfirm("none"); }} className="accent-chip rounded-full px-4 py-2 text-sm font-semibold">{revealConfirm === "word" ? "Reveal word" : "Reveal puzzle"}</button>
+                <button ref={revealCancelRef} type="button" onClick={() => closeRevealDialog()} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">Cancel</button>
+                <button type="button" onClick={acceptReveal} className="accent-chip rounded-full px-4 py-2 text-sm font-semibold">{revealConfirm.kind === "word" ? "Reveal word" : "Reveal puzzle"}</button>
               </div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
+        </dialog>
 
         {toast ? (
           <div className="pointer-events-none fixed inset-x-4 bottom-4 z-50 flex justify-center">

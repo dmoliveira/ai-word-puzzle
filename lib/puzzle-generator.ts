@@ -1,17 +1,15 @@
 import type {
   ChallengeLevel,
   ContentPack,
-  PuzzleBoard,
-  PuzzleBoardCell,
-  PuzzleDirection,
-  PuzzleFamily,
   PuzzleMode,
   PuzzleOptions,
-  PuzzlePlacement,
   PuzzleRun,
   PuzzleWord,
   TopicId,
 } from "@/lib/game-types";
+import { buildConnectedCrossword, buildQuestBoard } from "@/lib/board-generator";
+import { isCrosswordContentPack, isCrosswordTopic } from "@/lib/clue-catalog";
+import { getPuzzleSizeRange, normalizePuzzleOptions } from "@/lib/puzzle-options";
 import { getThemeStyle } from "@/lib/themes";
 import { contentCatalog, topicCatalog, wordBank } from "@/lib/word-bank";
 
@@ -28,20 +26,6 @@ const miniTargetLengthRanges: Record<ChallengeLevel, [number, number]> = {
 };
 
 const challengeOrder: ChallengeLevel[] = ["breeze", "quest", "mythic"];
-
-function clampPuzzleSize(size: number) {
-  return Math.max(4, Math.min(12, size));
-}
-
-const defaultTopics: TopicId[] = ["myth", "cosmos", "greek"];
-
-function normalizeTopics(topics: TopicId[]) {
-  return topics.length > 0 ? topics : defaultTopics;
-}
-
-function clampPuzzleSizeForFamily(size: number, family: PuzzleFamily) {
-  return family === "mini" ? Math.max(4, Math.min(6, size)) : clampPuzzleSize(size);
-}
 
 function difficultyDistance(left: ChallengeLevel, right: ChallengeLevel) {
   return Math.abs(challengeOrder.indexOf(left) - challengeOrder.indexOf(right));
@@ -75,11 +59,17 @@ function getEntrySeedScore(entry: PuzzleWord, seed: string, turn: number) {
   return (hash % 1000) / 1000;
 }
 
+export function scoreDifficultyMatch(entryDifficulty: ChallengeLevel, requestedDifficulty: ChallengeLevel) {
+  if (entryDifficulty === requestedDifficulty) {
+    return 8;
+  }
+  return difficultyDistance(entryDifficulty, requestedDifficulty) === 1 ? 4 : -4;
+}
+
 function scoreEntry(entry: PuzzleWord, options: PuzzleOptions, chosen: PuzzleWord[], contentPack: ContentPack | null) {
   const [minLength, maxLength] = options.puzzleFamily === "mini" ? miniTargetLengthRanges[options.challenge] : targetLengthRanges[options.challenge];
   const inRange = entry.length >= minLength && entry.length <= maxLength ? 4 : 0;
-  const exactDifficulty = entry.difficulty === options.challenge ? 8 : 0;
-  const nearDifficulty = exactDifficulty === 0 && difficultyDistance(entry.difficulty, options.challenge) === 1 ? 4 : -4;
+  const difficultyScore = scoreDifficultyMatch(entry.difficulty, options.challenge);
   const topicBonus = options.topics.includes(entry.topicId) ? 12 : 1;
   const repeatedInitialPenalty = chosen.some((word) => word.answer[0] === entry.answer[0]) ? -3 : 0;
   const repeatedLengthPenalty = chosen.filter((word) => word.length === entry.length).length * -2;
@@ -114,14 +104,33 @@ function scoreEntry(entry: PuzzleWord, options: PuzzleOptions, chosen: PuzzleWor
             : 0
         : 0;
 
-  return inRange + exactDifficulty + nearDifficulty + topicBonus + repeatedInitialPenalty + repeatedLengthPenalty + suffixPenalty + topicVarietyBonus + frequencyBonus + fairnessPenalty + familyBonus + featuredPackBonus - entry.weight;
+  return inRange + difficultyScore + topicBonus + repeatedInitialPenalty + repeatedLengthPenalty + suffixPenalty + topicVarietyBonus + frequencyBonus + fairnessPenalty + familyBonus + featuredPackBonus - entry.weight;
 }
 
-function getContentPackCandidates(topics: TopicId[], challenge: ChallengeLevel, minimumSize = 1) {
+function isEligibleEntry(entry: PuzzleWord, options: PuzzleOptions, contentPack: ContentPack | null) {
+  if (entry.length > 14 || !options.topics.includes(entry.topicId)) {
+    return false;
+  }
+
+  if (options.boardView === "crossword" && (entry.qualityStatus !== "approved" || !entry.clue)) {
+    return false;
+  }
+
+  return contentPack
+    ? entry.topicId === contentPack.topicId && entry.contentPackIds.includes(contentPack.id)
+    : true;
+}
+
+function countEligibleAnswers(pack: ContentPack, options: PuzzleOptions) {
+  return new Set(wordBank.filter((entry) => isEligibleEntry(entry, options, pack)).map((entry) => entry.normalized)).size;
+}
+
+function getContentPackCandidates(options: PuzzleOptions, minimumSize = 1) {
+  const topics: TopicId[] = options.topics;
   const topicSet = new Set(topics);
   return contentCatalog
     .filter((pack) => topicSet.has(pack.topicId))
-    .filter((pack) => pack.answers.filter((answer) => wordBank.some((entry) => entry.normalized === answer && difficultyDistance(entry.difficulty, challenge) <= 1)).length >= minimumSize);
+    .filter((pack) => countEligibleAnswers(pack, options) >= minimumSize);
 }
 
 function resolveContentPack(options: PuzzleOptions, seed: string) {
@@ -135,11 +144,11 @@ function resolveContentPack(options: PuzzleOptions, seed: string) {
       return null;
     }
 
-    const eligibleCount = explicitPack.answers.filter((answer) => wordBank.some((entry) => entry.normalized === answer && difficultyDistance(entry.difficulty, options.challenge) <= 1)).length;
+    const eligibleCount = countEligibleAnswers(explicitPack, options);
     return eligibleCount >= options.puzzleSize ? explicitPack : null;
   }
 
-  const candidates = getContentPackCandidates(options.topics, options.challenge, options.puzzleSize);
+  const candidates = getContentPackCandidates(options, options.puzzleSize);
   if (candidates.length === 0) {
     return null;
   }
@@ -152,186 +161,12 @@ function resolveFeaturedContentPack(options: PuzzleOptions, seed: string) {
     return resolveContentPack(options, seed);
   }
 
-  const candidates = getContentPackCandidates(options.topics, options.challenge, Math.min(options.puzzleSize, 4));
+  const candidates = getContentPackCandidates(options, Math.min(options.puzzleSize, 4));
   if (candidates.length === 0) {
     return null;
   }
 
   return candidates[hashString(`${seed}:${options.challenge}:${options.puzzleFamily}:featured-pack`) % candidates.length];
-}
-
-function getBoardSize(words: PuzzleWord[]) {
-  const longest = words.reduce((max, word) => Math.max(max, word.length), 0);
-  return Math.max(9, Math.min(17, longest + Math.ceil(words.length / 2) + 2));
-}
-
-function createEmptyGrid(size: number) {
-  return Array.from({ length: size }, () => Array.from<string | null>({ length: size }).fill(null));
-}
-
-function getStep(direction: PuzzleDirection) {
-  return direction === "across" ? { row: 0, col: 1 } : { row: 1, col: 0 };
-}
-
-function canPlaceWord(grid: (string | null)[][], word: string, row: number, col: number, direction: PuzzleDirection) {
-  const size = grid.length;
-  const { row: rowStep, col: colStep } = getStep(direction);
-  const endRow = row + rowStep * (word.length - 1);
-  const endCol = col + colStep * (word.length - 1);
-
-  if (row < 0 || col < 0 || endRow >= size || endCol >= size) {
-    return -1;
-  }
-
-  const beforeRow = row - rowStep;
-  const beforeCol = col - colStep;
-  const afterRow = endRow + rowStep;
-  const afterCol = endCol + colStep;
-
-  if (beforeRow >= 0 && beforeCol >= 0 && beforeRow < size && beforeCol < size && grid[beforeRow][beforeCol] !== null) {
-    return -1;
-  }
-
-  if (afterRow >= 0 && afterCol >= 0 && afterRow < size && afterCol < size && grid[afterRow][afterCol] !== null) {
-    return -1;
-  }
-
-  let intersections = 0;
-
-  for (let index = 0; index < word.length; index += 1) {
-    const currentRow = row + rowStep * index;
-    const currentCol = col + colStep * index;
-    const currentCell = grid[currentRow][currentCol];
-
-    if (currentCell !== null && currentCell !== word[index]) {
-      return -1;
-    }
-
-    if (currentCell === word[index]) {
-      intersections += 1;
-      continue;
-    }
-
-    if (direction === "across") {
-      if ((currentRow > 0 && grid[currentRow - 1][currentCol] !== null) || (currentRow < size - 1 && grid[currentRow + 1][currentCol] !== null)) {
-        return -1;
-      }
-    } else if ((currentCol > 0 && grid[currentRow][currentCol - 1] !== null) || (currentCol < size - 1 && grid[currentRow][currentCol + 1] !== null)) {
-      return -1;
-    }
-  }
-
-  return intersections;
-}
-
-function writeWordToGrid(grid: (string | null)[][], word: string, row: number, col: number, direction: PuzzleDirection) {
-  const { row: rowStep, col: colStep } = getStep(direction);
-
-  for (let index = 0; index < word.length; index += 1) {
-    grid[row + rowStep * index][col + colStep * index] = word[index];
-  }
-}
-
-function buildPuzzleBoard(words: PuzzleWord[]): PuzzleBoard {
-  const orderedWords = [...words].sort((left, right) => right.length - left.length || left.answer.localeCompare(right.answer));
-  const size = getBoardSize(orderedWords);
-  const grid = createEmptyGrid(size);
-  const placements: Omit<PuzzlePlacement, "clueNumber">[] = [];
-  const centerRow = Math.floor(size / 2);
-  const firstWord = orderedWords[0];
-
-  writeWordToGrid(grid, firstWord.answer, centerRow, Math.max(0, Math.floor((size - firstWord.length) / 2)), "across");
-  placements.push({ wordId: firstWord.id, row: centerRow, col: Math.max(0, Math.floor((size - firstWord.length) / 2)), direction: "across" });
-
-  for (const word of orderedWords.slice(1)) {
-    let bestPlacement: Omit<PuzzlePlacement, "clueNumber"> | null = null;
-    let bestScore = -1;
-
-    for (let row = 0; row < size; row += 1) {
-      for (let col = 0; col < size; col += 1) {
-        for (const direction of ["across", "down"] as const) {
-          const intersections = canPlaceWord(grid, word.answer, row, col, direction);
-          if (intersections < 0) {
-            continue;
-          }
-
-          const centeredness = Math.abs(centerRow - row) + Math.abs(centerRow - col);
-          const score = intersections * 10 - centeredness;
-
-          if (score > bestScore) {
-            bestScore = score;
-            bestPlacement = { wordId: word.id, row, col, direction };
-          }
-        }
-      }
-    }
-
-    if (!bestPlacement) {
-      for (let row = 0; row < size; row += 1) {
-        for (let col = 0; col < size; col += 1) {
-          const fallback = canPlaceWord(grid, word.answer, row, col, "across");
-          if (fallback >= 0) {
-            bestPlacement = { wordId: word.id, row, col, direction: "across" };
-            break;
-          }
-        }
-
-        if (bestPlacement) {
-          break;
-        }
-      }
-    }
-
-    if (!bestPlacement) {
-      continue;
-    }
-
-    writeWordToGrid(grid, word.answer, bestPlacement.row, bestPlacement.col, bestPlacement.direction);
-    placements.push(bestPlacement);
-  }
-
-  const numberedPlacements = placements
-    .sort((left, right) => left.row - right.row || left.col - right.col || (left.direction === "across" ? -1 : 1))
-    .map((placement, index) => ({ ...placement, clueNumber: index + 1 }));
-
-  const cellMap = new Map<string, PuzzleBoardCell>();
-
-  for (const placement of numberedPlacements) {
-    const word = words.find((entry) => entry.id === placement.wordId);
-    if (!word) {
-      continue;
-    }
-
-    const { row: rowStep, col: colStep } = getStep(placement.direction);
-    for (let index = 0; index < word.answer.length; index += 1) {
-      const row = placement.row + rowStep * index;
-      const col = placement.col + colStep * index;
-      const key = `${row}:${col}`;
-      const existing = cellMap.get(key);
-
-      if (existing) {
-        existing.wordIds.push(word.id);
-        if (index === 0) {
-          existing.clueNumbers.push(placement.clueNumber);
-        }
-        continue;
-      }
-
-      cellMap.set(key, {
-        row,
-        col,
-        solution: word.answer[index],
-        clueNumbers: index === 0 ? [placement.clueNumber] : [],
-        wordIds: [word.id],
-      });
-    }
-  }
-
-  return {
-    size,
-    placements: numberedPlacements,
-    cells: [...cellMap.values()],
-  };
 }
 
 function buildThemeBlurb(words: PuzzleWord[], options: PuzzleOptions) {
@@ -346,7 +181,10 @@ function buildThemeBlurb(words: PuzzleWord[], options: PuzzleOptions) {
 
   const cadence = options.mode === "daily" ? "This daily constellation resets its exact mix each day." : "This custom constellation follows your chosen setup and seed.";
 
-  let blurb = `${theme.strapline} Tonight's lane drifts through ${moodDescriptors.join(" and ")} for ${tone}. ${cadence} The scene points the way, but the exact words stay hidden until you earn them.`;
+  const playContract = options.boardView === "crossword"
+    ? "Each answer has an editorial clue, and unsolved words stay hidden until you earn them."
+    : "Use the visible target list to trace each hidden path across the letter field.";
+  let blurb = `${theme.strapline} Tonight's lane drifts through ${moodDescriptors.join(" and ")} for ${tone}. ${cadence} ${playContract}`;
 
   for (const word of words) {
     if (word.answer.length < 4) {
@@ -369,88 +207,104 @@ export function createHintLadder(word: PuzzleWord) {
   ];
 }
 
+export class PuzzleGenerationError extends Error {
+  constructor(
+    readonly code: "unsupported-content" | "insufficient-words" | "layout-failed",
+    message: string,
+  ) {
+    super(message);
+    this.name = "PuzzleGenerationError";
+  }
+}
+
 export function buildPuzzleRun(input: Partial<PuzzleOptions> = {}): PuzzleRun {
-  const options: PuzzleOptions = {
-    mode: input.mode ?? "custom",
-    challenge: input.challenge ?? "quest",
-    puzzleFamily: input.puzzleFamily ?? "classic",
-    topics: normalizeTopics(input.topics ?? defaultTopics),
-    contentPackId: input.contentPackId ?? "auto",
-    puzzleSize: clampPuzzleSizeForFamily(input.puzzleSize ?? 7, input.puzzleFamily ?? "classic"),
-    boardView: input.boardView ?? "crossword",
-    style: input.style ?? "alpha",
-    clueDensity: input.clueDensity ?? 2,
-    timerEnabled: input.timerEnabled ?? true,
-    learningMode: input.learningMode ?? false,
-    seed: input.seed ?? "",
-  };
+  const requestedBoardView = input.boardView ?? "crossword";
+  const requestedFamily = input.puzzleFamily ?? "classic";
+  const sizeRange = getPuzzleSizeRange(requestedFamily, requestedBoardView);
+  if (input.puzzleSize !== undefined && (!Number.isInteger(input.puzzleSize) || input.puzzleSize < sizeRange.min || input.puzzleSize > sizeRange.max)) {
+    throw new PuzzleGenerationError("unsupported-content", `Supported ${requestedBoardView} sizes are ${sizeRange.min}–${sizeRange.max} words for this family.`);
+  }
+  if (requestedBoardView === "crossword"
+    && ((input.topics?.some((topic) => !isCrosswordTopic(topic)) ?? false)
+      || (input.contentPackId !== undefined && input.contentPackId !== "auto" && !isCrosswordContentPack(input.contentPackId)))) {
+    throw new PuzzleGenerationError("unsupported-content", "That topic or content pack does not yet have editorial crossword clues.");
+  }
+
+  const options = normalizePuzzleOptions({
+    mode: "custom",
+    seed: "",
+    ...input,
+  });
 
   if (options.mode === "daily") {
     options.seed = getDailySeedValue(options.seed);
   }
 
-  if (options.puzzleFamily !== "themed") {
-    options.contentPackId = "auto";
-  }
-
   const resolvedSeed = resolveModeSeed(options.mode, options.seed);
-  let resolvedContentPack = resolveContentPack(options, resolvedSeed);
-
+  const resolvedContentPack = resolveContentPack(options, resolvedSeed);
   if (options.puzzleFamily === "themed" && !resolvedContentPack) {
-    options.puzzleFamily = "classic";
-    options.contentPackId = "auto";
-    options.puzzleSize = clampPuzzleSizeForFamily(options.puzzleSize, options.puzzleFamily);
+    throw new PuzzleGenerationError("unsupported-content", "That themed pack cannot support the selected puzzle size.");
   }
 
-  resolvedContentPack = resolveContentPack(options, resolvedSeed);
   const featuredContentPack = resolveFeaturedContentPack(options, resolvedSeed);
-
-  const topicSet = new Set(options.topics);
-  const candidates = wordBank.filter((entry) => {
-    if (resolvedContentPack) {
-      return entry.contentPackIds.includes(resolvedContentPack.id) && difficultyDistance(entry.difficulty, options.challenge) <= 1;
+  const uniqueAnswers = new Map<string, PuzzleWord>();
+  for (const entry of wordBank) {
+    if (!isEligibleEntry(entry, options, resolvedContentPack)) {
+      continue;
     }
 
-    if (topicSet.has(entry.topicId)) {
-      return true;
+    const existing = uniqueAnswers.get(entry.normalized);
+    if (!existing || scoreEntry(entry, options, [], resolvedContentPack) > scoreEntry(existing, options, [], resolvedContentPack)) {
+      uniqueAnswers.set(entry.normalized, entry);
     }
-
-    if (entry.topicLabel === "General English") {
-      return difficultyDistance(entry.difficulty, options.challenge) <= 1;
-    }
-
-    return false;
-  });
-
-  const chosen: PuzzleWord[] = [];
-  const used = new Set<string>();
-
-  while (chosen.length < options.puzzleSize) {
-    const ranked = candidates
-      .filter((entry) => !used.has(entry.id))
-      .map((entry) => ({ entry, score: scoreEntry(entry, options, chosen, resolvedContentPack ?? featuredContentPack) + getEntrySeedScore(entry, resolvedSeed, chosen.length) }))
-      .sort((left, right) => right.score - left.score || left.entry.answer.localeCompare(right.entry.answer));
-
-    const pickWindow = Math.min(6, ranked.length);
-    const pickIndex = pickWindow > 0 ? hashString(`${resolvedSeed}:pick:${chosen.length}`) % pickWindow : 0;
-
-    const next = ranked[pickIndex]?.entry ?? ranked[0]?.entry;
-    if (!next) {
-      break;
-    }
-
-    chosen.push(next);
-    used.add(next.id);
   }
 
-  const board = buildPuzzleBoard(chosen);
-  const placedWordIds = new Set(board.placements.map((placement) => placement.wordId));
-  const placedWords = chosen.filter((word) => placedWordIds.has(word.id));
+  const candidates = [...uniqueAnswers.values()]
+    .map((entry) => ({
+      entry,
+      score: scoreEntry(entry, options, [], resolvedContentPack ?? featuredContentPack) + getEntrySeedScore(entry, resolvedSeed, 0) * 3,
+    }))
+    .sort((left, right) => right.score - left.score
+      || hashString(`${resolvedSeed}:rank:${left.entry.id}`) - hashString(`${resolvedSeed}:rank:${right.entry.id}`)
+      || left.entry.answer.localeCompare(right.entry.answer))
+    .map(({ entry }) => entry);
+
+  if (candidates.length < options.puzzleSize) {
+    throw new PuzzleGenerationError("insufficient-words", "Not enough approved words exist for that puzzle setup.");
+  }
+
+  const generated = options.boardView === "quest"
+    ? {
+        words: candidates.slice(0, options.puzzleSize),
+        board: buildQuestBoard(candidates.slice(0, options.puzzleSize), resolvedSeed),
+      }
+    : buildConnectedCrossword(candidates, options.puzzleSize, resolvedSeed);
+  if (!generated || generated.words.length !== options.puzzleSize || generated.board.placements.length !== options.puzzleSize) {
+    throw new PuzzleGenerationError("layout-failed", "Could not build a connected puzzle for that setup. Try another seed or topic mix.");
+  }
+
+  const placedWords = generated.words;
+  const board = generated.board;
   const theme = getThemeStyle(options.style);
   const labelTopic = resolvedContentPack?.label ?? featuredContentPack?.label ?? topicCatalog.find((topic) => topic.id === options.topics[0])?.label ?? "Word Puzzle";
+  const identity = [
+    "v3",
+    resolvedSeed,
+    options.challenge,
+    options.puzzleFamily,
+    options.contentPackId,
+    options.topics.join(","),
+    options.puzzleSize,
+    options.boardView,
+    placedWords.map((word) => word.id).join(","),
+    board.placements.map((placement) => `${placement.wordId}:${placement.row}:${placement.col}:${placement.direction}`).join("|"),
+  ].join(":");
+  const puzzleId = `${hashString(identity)}`;
 
   return {
-    id: `${hashString(`${resolvedSeed}:${options.challenge}:${options.puzzleFamily}:${options.contentPackId}:${options.topics.join(",")}:${options.puzzleSize}`)}`,
+    id: puzzleId,
+    puzzleId,
+    generatorVersion: 3,
     createdAt: new Date().toISOString(),
     seed: resolvedSeed,
     options,

@@ -14,10 +14,14 @@
 
 html {
   background: #020817;
+  max-width: 100%;
+  overflow-x: clip;
 }
 
 body {
   min-height: 100vh;
+  max-width: 100%;
+  overflow-x: clip;
   background:
     radial-gradient(circle at top left, rgb(56 189 248 / 0.16), transparent 26%),
     radial-gradient(circle at top right, rgb(168 85 247 / 0.18), transparent 28%),
@@ -40,6 +44,11 @@ body::before {
 
 ::selection {
   background: rgb(125 211 252 / 0.28);
+}
+
+:where(button, input, select, textarea, [role="tab"], [role="gridcell"], [tabindex]):focus-visible {
+  outline: 3px solid var(--accent, #7dd3fc);
+  outline-offset: 3px;
 }
 
 .scroll-shell {
@@ -183,5 +192,16 @@ body::before {
   50% {
     transform: translateY(-8px) scale(1.05);
     opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
