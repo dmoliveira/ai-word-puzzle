@@ -1,55 +1,78 @@
 # Astra Lexa
 
-Configurable English word-puzzle studio built with Next.js.
+[Play Astra Lexa](https://dmoliveira.github.io/ai-word-puzzle/) — an accessible, local-first daily crossword and word-quest studio built with Next.js.
 
-## Current Scope
+## What ships
 
-- Crossword-style placed boards with clue numbers and overlaps
-- Topic-based puzzle generation with weighted selection and seed control
-- Deterministic seeded runs for custom and daily play
-- Three challenge levels: `breeze`, `quest`, `mythic`
-- 3000+ themed, bridge, generated, and curated English words
-- Frequency-aware scoring using `common`, `uncommon`, and `rare` bands
-- Visual clue chips, clue-art panels, and incremental hint ladders
-- Pause, resume, restart, current-word review, and full-puzzle review
-- Daily streaks, recent-run history, and local daily archive view
-- Switchable presentation themes including Greek-letter flavored styling
-- GitHub Pages-ready static export deployment
-- Local persistence so the current run survives reloads
-- Pure TypeScript generator separated from the UI for easy extension
-- Playwright coverage for the main play flow
+- One canonical UTC daily crossword plus configurable seeded custom runs
+- Editorial crossword clues with connected exact-size boards
+- A 14×14 trace quest with keyboard, touch-endpoint, and pointer-drag controls
+- Challenge, topic, content-pack, board-style, timer, and learning options
+- Bounded hints, letter/word/puzzle reveals, review gates, and truthful assist summaries
+- Browser-local current-attempt persistence, daily streaks, archive, and replay history
+- Answer-safe crossword rendering before solve or deliberate review
+- Responsive ARIA grids, compact workspace tabs, visible focus, live status, and reduced-motion support
+- Deterministic generator, unit, matrix, browser, static-export, and artifact validation
+- GitHub Pages deployment at the repository project path
 
-## Project Structure
+The app has no account or backend. Progress stays in this browser and is not a remote leaderboard or cloud backup.
 
-- `app/`: Next.js UI
-- `app/components/word-puzzle-studio.tsx`: board play UI, archive, and run controls
-- `lib/word-bank.ts`: topic packs and lexicon seed data
-- `lib/lexicon-seeds.ts`: curated English lexicon inputs
-- `lib/puzzle-generator.ts`: weighted puzzle selection, seeded generation, and board placement
-- `lib/progress.ts`: streak and archive persistence helpers
-- `lib/themes.ts`: visual theme tokens
-- `lib/game-types.ts`: shared contracts
-- `tests/e2e/`: Playwright browser coverage
-- `.github/workflows/deploy-pages.yml`: GitHub Pages deployment
+## Requirements
 
-## Quick Start
+- Node.js 22 or newer
+- npm 10 or 11
+- Chromium installed through Playwright for browser checks
 
-1. `npm install`
-2. `npm run dev`
-3. `npm run test`
-4. `npm run build`
-5. `npm run test:e2e`
+## Local development
 
-## Deployment
+```bash
+npm ci
+npm run dev
+```
 
-- Production deploy target: GitHub Pages
-- Static export output: `out/`
-- Repo base path is applied automatically for Pages builds
-- Workflow deploys on push to `main`
+Open `http://localhost:3000/`.
 
-## Extension Points
+## Validation
 
-- Add more topics by appending `TopicPack` entries in `lib/word-bank.ts`
-- Swap the seeded word lists for a larger JSON or database-backed lexicon
-- Add more theme shells, visual clue packs, or clue presentation formats without changing the generator contract
-- Add leaderboard, streaks, multiplayer drafts, or curated puzzle campaigns without rewriting the generator
+```bash
+npm run lint
+npx tsc --noEmit
+npm run test
+npm run test:generator
+npx playwright install chromium
+npm run test:e2e -- --project=chromium
+npm run build
+npm run validate:export
+npm run test:export
+```
+
+`npm run build` always creates a static export in `out/`. The export validator checks SEO files, canonical and social metadata, image dimensions, manifest paths, local asset resolution, and Next chunk URLs. The export browser test mounts the artifact and proves that it hydrates without failed same-origin requests.
+
+## Project map
+
+- `app/`: server metadata, stable indexable page copy, and interactive UI
+- `app/components/word-puzzle-studio.tsx`: crossword/quest play, review, archive, and controls
+- `lib/puzzle-generator.ts`, `lib/board-generator.ts`: deterministic puzzle selection and board construction
+- `lib/clue-catalog.ts`, `lib/word-bank.ts`: editorial crossword and broad quest content
+- `lib/run-state.ts`, `lib/progress.ts`, `lib/session-storage.ts`: lifecycle and local persistence
+- `lib/site-config.ts`: validated canonical URL and Pages base-path contract
+- `scripts/`: export validation, mounted serving, and deployment smoke checks
+- `tests/e2e/`, `tests/export/`: live UI and built-artifact browser coverage
+- `.github/workflows/deploy-pages.yml`: validated GitHub Pages build and deployment
+
+## Documentation
+
+- [Player guide](docs/player-guide.md)
+- [Deployment and operations](docs/deployment.md)
+- [Documentation index](docs/index.md)
+
+## Deployment summary
+
+Production uses GitHub Pages Actions at `https://dmoliveira.github.io/ai-word-puzzle/`. `actions/configure-pages` supplies the full `SITE_URL` and runtime `PAGES_BASE_PATH`; the build rejects inconsistent values. See [the deployment guide](docs/deployment.md) for local Pages-mode validation, custom domains, robots limitations, smoke checks, and rollback.
+
+## Safe extension points
+
+- Add reviewed clues through `lib/clue-catalog.ts` and broad trace content through `lib/word-bank.ts`.
+- Add themes without changing persisted puzzle identity.
+- Extend lifecycle or progress data through strict decoders and migration tests.
+- Treat accounts, synced progress, multiplayer, and leaderboards as new backend features rather than implying they already exist.

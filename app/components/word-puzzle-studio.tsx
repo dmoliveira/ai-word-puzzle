@@ -1655,7 +1655,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
 }
 
   return (
-    <main aria-busy={!hydrated} data-hydrated={hydrated ? "true" : "false"} className={`scroll-shell ${theme.className} min-h-screen px-4 py-6 sm:px-6 lg:px-8 ${hydrated ? "" : "pointer-events-none opacity-70"}`}>
+    <main id="puzzle-studio" aria-busy={!hydrated} data-hydrated={hydrated ? "true" : "false"} className={`scroll-shell ${theme.className} min-h-screen scroll-mt-4 px-4 py-6 sm:px-6 lg:px-8 ${hydrated ? "" : "pointer-events-none opacity-70"}`}>
       <div className="mx-auto flex w-full max-w-[96rem] flex-col gap-6">
         <section className="glass-card quest-card-frame quest-card-glow overflow-hidden rounded-[2rem] px-5 py-5 sm:px-6">
           <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
@@ -1679,7 +1679,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
               <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_8.5rem] lg:items-center">
                 <div className="space-y-3">
                   <div className="text-sm font-semibold text-fuchsia-300">{runContextLabel}</div>
-                  <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">{state.run.title}</h1>
+                  <h2 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">{state.run.title}</h2>
                   <p className="max-w-3xl text-sm leading-6 text-slate-300">{state.run.blurb}</p>
                   <div className="flex flex-wrap gap-2 text-xs text-slate-200">
                     <span data-testid="progress-label" className="accent-chip rounded-full px-3 py-1 font-semibold uppercase tracking-[0.22em]">{progressLabel}</span>

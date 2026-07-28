@@ -10,11 +10,13 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
     "lint": "eslint .",
     "test": "tsx --test",
     "test:generator": "GENERATOR_MATRIX_SEEDS=32 tsx --test lib/board-generator.test.ts lib/puzzle-generator.test.ts",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:export": "playwright test --config=playwright.export.config.ts",
+    "smoke:deployment": "node scripts/smoke-deployment.mjs",
+    "validate:export": "node scripts/validate-static-export.mjs"
   },
   "dependencies": {
     "next": "16.2.2",

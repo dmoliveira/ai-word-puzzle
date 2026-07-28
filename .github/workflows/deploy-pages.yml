@@ -13,48 +13,80 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
 
       - name: Setup Pages
-        uses: actions/configure-pages@v5
+        id: pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
+
+      - name: Verify Pages URL contract
+        env:
+          PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          SITE_URL: ${{ steps.pages.outputs.base_url }}
+        run: |
+          test -n "$SITE_URL"
+          node -e 'const url = new URL(process.env.SITE_URL); const path = url.pathname === "/" ? "" : url.pathname.replace(/\/$/, ""); if (path !== process.env.PAGES_BASE_PATH) throw new Error(`Pages base mismatch: ${path || "/"} !== ${process.env.PAGES_BASE_PATH || "/"}`)'
 
       - name: Install dependencies
         run: npm ci
 
       - name: Validate project
-        run: npm run lint && npm run test
+        run: npm run lint && npx tsc --noEmit && npm run test
 
       - name: Build static site
-        run: STATIC_EXPORT=true npm run build
+        env:
+          PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          SITE_URL: ${{ steps.pages.outputs.base_url }}
+        run: npm run build
 
       - name: Prepare Pages artifact
         run: touch out/.nojekyll
 
+      - name: Validate Pages artifact
+        env:
+          EXPECTED_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          EXPECTED_SITE_URL: ${{ steps.pages.outputs.base_url }}
+          REQUIRE_NOJEKYLL: "true"
+        run: npm run validate:export
+
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: ./out
 
   deploy:
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     needs: build
     steps:
+      - name: Checkout smoke script
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5
+
+      - name: Smoke deployed site
+        env:
+          DEPLOYMENT_URL: ${{ steps.deployment.outputs.page_url }}
+          EXPECTED_SITE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: node scripts/smoke-deployment.mjs

@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="Astra Lexa daily crossword and word quest">
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#020817"/>
+      <stop offset="0.48" stop-color="#111c38"/>
+      <stop offset="1" stop-color="#190d35"/>
+    </linearGradient>
+    <radialGradient id="blue">
+      <stop offset="0" stop-color="#38bdf8" stop-opacity=".3"/>
+      <stop offset="1" stop-color="#38bdf8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="violet">
+      <stop offset="0" stop-color="#a855f7" stop-opacity=".32"/>
+      <stop offset="1" stop-color="#a855f7" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7dd3fc"/>
+      <stop offset=".52" stop-color="#c084fc"/>
+      <stop offset="1" stop-color="#60a5fa"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#background)"/>
+  <circle cx="106" cy="45" r="330" fill="url(#blue)"/>
+  <circle cx="1100" cy="590" r="390" fill="url(#violet)"/>
+  <g transform="translate(790 95)">
+    <rect width="320" height="320" rx="76" fill="#071426" stroke="#ffffff" stroke-opacity=".12" stroke-width="3"/>
+    <ellipse cx="160" cy="160" rx="120" ry="50" fill="none" stroke="#7dd3fc" stroke-opacity=".42" stroke-width="7" transform="rotate(-22 160 160)"/>
+    <ellipse cx="160" cy="160" rx="92" ry="128" fill="none" stroke="#c084fc" stroke-opacity=".34" stroke-width="6" transform="rotate(38 160 160)"/>
+    <path d="M160 38 184 130 278 154 184 180 160 276 136 180 42 154 136 130Z" fill="url(#mark)"/>
+    <path d="M160 84 174 140 230 154 174 169 160 226 146 169 90 154 146 140Z" fill="#f8fafc"/>
+  </g>
+  <text x="90" y="218" fill="#7dd3fc" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700" letter-spacing="7">FREE · ACCESSIBLE · LOCAL-FIRST</text>
+  <text x="84" y="330" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="86" font-weight="800">ASTRA LEXA</text>
+  <text x="90" y="405" fill="#d8e5f5" font-family="Arial, Helvetica, sans-serif" font-size="38" font-weight="600">Daily crossword &amp; word quest</text>
+  <text x="90" y="472" fill="#aebed3" font-family="Arial, Helvetica, sans-serif" font-size="27">Keyboard · touch · seeded play · browser-local progress</text>
+  <rect x="90" y="520" width="555" height="3" rx="2" fill="url(#mark)"/>
+</svg>

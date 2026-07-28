@@ -138,7 +138,9 @@ async function readStoredAnswers(page: Page) {
 test("loads a deterministic puzzle with the primary play controls", async ({ page }) => {
   await openPuzzle(page);
 
-  await expect(page.locator("h1")).toHaveText(/\S+/);
+  await expect(page.getByRole("heading", { level: 1, name: "Astra Lexa daily crossword and word quest" })).toHaveCount(1);
+  await expect(page.getByRole("link", { name: "Open the puzzle studio" })).toHaveAttribute("href", "#puzzle-studio");
+  await expect(page.locator('main#puzzle-studio[data-hydrated="true"]')).toBeVisible();
   await expect(page.getByRole("button", { name: "Fresh run", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Pause", exact: true }).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Puzzle board" })).toBeVisible();
