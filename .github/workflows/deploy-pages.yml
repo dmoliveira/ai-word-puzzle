@@ -4,23 +4,30 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
+permissions: {}
 
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('pages-pr-{0}', github.event.pull_request.number) || 'pages-production' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
+    name: Build and validate Pages artifact
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pages: read
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -38,13 +45,28 @@ jobs:
           SITE_URL: ${{ steps.pages.outputs.base_url }}
         run: |
           test -n "$SITE_URL"
-          node -e 'const url = new URL(process.env.SITE_URL); const path = url.pathname === "/" ? "" : url.pathname.replace(/\/$/, ""); if (path !== process.env.PAGES_BASE_PATH) throw new Error(`Pages base mismatch: ${path || "/"} !== ${process.env.PAGES_BASE_PATH || "/"}`)'
+          node -e 'const url = new URL(process.env.SITE_URL); const path = url.pathname === "/" ? "" : url.pathname.replace(/\/$/, ""); if (path !== process.env.PAGES_BASE_PATH) throw new Error("Pages base mismatch: " + (path || "/") + " !== " + (process.env.PAGES_BASE_PATH || "/"))'
 
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify dependency integrity
+        run: |
+          npm audit signatures
+          npm run audit:dependencies
+
       - name: Validate project
-        run: npm run lint && npx tsc --noEmit && npm run test
+        run: |
+          npm run lint
+          npx tsc --noEmit
+          npm run test
+          npm run test:generator
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Test browser gameplay
+        run: npm run test:e2e -- --project=chromium
 
       - name: Build static site
         env:
@@ -62,12 +84,20 @@ jobs:
           REQUIRE_NOJEKYLL: "true"
         run: npm run validate:export
 
+      - name: Test mounted Pages artifact
+        env:
+          EXPECTED_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          EXPECTED_SITE_URL: ${{ steps.pages.outputs.base_url }}
+        run: npm run test:export
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: ./out
 
   deploy:
+    name: Deploy validated Pages artifact
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     permissions:
       contents: read
       pages: write
@@ -76,10 +106,13 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: build
     steps:
       - name: Checkout smoke script
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Deploy to GitHub Pages
         id: deployment

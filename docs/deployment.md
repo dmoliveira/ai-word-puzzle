@@ -69,16 +69,26 @@ git restore next-env.d.ts
 
 `.github/workflows/deploy-pages.yml`:
 
-1. checks out the exact commit and configures Node 22;
-2. reads `base_url` and `base_path` from `actions/configure-pages`;
-3. independently rejects an inconsistent URL/path pair;
-4. installs with `npm ci` and runs lint, TypeScript, and unit tests;
-5. builds the static export with the Pages URL contract;
-6. adds `.nojekyll` and validates HTML, metadata, manifest, images, paths, and local assets;
-7. uploads and deploys the artifact; and
-8. runs a retrying post-deployment smoke against the H1, canonical, manifest, a Next chunk, sitemap, and social PNG.
+1. runs for pull requests to `main`, pushes to `main`, and manual dispatches;
+2. checks out the exact commit without persisted credentials and configures Node 22;
+3. reads `base_url` and `base_path` from `actions/configure-pages`;
+4. independently rejects an inconsistent URL/path pair;
+5. installs with `npm ci`, verifies registry signatures, requires zero production dependency findings, and runs lint, TypeScript, unit tests, the 32-seed generator matrix, and Chromium gameplay tests;
+6. builds the static export with the Pages URL contract;
+7. adds `.nojekyll` and validates HTML, metadata, manifest, images, paths, and local assets;
+8. mounts the exact `out/` directory at the Pages base path and checks hydration and asset loading in Chromium;
+9. uploads the validated artifact; and
+10. only for a `main` push or a `main` manual dispatch, deploys the artifact and runs a retrying smoke against the H1, canonical, manifest, a Next chunk, sitemap, and social PNG.
+
+Build and deploy jobs receive separate least-privilege tokens. Pull requests have an isolated, cancelable concurrency lane and never deploy. Production runs share a non-canceling lane so an older build cannot activate after a newer one. A manual dispatch from a non-`main` ref validates and uploads an artifact but deliberately skips deployment.
 
 The smoke runs after Pages activates the deployment. It detects a bad release; it cannot prevent activation.
+
+### Dependency-audit policy
+
+The deployable artifact contains only `out/`; it does not publish `node_modules` or run a Next server. CI nevertheless requires valid npm registry signatures, a clean production dependency audit, and an allowlist check over the full audit. Next, PostCSS, and Sharp are pinned or overridden to audited patched releases.
+
+As of 2026-07-29, a full development-dependency audit expands one advisory, [GHSA-mh99-v99m-4gvg](https://github.com/advisories/GHSA-mh99-v99m-4gvg), into nine high-severity metavulnerability entries through ESLint plugins that still require `minimatch@3` and `brace-expansion@1`. The gate pins the exact affected package and installation-path set so advisory reuse or dependency drift fails closed. There is no patched `brace-expansion@1` release, and forcing version 5 under those CommonJS consumers changes the module API. This is an accepted, time-bounded CI availability risk: the packages are not shipped, production dependencies audit cleanly, pull-request tokens are read-only, and the build job has a 30-minute timeout. The repository maintainer must reassess the exception by 2026-08-29 or sooner when the ESLint plugin graph supports a patched brace-expansion line.
 
 ## Search and metadata files
 
