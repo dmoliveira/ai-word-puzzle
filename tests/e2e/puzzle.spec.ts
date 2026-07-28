@@ -11,7 +11,6 @@ const deterministicQuery = new URLSearchParams({
   boardView: "crossword",
   style: "alpha",
   puzzleSize: "7",
-  clueDensity: "2",
   timerEnabled: "false",
   learningMode: "false",
 });
@@ -76,6 +75,14 @@ async function readStoredAttempt(page: Page) {
   }, sessionStorageKey);
 }
 
+async function readStoredAnswers(page: Page) {
+  await readStoredAttempt(page);
+  return page.evaluate((key) => {
+    const game = JSON.parse(window.localStorage.getItem(key)!) as { currentAttempt: { run: { words: Array<{ answer: string }> } } };
+    return game.currentAttempt.run.words.map((word) => word.answer.toUpperCase());
+  }, sessionStorageKey);
+}
+
 test("loads a deterministic puzzle with the primary play controls", async ({ page }) => {
   await openPuzzle(page);
 
@@ -83,6 +90,20 @@ test("loads a deterministic puzzle with the primary play controls", async ({ pag
   await expect(page.getByRole("button", { name: "Fresh run", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Pause", exact: true }).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Puzzle board" })).toBeVisible();
+});
+
+test("crossword answers stay out of the rendered page until deliberate review", async ({ page }) => {
+  await openPuzzle(page, { learningMode: "true" });
+  const answers = await readStoredAnswers(page);
+
+  await expect(page.getByRole("heading", { name: "Clue progress" })).toBeVisible();
+  await expect(page.getByText(/Vocabulary examples, pronunciation, and translation notes unlock/i)).toBeVisible();
+  for (const answer of answers) {
+    await expect(page.getByText(answer, { exact: true })).toHaveCount(0);
+  }
+
+  await openWordReview(page);
+  await expect(page.getByTestId("review-word-answer")).toHaveText(answers[0].toLowerCase());
 });
 
 test("player can deliberately review and solve the active clue", async ({ page }) => {
@@ -137,6 +158,20 @@ test("setup exposes advanced learning and board controls", async ({ page }) => {
   await page.getByLabel("Board mode").selectOption("quest");
   await page.getByRole("button", { name: "Start Fresh Run" }).click();
   await expect(page.getByRole("heading", { name: "Quest board" })).toBeVisible();
+});
+
+test("setup advertises only certified crossword options and keeps trace topics broad", async ({ page }) => {
+  await openPuzzle(page);
+  await openSetup(page);
+
+  await expect(page.getByRole("button", { name: "Ocean", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "City Light", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Show advanced" }).click();
+  await expect(page.getByLabel("Target count")).toHaveAttribute("max", "8");
+
+  await page.getByLabel("Board mode").selectOption("quest");
+  await expect(page.getByRole("button", { name: "City Light", exact: true })).toBeVisible();
+  await expect(page.getByLabel("Target count")).toHaveAttribute("max", "12");
 });
 
 test("mobile player can switch between board, clues, and archive", async ({ page }) => {
@@ -307,6 +342,18 @@ test("shared daily options reopen the requested seeded run", async ({ page }) =>
 
   await expect(page.getByText("daily", { exact: true }).first()).toBeVisible();
   await expect(page.locator("span").filter({ hasText: /^seed 2026-04-24$/ }).first()).toBeVisible();
+});
+
+test("shared links declare generator v3 and omit retired options", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await openPuzzle(page);
+  await page.evaluate(() => Object.defineProperty(navigator, "share", { value: undefined, configurable: true }));
+  await page.getByRole("button", { name: "Share link", exact: true }).click();
+  await expect(page.getByText("Run link copied.")).toBeVisible();
+
+  const sharedUrl = new URL(await page.evaluate(() => navigator.clipboard.readText()));
+  expect(sharedUrl.searchParams.get("generatorVersion")).toBe("3");
+  expect(sharedUrl.searchParams.has("clueDensity")).toBe(false);
 });
 
 test("player sees completion and share actions after solving every word", async ({ page }) => {

@@ -60,6 +60,9 @@ export type PuzzleWord = {
   id: string;
   answer: string;
   normalized: string;
+  source: "topic" | "general" | "synthetic" | "lexicon";
+  qualityStatus: "approved" | "unreviewed";
+  clue: string | null;
   topicId: TopicId;
   topicLabel: string;
   contentPackIds: ContentPackId[];
@@ -113,7 +116,6 @@ export type PuzzleOptions = {
   puzzleSize: number;
   boardView: BoardView;
   style: ThemeStyleId;
-  clueDensity: 1 | 2 | 3;
   timerEnabled: boolean;
   learningMode: boolean;
   seed: string;

@@ -8,6 +8,7 @@ import type {
   ThemeStyleId,
   TopicId,
 } from "@/lib/game-types";
+import { crosswordContentPackIds, crosswordTopicIds } from "@/lib/clue-catalog";
 
 const modes = ["custom", "daily"] as const satisfies readonly PuzzleMode[];
 const challenges = ["breeze", "quest", "mythic"] as const satisfies readonly ChallengeLevel[];
@@ -27,6 +28,7 @@ const contentPackIds = [
 ] as const satisfies readonly ContentPackId[];
 
 const sharedOptionKeys = [
+  "generatorVersion",
   "mode",
   "seed",
   "topics",
@@ -36,7 +38,6 @@ const sharedOptionKeys = [
   "boardView",
   "style",
   "puzzleSize",
-  "clueDensity",
   "timerEnabled",
   "learningMode",
 ] as const;
@@ -73,8 +74,17 @@ export function getUtcDay(nowMs = Date.now()) {
   return new Date(nowMs).toISOString().slice(0, 10);
 }
 
-export function clampPuzzleSize(size: number, family: PuzzleFamily) {
-  return family === "mini" ? Math.max(4, Math.min(6, size)) : Math.max(4, Math.min(12, size));
+export function getPuzzleSizeRange(family: PuzzleFamily, boardView: BoardView) {
+  if (boardView === "quest") {
+    return { min: 4, max: family === "mini" ? 6 : 12 };
+  }
+
+  return { min: 4, max: family === "mini" ? 5 : family === "themed" ? 6 : 8 };
+}
+
+export function clampPuzzleSize(size: number, family: PuzzleFamily, boardView: BoardView) {
+  const range = getPuzzleSizeRange(family, boardView);
+  return Math.max(range.min, Math.min(range.max, size));
 }
 
 export function getCanonicalDailyOptions(nowMs = Date.now()): PuzzleOptions {
@@ -87,7 +97,6 @@ export function getCanonicalDailyOptions(nowMs = Date.now()): PuzzleOptions {
     puzzleSize: 7,
     boardView: "crossword",
     style: "alpha",
-    clueDensity: 2,
     timerEnabled: true,
     learningMode: false,
     seed: getUtcDay(nowMs),
@@ -97,22 +106,28 @@ export function getCanonicalDailyOptions(nowMs = Date.now()): PuzzleOptions {
 export function normalizePuzzleOptions(input: Partial<PuzzleOptions> = {}, nowMs = Date.now()): PuzzleOptions {
   const defaults = getCanonicalDailyOptions(nowMs);
   const puzzleFamily = families.includes(input.puzzleFamily as PuzzleFamily) ? input.puzzleFamily! : defaults.puzzleFamily;
-  const topics = [...new Set((input.topics ?? defaults.topics).filter((topic): topic is TopicId => topicIds.includes(topic as TopicId)))];
+  const boardView = boardViews.includes(input.boardView as BoardView) ? input.boardView! : defaults.boardView;
+  const allowedTopics: readonly TopicId[] = boardView === "crossword" ? crosswordTopicIds : topicIds;
+  const topics = [...new Set((input.topics ?? defaults.topics).filter((topic): topic is TopicId => allowedTopics.includes(topic as TopicId)))];
   const mode = modes.includes(input.mode as PuzzleMode) ? input.mode! : defaults.mode;
   const rawSeed = typeof input.seed === "string" ? input.seed.trim() : "";
+  const requestedContentPack = input.contentPackId === "auto" || contentPackIds.includes(input.contentPackId as ContentPackId)
+    ? input.contentPackId!
+    : defaults.contentPackId;
+  const contentPackId = puzzleFamily !== "themed"
+    || (boardView === "crossword" && requestedContentPack !== "auto" && !crosswordContentPackIds.includes(requestedContentPack as (typeof crosswordContentPackIds)[number]))
+    ? "auto"
+    : requestedContentPack;
 
   return {
     mode,
     challenge: challenges.includes(input.challenge as ChallengeLevel) ? input.challenge! : defaults.challenge,
     puzzleFamily,
     topics: topics.length > 0 ? topics : defaults.topics,
-    contentPackId: input.contentPackId === "auto" || contentPackIds.includes(input.contentPackId as ContentPackId)
-      ? input.contentPackId!
-      : defaults.contentPackId,
-    puzzleSize: clampPuzzleSize(Number.isFinite(input.puzzleSize) ? Math.trunc(input.puzzleSize!) : defaults.puzzleSize, puzzleFamily),
-    boardView: boardViews.includes(input.boardView as BoardView) ? input.boardView! : defaults.boardView,
+    contentPackId,
+    puzzleSize: clampPuzzleSize(Number.isFinite(input.puzzleSize) ? Math.trunc(input.puzzleSize!) : defaults.puzzleSize, puzzleFamily, boardView),
+    boardView,
     style: styles.includes(input.style as ThemeStyleId) ? input.style! : defaults.style,
-    clueDensity: input.clueDensity === 1 || input.clueDensity === 2 || input.clueDensity === 3 ? input.clueDensity : defaults.clueDensity,
     timerEnabled: typeof input.timerEnabled === "boolean" ? input.timerEnabled : defaults.timerEnabled,
     learningMode: typeof input.learningMode === "boolean" ? input.learningMode : defaults.learningMode,
     seed: rawSeed || (mode === "daily" ? getUtcDay(nowMs) : ""),
@@ -129,6 +144,11 @@ export function parseSharedOptions(search: string, nowMs = Date.now()): SharedOp
   const duplicatedKey = presentKeys.find((key) => params.getAll(key).length !== 1);
   if (duplicatedKey) {
     return { kind: "invalid", reason: `Duplicate ${duplicatedKey} parameter.` };
+  }
+
+  const generatorVersion = params.get("generatorVersion");
+  if (generatorVersion !== null && generatorVersion !== "3") {
+    return { kind: "invalid", reason: "That shared puzzle uses an unsupported generator version." };
   }
 
   const modeValue = params.get("mode");
@@ -158,6 +178,13 @@ export function parseSharedOptions(search: string, nowMs = Date.now()): SharedOp
     return { kind: "invalid", reason: "A shared topic is not supported." };
   }
 
+  const resolvedBoardView = boardView ?? "crossword";
+  if (resolvedBoardView === "crossword"
+    && ((topics && topics.some((topic) => !crosswordTopicIds.includes(topic as (typeof crosswordTopicIds)[number])))
+      || (contentPackId && contentPackId !== "auto" && !crosswordContentPackIds.includes(contentPackId as (typeof crosswordContentPackIds)[number])))) {
+    return { kind: "invalid", reason: "That topic or content pack is not available for curated crosswords." };
+  }
+
   const seed = (params.get("seed") ?? "").trim();
   if (seed.length > 80 || (mode === "daily" && seed !== "" && !isUtcDay(seed))) {
     return { kind: "invalid", reason: "The shared seed is invalid." };
@@ -166,15 +193,9 @@ export function parseSharedOptions(search: string, nowMs = Date.now()): SharedOp
   const sizeValue = params.get("puzzleSize");
   const puzzleSize = sizeValue === null ? undefined : Number(sizeValue);
   const resolvedFamily = puzzleFamily ?? "classic";
-  const maximumSize = resolvedFamily === "mini" ? 6 : 12;
+  const maximumSize = getPuzzleSizeRange(resolvedFamily, resolvedBoardView).max;
   if (puzzleSize !== undefined && (!Number.isInteger(puzzleSize) || puzzleSize < 4 || puzzleSize > maximumSize)) {
     return { kind: "invalid", reason: "The shared puzzle size is invalid." };
-  }
-
-  const densityValue = params.get("clueDensity");
-  const clueDensity = densityValue === null ? undefined : Number(densityValue);
-  if (clueDensity !== undefined && clueDensity !== 1 && clueDensity !== 2 && clueDensity !== 3) {
-    return { kind: "invalid", reason: "The shared clue density is invalid." };
   }
 
   const timerValue = params.get("timerEnabled");
@@ -196,7 +217,6 @@ export function parseSharedOptions(search: string, nowMs = Date.now()): SharedOp
       boardView,
       style,
       puzzleSize,
-      clueDensity: clueDensity as 1 | 2 | 3 | undefined,
       timerEnabled,
       learningMode,
       topics: topics as TopicId[] | undefined,

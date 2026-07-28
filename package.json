@@ -13,6 +13,7 @@
     "start": "next start",
     "lint": "eslint .",
     "test": "tsx --test",
+    "test:generator": "GENERATOR_MATRIX_SEEDS=32 tsx --test lib/board-generator.test.ts lib/puzzle-generator.test.ts",
     "test:e2e": "playwright test"
   },
   "dependencies": {

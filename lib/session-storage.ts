@@ -16,6 +16,7 @@ import {
   runStateSchemaVersion,
   snapshotAttempt,
 } from "@/lib/run-state";
+import { wordBank } from "@/lib/word-bank";
 
 export const gameStorageKey = "astra-lexa:v2";
 export const legacySessionStorageKey = "astra-lexa-session";
@@ -56,7 +57,13 @@ function decodeOptions(value: unknown, nowMs: number, allowLegacyDefaults: boole
     return null;
   }
 
-  const normalized = normalizePuzzleOptions(value as Partial<PuzzleOptions>, nowMs);
+  const rawOptions = value as Partial<PuzzleOptions>;
+  const normalized = allowLegacyDefaults
+    ? {
+        ...normalizePuzzleOptions({ ...rawOptions, boardView: "quest" }, nowMs),
+        boardView: rawOptions.boardView === "quest" ? "quest" as const : "crossword" as const,
+      }
+    : normalizePuzzleOptions(rawOptions, nowMs);
   if (allowLegacyDefaults) {
     return normalized;
   }
@@ -71,7 +78,6 @@ function decodeOptions(value: unknown, nowMs: number, allowLegacyDefaults: boole
     && value.puzzleSize === normalized.puzzleSize
     && value.boardView === normalized.boardView
     && value.style === normalized.style
-    && value.clueDensity === normalized.clueDensity
     && value.timerEnabled === normalized.timerEnabled
     && value.learningMode === normalized.learningMode
     && value.seed === normalized.seed;
@@ -79,7 +85,7 @@ function decodeOptions(value: unknown, nowMs: number, allowLegacyDefaults: boole
   return exact ? normalized : null;
 }
 
-function isPuzzleWord(value: unknown): value is PuzzleWord {
+function hasLegacyPuzzleWordShape(value: unknown) {
   if (!isObject(value)) {
     return false;
   }
@@ -98,6 +104,43 @@ function isPuzzleWord(value: unknown): value is PuzzleWord {
     && isStringArray(value.contentPackIds)
     && isStringArray(value.relatedWords)
     && isStringArray(value.visuals);
+}
+
+function hydratePuzzleWord(value: unknown, allowDefaults: boolean): PuzzleWord | null {
+  if (!isObject(value) || typeof value.id !== "string" || typeof value.answer !== "string") {
+    return null;
+  }
+
+  const normalized = typeof value.normalized === "string"
+    ? value.normalized
+    : value.answer.toLowerCase().replace(/[^a-z]/g, "");
+  const current = wordBank.find((word) => word.id === value.id)
+    ?? wordBank.find((word) => word.topicId === value.topicId && word.normalized === normalized)
+    ?? wordBank.find((word) => word.normalized === normalized);
+  const merged: Record<string, unknown> = current ? { ...current, ...value, normalized } : { ...value, normalized };
+  if (!hasLegacyPuzzleWordShape(merged)) {
+    return null;
+  }
+
+  const validSources = new Set<PuzzleWord["source"]>(["topic", "general", "synthetic", "lexicon"]);
+  const source = validSources.has(merged.source as PuzzleWord["source"])
+    ? merged.source as PuzzleWord["source"]
+    : current?.source ?? "topic";
+  const clue = typeof merged.clue === "string" ? merged.clue : null;
+  const qualityStatus: PuzzleWord["qualityStatus"] = merged.qualityStatus === "approved" && clue ? "approved" : "unreviewed";
+  if (!allowDefaults
+    && (merged.source !== source
+      || merged.clue !== clue
+      || merged.qualityStatus !== qualityStatus)) {
+    return null;
+  }
+
+  return {
+    ...(merged as unknown as PuzzleWord),
+    source,
+    clue,
+    qualityStatus,
+  };
 }
 
 function decodeBoard(value: unknown, wordIds: Set<string>): PuzzleBoard | null {
@@ -148,15 +191,24 @@ function decodeRun(value: unknown, nowMs: number, allowLegacyDefaults: boolean):
     || typeof value.title !== "string"
     || typeof value.blurb !== "string"
     || !Array.isArray(value.words)
-    || value.words.length === 0
-    || !value.words.every(isPuzzleWord)) {
+    || value.words.length === 0) {
     return null;
   }
 
-  const options = decodeOptions(value.options, nowMs, allowLegacyDefaults);
-  const wordIds = new Set(value.words.map((word) => word.id));
+  const generatorVersion = typeof value.generatorVersion === "number" && Number.isInteger(value.generatorVersion)
+    ? value.generatorVersion
+    : 1;
+  const allowRunDefaults = allowLegacyDefaults || generatorVersion < 3;
+  const options = decodeOptions(value.options, nowMs, allowRunDefaults);
+  const decodedWords = value.words.map((word) => hydratePuzzleWord(word, allowRunDefaults));
+  if (decodedWords.some((word) => word === null)) {
+    return null;
+  }
+  const words = decodedWords as PuzzleWord[];
+
+  const wordIds = new Set(words.map((word) => word.id));
   const board = decodeBoard(value.board, wordIds);
-  if (!options || !board || board.placements.length !== value.words.length) {
+  if (!options || !board || board.placements.length !== words.length) {
     return null;
   }
 
@@ -164,12 +216,10 @@ function decodeRun(value: unknown, nowMs: number, allowLegacyDefaults: boolean):
     ...(value as unknown as PuzzleRun),
     id: value.id,
     puzzleId: typeof value.puzzleId === "string" && value.puzzleId ? value.puzzleId : value.id,
-    generatorVersion: typeof value.generatorVersion === "number" && Number.isInteger(value.generatorVersion)
-      ? value.generatorVersion
-      : 1,
+    generatorVersion,
     options,
     board,
-    words: value.words,
+    words,
   };
 }
 

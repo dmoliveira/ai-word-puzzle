@@ -15,7 +15,7 @@ test("canonical daily options use a stable UTC day and fixed content preset", ()
 
 test("shared options parse supported values without unchecked casts", () => {
   const result = parseSharedOptions(
-    "?mode=custom&seed=shared-seed&topics=myth,cosmos&challenge=mythic&puzzleFamily=mini&contentPackId=auto&boardView=quest&style=nebula&puzzleSize=6&clueDensity=3&timerEnabled=false&learningMode=true",
+    "?mode=custom&seed=shared-seed&topics=myth,cosmos&challenge=mythic&puzzleFamily=mini&contentPackId=auto&boardView=quest&style=nebula&puzzleSize=6&timerEnabled=false&learningMode=true",
     now,
   );
 
@@ -34,6 +34,8 @@ test("shared options reject duplicates and malformed values as one candidate", (
   assert.equal(parseSharedOptions("?mode=custom&seed=x&timerEnabled=yes", now).kind, "invalid");
   assert.equal(parseSharedOptions("?mode=custom&seed=x&puzzleFamily=mini&puzzleSize=12", now).kind, "invalid");
   assert.equal(parseSharedOptions("?mode=custom&seed=x&topics=myth,unknown", now).kind, "invalid");
+  assert.equal(parseSharedOptions("?generatorVersion=2&mode=custom&seed=x", now).kind, "invalid");
+  assert.equal(parseSharedOptions("?mode=custom&seed=x&topics=city&boardView=crossword", now).kind, "invalid");
 });
 
 test("normalization removes invalid topics and clamps mini runs", () => {
@@ -45,6 +47,20 @@ test("normalization removes invalid topics and clamps mini runs", () => {
     topics: ["myth", "myth"],
   }, now);
 
-  assert.equal(options.puzzleSize, 6);
+  assert.equal(options.puzzleSize, 5);
   assert.deepEqual(options.topics, ["myth"]);
+});
+
+test("trace-path options retain the broad catalog and larger mini range", () => {
+  const options = normalizePuzzleOptions({
+    mode: "custom",
+    seed: "trace",
+    boardView: "quest",
+    puzzleFamily: "mini",
+    puzzleSize: 10,
+    topics: ["city", "winter"],
+  }, now);
+
+  assert.equal(options.puzzleSize, 6);
+  assert.deepEqual(options.topics, ["city", "winter"]);
 });

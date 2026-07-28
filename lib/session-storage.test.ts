@@ -34,8 +34,19 @@ function createState(nowMs = 1_000) {
 function createLegacyRaw() {
   const state = createState();
   const { puzzleId: _puzzleId, generatorVersion: _generatorVersion, ...legacyRun } = state.run;
+  const legacyWords = state.run.words.map(({
+    source: _source,
+    qualityStatus: _qualityStatus,
+    clue: _clue,
+    learningNote: _learningNote,
+    plainMeaning: _plainMeaning,
+    pronunciationHint: _pronunciationHint,
+    usageExample: _usageExample,
+    translationAid: _translationAid,
+    ...word
+  }) => word);
   return JSON.stringify({
-    run: legacyRun,
+    run: { ...legacyRun, words: legacyWords },
     guesses: state.guesses,
     cellEntries: state.cellEntries,
     solvedIds: state.solvedIds,
@@ -77,6 +88,38 @@ test("invalid v2 data falls back to legacy data without mutating legacy keys", (
   assert.equal(loaded.game.currentAttempt.assists.hintStepsByWord[loaded.game.currentAttempt.run.words[0].id], 2);
   assert.equal(storage.getItem(legacySessionStorageKey), legacyRaw);
   assert.equal(storage.writes, 0);
+});
+
+test("previous generator-v2 envelopes backfill removed options and word metadata", () => {
+  const storage = new MemoryStorage();
+  const state = createState();
+  const previousWords = state.run.words.map(({ source: _source, qualityStatus: _qualityStatus, clue: _clue, ...word }) => word);
+  const { timerEnabled: _timerEnabled, learningMode: _learningMode, ...previousOptions } = state.run.options;
+  const previousEnvelope = {
+    schemaVersion: 2,
+    currentAttempt: {
+      ...state,
+      run: {
+        ...state.run,
+        generatorVersion: 2,
+        words: previousWords,
+        options: { ...previousOptions, clueDensity: 3 },
+      },
+    },
+    progress: createEmptyProgress(),
+  };
+  const raw = JSON.stringify(previousEnvelope);
+  storage.values.set(gameStorageKey, raw);
+
+  const loaded = readStoredGame(storage, 5_000);
+
+  assert.equal(loaded.source, "v2");
+  assert.ok(loaded.game);
+  assert.equal(loaded.game.currentAttempt.run.generatorVersion, 2);
+  assert.equal(loaded.game.currentAttempt.run.options.timerEnabled, true);
+  assert.equal(loaded.game.currentAttempt.run.options.learningMode, false);
+  assert.ok(loaded.game.currentAttempt.run.words.every((word) => word.source && word.learningNote && "clue" in word));
+  assert.equal(storage.getItem(gameStorageKey), raw, "decoding must not overwrite the source envelope");
 });
 
 test("malformed persisted candidates are rejected instead of shallow-merged", () => {
