@@ -32,9 +32,13 @@ type ToastState = {
 type ToastTone = NonNullable<ToastState>["tone"];
 type HistoryFilterMode = "all" | "daily" | "custom";
 type HistoryFilterStatus = "all" | "finished" | "active";
-type RevealConfirmState = "none" | "word" | "puzzle";
+type ReviewTarget =
+  | { kind: "none" }
+  | { kind: "word"; attemptId: string; wordId: string }
+  | { kind: "puzzle"; attemptId: string };
 type BuilderPresetId = "gentle" | "balanced" | "study" | "deep";
 type MobilePanel = "board" | "clues" | "review" | "archive";
+type WordSelectionIntent = "answer" | "cell";
 type QuestPathState = {
   anchor: string | null;
   cells: string[];
@@ -127,6 +131,26 @@ function getWordCells(state: PersistedRunState, placement: PuzzlePlacement) {
   }).filter((cell): cell is PuzzleBoardCell => Boolean(cell));
 }
 
+function getCrosswordCellLabel(state: PersistedRunState, cell: PuzzleBoardCell, activeWordId: string | null) {
+  const clueReferences = cell.wordIds
+    .map((wordId) => getPlacementByWordId(state, wordId))
+    .filter((placement): placement is PuzzlePlacement => Boolean(placement))
+    .map((placement) => `${placement.clueNumber} ${placement.direction}`);
+  const entry = state.cellEntries[getCellKey(cell.row, cell.col)];
+  const activePlacement = activeWordId ? getPlacementByWordId(state, activeWordId) : null;
+  const selected = Boolean(activeWordId && cell.wordIds.includes(activeWordId));
+  const solved = cell.wordIds.every((wordId) => state.solvedIds.includes(wordId));
+  const parts = [
+    `Row ${cell.row + 1} column ${cell.col + 1}`,
+    clueReferences.length > 0 ? clueReferences.join(" and ") : "playable cell",
+    entry ? `letter ${entry.toUpperCase()}` : "blank",
+    selected && activePlacement ? `${activePlacement.clueNumber} ${activePlacement.direction} selected` : null,
+    solved ? "solved" : null,
+  ].filter((part): part is string => Boolean(part));
+
+  return parts.join(", ");
+}
+
 function deriveGuessFromCells(state: PersistedRunState, wordId: string) {
   const placement = getWordPlacement(state, wordId);
   if (!placement) {
@@ -173,7 +197,9 @@ function buildStateWithEntries(current: PersistedRunState, nextCellEntries: Reco
     cellEntries: nextCellEntries,
   };
   const solvedIds = computeSolvedIds(provisional);
-  const nextActive = current.run.words.find((entry) => !solvedIds.includes(entry.id))?.id ?? fallbackWordId;
+  const nextActive = solvedIds.includes(fallbackWordId)
+    ? current.run.words.find((entry) => !solvedIds.includes(entry.id))?.id ?? fallbackWordId
+    : fallbackWordId;
 
   return {
     ...provisional,
@@ -336,26 +362,53 @@ function getClueCardValue(word: PuzzleWord, index: number, challenge: PuzzleOpti
 }
 
 function buildAnagram(answer: string) {
-  if (answer.length < 4) {
-    return answer.toUpperCase();
+  const chars = answer.toUpperCase().split("");
+  if (chars.length < 2) {
+    return null;
   }
 
-  const chars = answer.toUpperCase().split("");
-  const rotated = [...chars.slice(1), chars[0]].join("");
-  return rotated === answer.toUpperCase() ? chars.reverse().join("") : rotated;
+  for (let offset = 1; offset < chars.length; offset += 1) {
+    const rotated = [...chars.slice(offset), ...chars.slice(0, offset)].join("");
+    if (rotated !== answer.toUpperCase()) {
+      return rotated;
+    }
+  }
+
+  const reversed = [...chars].reverse().join("");
+  return reversed === answer.toUpperCase() ? null : reversed;
+}
+
+function isWordReviewAuthorized(state: PersistedRunState, target: Extract<ReviewTarget, { kind: "word" }>) {
+  return target.attemptId === state.attemptId
+    && state.run.words.some((word) => word.id === target.wordId)
+    && (state.solvedIds.includes(target.wordId)
+      || state.assists.revealedWordIds.includes(target.wordId)
+      || state.assists.puzzleRevealed);
+}
+
+function isPuzzleReviewAuthorized(state: PersistedRunState, target: Extract<ReviewTarget, { kind: "puzzle" }>) {
+  return target.attemptId === state.attemptId && (state.completedAt !== null || state.assists.puzzleRevealed);
 }
 
 export function WordPuzzleStudio() {
   const activeAnswerInputRef = useRef<HTMLInputElement | null>(null);
   const boardCellRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const revealDialogRef = useRef<HTMLDialogElement | null>(null);
+  const revealCancelRef = useRef<HTMLButtonElement | null>(null);
+  const revealInvokerRef = useRef<HTMLElement | null>(null);
+  const reviewOriginRef = useRef<{ element: HTMLElement | null; panel: MobilePanel }>({ element: null, panel: "board" });
+  const reviewHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const completionHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const completionTransitionRef = useRef({ hydrated: false, finished: false });
+  const workspaceTabRefs = useRef<Record<MobilePanel, HTMLButtonElement | null>>({ board: null, clues: null, review: null, archive: null });
   const [options, setOptions] = useState<PuzzleOptions>(defaultOptions);
   const [state, setState] = useState<PersistedRunState>(() => createFreshState(defaultOptions));
-  const [reviewMode, setReviewMode] = useState<"none" | "word" | "puzzle">("none");
+  const [reviewTarget, setReviewTarget] = useState<ReviewTarget>({ kind: "none" });
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>("board");
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(false);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
   const [builderAdvancedOpen, setBuilderAdvancedOpen] = useState(false);
-  const [revealConfirm, setRevealConfirm] = useState<RevealConfirmState>("none");
+  const [revealConfirm, setRevealConfirm] = useState<ReviewTarget>({ kind: "none" });
   const [shownAnagrams, setShownAnagrams] = useState<Record<string, string>>({});
   const [questPath, setQuestPath] = useState<QuestPathState>({ anchor: null, cells: [] });
   const [questSelecting, setQuestSelecting] = useState(false);
@@ -367,6 +420,8 @@ export function WordPuzzleStudio() {
   const [progress, setProgress] = useState<ProgressSnapshot>(createEmptyProgress());
   const [focusedCellKey, setFocusedCellKey] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  const [compactWorkspace, setCompactWorkspace] = useState(false);
+  const [announcement, setAnnouncement] = useState("Puzzle ready.");
   const [clockNow, setClockNow] = useState(readNow);
   const stateRef = useRef(state);
   const progressRef = useRef(progress);
@@ -400,6 +455,7 @@ export function WordPuzzleStudio() {
       setState(nextState);
       setProgress(nextProgress);
       setFocusedCellKey(getFirstOpenCellKey(nextState, nextState.activeWordId));
+      setMobilePanel(nextState.run.options.boardView === "crossword" ? "clues" : "board");
       setClockNow(nowMs);
       setHydrated(true);
     }, 0);
@@ -469,12 +525,26 @@ export function WordPuzzleStudio() {
   }, [hydrated, state.completedAt, state.paused, state.run.options.timerEnabled]);
 
   useEffect(() => {
-    if (!hydrated || state.paused || state.completedAt) {
+    const query = window.matchMedia("(max-width: 1279px)");
+    const updateCompactWorkspace = () => setCompactWorkspace(query.matches);
+    updateCompactWorkspace();
+    query.addEventListener("change", updateCompactWorkspace);
+    return () => query.removeEventListener("change", updateCompactWorkspace);
+  }, []);
+
+  useEffect(() => {
+    const dialog = revealDialogRef.current;
+    if (!dialog) {
       return;
     }
 
-    activeAnswerInputRef.current?.focus();
-  }, [hydrated, state.activeWordId, state.paused, state.completedAt]);
+    if (revealConfirm.kind !== "none" && !dialog.open) {
+      dialog.showModal();
+      window.requestAnimationFrame(() => revealCancelRef.current?.focus());
+    } else if (revealConfirm.kind === "none" && dialog.open) {
+      dialog.close();
+    }
+  }, [revealConfirm]);
 
   const solvedCount = state.solvedIds.length;
   const activeWord = state.run.words.find((word) => word.id === state.activeWordId) ?? state.run.words[0] ?? null;
@@ -547,10 +617,55 @@ export function WordPuzzleStudio() {
   const todayDailyTotal = currentIsTodayDaily
     ? state.run.words.length
     : todayArchiveEntry?.totalWords ?? getCanonicalDailyOptions(clockNow).puzzleSize;
-  const activeVocabularyUnlocked = isQuestView || (activeWord ? state.solvedIds.includes(activeWord.id) : false) || reviewMode !== "none";
+  const reviewedWord = reviewTarget.kind === "word" && isWordReviewAuthorized(state, reviewTarget)
+    ? getWordById(state, reviewTarget.wordId)
+    : null;
+  const puzzleReviewAuthorized = reviewTarget.kind === "puzzle" && isPuzzleReviewAuthorized(state, reviewTarget);
+  const visibleReviewKind = reviewedWord ? "word" : puzzleReviewAuthorized ? "puzzle" : null;
+  const activeVocabularyUnlocked = isQuestView || Boolean(activeWord && (
+    state.solvedIds.includes(activeWord.id)
+    || state.assists.revealedWordIds.includes(activeWord.id)
+    || state.assists.puzzleRevealed
+  ));
+  const activeGuessIncorrect = !isQuestView
+    && Boolean(activeWord)
+    && activeFilledCount === activeWord?.length
+    && !state.solvedIds.includes(activeWord?.id ?? "");
+  const activeClueName = activePlacement ? `${activePlacement.clueNumber} ${activePlacement.direction}` : "Active clue";
+  const activeCluePromptId = activeWord ? `clue-prompt-${activeWord.id}` : undefined;
+  const activeClueFeedbackId = activeWord ? `clue-feedback-${activeWord.id}` : undefined;
+  const liveMessage = finished
+    ? `Puzzle cleared. ${solvedCount} of ${state.run.words.length} words solved.`
+    : state.paused
+      ? "Puzzle paused. Entries and new assists are locked."
+      : activeGuessIncorrect
+        ? `${activeClueName} is not correct yet.`
+        : announcement;
+  const workspacePanels = [
+    { id: "board", label: "Board" },
+    { id: "clues", label: "Clues" },
+    ...(visibleReviewKind ? [{ id: "review", label: visibleReviewKind === "word" ? "Word" : "Puzzle" } as const] : []),
+    { id: "archive", label: "Archive" },
+  ] as const;
   const filteredHistory = progress.history
     .filter((entry) => (historyModeFilter === "all" ? true : entry.mode === historyModeFilter))
     .filter((entry) => (historyStatusFilter === "all" ? true : historyStatusFilter === "finished" ? entry.finished : !entry.finished));
+
+  useEffect(() => {
+    if (!hydrated) {
+      return;
+    }
+
+    if (!completionTransitionRef.current.hydrated) {
+      completionTransitionRef.current = { hydrated: true, finished };
+      return;
+    }
+
+    if (finished && !completionTransitionRef.current.finished) {
+      window.requestAnimationFrame(() => completionHeadingRef.current?.focus());
+    }
+    completionTransitionRef.current.finished = finished;
+  }, [finished, hydrated]);
 
   function showToast(message: string, tone: ToastTone = "success") {
     setToast({ message, tone });
@@ -644,12 +759,13 @@ export function WordPuzzleStudio() {
         setOptions(run.options);
         setState(nextState);
         setFocusedCellKey(getFirstOpenCellKey(nextState, nextState.activeWordId));
-        setMobilePanel("board");
-        setRevealConfirm("none");
+        setMobilePanel(run.options.boardView === "crossword" ? "clues" : "board");
+        setRevealConfirm({ kind: "none" });
         setShownAnagrams({});
         setQuestPath({ anchor: null, cells: [] });
         setQuestSelecting(false);
-        setReviewMode("none");
+        setReviewTarget({ kind: "none" });
+        setAnnouncement("New puzzle ready.");
       });
     } catch (error) {
       setRunError(error instanceof PuzzleGenerationError ? error.message : "Could not start a new local run.");
@@ -754,8 +870,14 @@ export function WordPuzzleStudio() {
   }
 
   function togglePause() {
+    if (finished) {
+      return;
+    }
+
     const nowMs = readNow();
-    setState((current) => setAttemptPaused(current, !current.paused, nowMs));
+    const willPause = !state.paused;
+    setState((current) => setAttemptPaused(current, willPause, nowMs));
+    setAnnouncement(willPause ? "Puzzle paused. Entries and new assists are locked." : `${activeClueName} selected. Puzzle resumed.`);
     setClockNow(nowMs);
   }
 
@@ -768,42 +890,133 @@ export function WordPuzzleStudio() {
       return;
     }
 
+    const anagram = buildAnagram(word.answer);
+    if (!anagram) {
+      showToast("A safe scramble is unavailable for this word.", "muted");
+      return;
+    }
+
     setState((current) => recordAnagram(current, word.id));
     setShownAnagrams((current) => ({
       ...current,
-      [word.id]: buildAnagram(word.answer),
+      [word.id]: anagram,
     }));
   }
 
   function confirmRevealWord() {
-    if (state.paused) {
+    if (!activeWord) {
       return;
     }
 
-    setMobilePanel("review");
-    setRevealConfirm("word");
+    const target = { kind: "word", attemptId: state.attemptId, wordId: activeWord.id } as const;
+    revealInvokerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    reviewOriginRef.current = { element: revealInvokerRef.current, panel: mobilePanel };
+    if (isWordReviewAuthorized(state, target)) {
+      openAuthorizedReview(target);
+      return;
+    }
+
+    if (!state.paused && canMutateAttempt(state)) {
+      setRevealConfirm(target);
+    }
   }
 
   function confirmRevealPuzzle() {
-    if (state.paused) {
+    const target = { kind: "puzzle", attemptId: state.attemptId } as const;
+    revealInvokerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    reviewOriginRef.current = { element: revealInvokerRef.current, panel: mobilePanel };
+    if (isPuzzleReviewAuthorized(state, target)) {
+      openAuthorizedReview(target);
       return;
     }
 
+    if (!state.paused && canMutateAttempt(state)) {
+      setRevealConfirm(target);
+    }
+  }
+
+  function closeRevealDialog(restoreFocus = true) {
+    if (revealDialogRef.current?.open) {
+      revealDialogRef.current.close();
+    }
+    setRevealConfirm({ kind: "none" });
+
+    if (restoreFocus) {
+      window.requestAnimationFrame(() => revealInvokerRef.current?.focus());
+    }
+  }
+
+  function openAuthorizedReview(target: Exclude<ReviewTarget, { kind: "none" }>) {
+    setReviewTarget(target);
     setMobilePanel("review");
-    setRevealConfirm("puzzle");
+    closeRevealDialog(false);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => reviewHeadingRef.current?.focus());
+    });
+  }
+
+  function closeReview() {
+    const origin = reviewOriginRef.current;
+    setReviewTarget({ kind: "none" });
+    setMobilePanel(origin.panel === "review" ? "board" : origin.panel);
+    window.requestAnimationFrame(() => {
+      if (origin.element?.isConnected) {
+        origin.element.focus();
+      }
+      reviewOriginRef.current = { element: null, panel: "board" };
+    });
   }
 
   function acceptReveal() {
-    if (revealConfirm === "word" && activeWord) {
-      setState((current) => recordWordReveal(current, activeWord.id));
-      setReviewMode("word");
-    } else if (revealConfirm === "puzzle") {
-      setState((current) => recordPuzzleReveal(current));
-      setReviewMode("puzzle");
+    const target = revealConfirm;
+    if (target.kind === "none" || target.attemptId !== state.attemptId) {
+      closeRevealDialog();
+      return;
     }
 
-    setMobilePanel("review");
-    setRevealConfirm("none");
+    if (target.kind === "word") {
+      if (!state.run.words.some((word) => word.id === target.wordId)) {
+        closeRevealDialog();
+        return;
+      }
+
+      if (!isWordReviewAuthorized(state, target)) {
+        if (!canMutateAttempt(state)) {
+          closeRevealDialog();
+          return;
+        }
+        setState((current) => current.attemptId === target.attemptId ? recordWordReveal(current, target.wordId) : current);
+      }
+    } else if (!isPuzzleReviewAuthorized(state, target)) {
+      if (!canMutateAttempt(state)) {
+        closeRevealDialog();
+        return;
+      }
+      setState((current) => current.attemptId === target.attemptId ? recordPuzzleReveal(current) : current);
+    }
+
+    openAuthorizedReview(target);
+  }
+
+  function trapRevealDialogFocus(event: React.KeyboardEvent<HTMLDialogElement>) {
+    if (event.key !== "Tab") {
+      return;
+    }
+
+    const controls = [...event.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled)")];
+    const first = controls[0];
+    const last = controls.at(-1);
+    if (!first || !last) {
+      return;
+    }
+
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   }
 
   function clearQuestPathSelection() {
@@ -961,13 +1174,13 @@ export function WordPuzzleStudio() {
     setQuestPath({ anchor: key, cells: [key] });
   }
 
-  function selectWord(wordId: string) {
-    if (!canMutateAttempt(state) || !state.run.words.some((word) => word.id === wordId)) {
+  function selectWord(wordId: string, intent: WordSelectionIntent = "answer", selectedCellKey?: string) {
+    if (!state.run.words.some((word) => word.id === wordId)) {
       return;
     }
 
     setState((current) => {
-      if (!canMutateAttempt(current) || !current.run.words.some((word) => word.id === wordId)) {
+      if (!current.run.words.some((word) => word.id === wordId)) {
         return current;
       }
 
@@ -976,8 +1189,22 @@ export function WordPuzzleStudio() {
         activeWordId: wordId,
       };
     });
-    setFocusedCellKey(getFirstOpenCellKey(state, wordId));
+    const targetCellKey = selectedCellKey ?? getFirstOpenCellKey(state, wordId);
+    setFocusedCellKey(targetCellKey);
     setMobilePanel("board");
+    const placement = getPlacementByWordId(state, wordId);
+    const word = getWordById(state, wordId);
+    if (placement && word) {
+      setAnnouncement(`${placement.clueNumber} ${placement.direction} selected, ${word.length} letters.`);
+    }
+
+    window.requestAnimationFrame(() => {
+      if (intent === "answer" && canMutateAttempt(state) && !state.solvedIds.includes(wordId)) {
+        activeAnswerInputRef.current?.focus();
+      } else if (targetCellKey) {
+        boardCellRefs.current[targetCellKey]?.focus();
+      }
+    });
   }
 
   function focusBoardCellKey(cellKey: string) {
@@ -993,13 +1220,34 @@ export function WordPuzzleStudio() {
       setRightSidebarOpen(true);
       window.setTimeout(() => {
         const section = document.getElementById(sectionId);
-        section?.scrollIntoView({ behavior: "smooth", block: "start" });
+        const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        section?.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
       }, 0);
       return;
     }
 
     const section = typeof document !== "undefined" ? document.getElementById(sectionId) : null;
-    section?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    section?.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
+  }
+
+  function handleWorkspaceTabKey(event: React.KeyboardEvent<HTMLButtonElement>, currentPanel: MobilePanel) {
+    if (!compactWorkspace || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+      return;
+    }
+
+    event.preventDefault();
+    const currentIndex = workspacePanels.findIndex((panel) => panel.id === currentPanel);
+    const nextIndex = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? workspacePanels.length - 1
+        : (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + workspacePanels.length) % workspacePanels.length;
+    const nextPanel = workspacePanels[nextIndex]?.id;
+    if (nextPanel) {
+      setMobilePanel(nextPanel);
+      window.requestAnimationFrame(() => workspaceTabRefs.current[nextPanel]?.focus());
+    }
   }
 
   function updateBoardCellEntry(cell: PuzzleBoardCell, nextLetter: string, options?: { moveBackward?: boolean }) {
@@ -1013,6 +1261,24 @@ export function WordPuzzleStudio() {
     }
 
     const nowMs = readNow();
+    const previewPlacement = getPlacementByWordId(state, preferredWordId);
+    const previewWord = getWordById(state, preferredWordId);
+    if (previewPlacement && previewWord) {
+      const previewEntries = { ...state.cellEntries, [getCellKey(cell.row, cell.col)]: nextLetter };
+      if (!nextLetter) {
+        delete previewEntries[getCellKey(cell.row, cell.col)];
+      }
+      const previewGuess = getWordCells(state, previewPlacement).map((entry) => previewEntries[getCellKey(entry.row, entry.col)] ?? "").join("");
+      const clueLabel = `${previewPlacement.clueNumber} ${previewPlacement.direction}`;
+      if (previewGuess.length === previewWord.length && sanitizeGuess(previewGuess) === previewWord.normalized) {
+        setAnnouncement(`${clueLabel} solved. ${Math.min(state.run.words.length, solvedCount + 1)} of ${state.run.words.length} complete.`);
+      } else if (previewGuess.length === previewWord.length) {
+        setAnnouncement(`${clueLabel} is not correct yet.`);
+      } else {
+        setAnnouncement(`${clueLabel} selected, ${previewWord.length} letters.`);
+      }
+    }
+
     setState((current) => {
       if (!canMutateAttempt(current)) {
         return current;
@@ -1061,10 +1327,6 @@ export function WordPuzzleStudio() {
   }
 
   function handleBoardCellMove(cell: PuzzleBoardCell, rowStep: number, colStep: number) {
-    if (!canMutateAttempt(state)) {
-      return;
-    }
-
     const nextCell = findNeighborCell(state, cell.row, cell.col, rowStep, colStep);
     if (!nextCell) {
       return;
@@ -1072,18 +1334,14 @@ export function WordPuzzleStudio() {
 
     const nextWordId = getPreferredWordIdForCell(state, nextCell, state.activeWordId);
     if (nextWordId) {
-      selectWord(nextWordId);
+      selectWord(nextWordId, "cell", getCellKey(nextCell.row, nextCell.col));
+      return;
     }
 
     focusBoardCellKey(getCellKey(nextCell.row, nextCell.col));
   }
 
   function handleBoardCellKeyDown(event: React.KeyboardEvent<HTMLButtonElement>, cell: PuzzleBoardCell) {
-    if (!canMutateAttempt(state)) {
-      event.preventDefault();
-      return;
-    }
-
     if (event.key === "ArrowUp") {
       event.preventDefault();
       handleBoardCellMove(cell, -1, 0);
@@ -1114,6 +1372,13 @@ export function WordPuzzleStudio() {
       return;
     }
 
+    if (!canMutateAttempt(state)) {
+      if (event.key === "Backspace" || event.key === "Delete" || /^[a-zA-Z]$/.test(event.key)) {
+        event.preventDefault();
+      }
+      return;
+    }
+
     if (event.key === "Backspace" || event.key === "Delete") {
       event.preventDefault();
       updateBoardCellEntry(cell, "", { moveBackward: event.key === "Backspace" });
@@ -1127,13 +1392,9 @@ export function WordPuzzleStudio() {
   }
 
   function jumpToAdjacentClue(step: 1 | -1) {
-    if (!canMutateAttempt(state)) {
-      return;
-    }
-
-    const nextWordId = getNextWordId(state, state.activeWordId, step);
+    const nextWordId = getNextWordId(state, state.activeWordId, step, canMutateAttempt(state));
     if (nextWordId) {
-      selectWord(nextWordId);
+      selectWord(nextWordId, "answer");
     }
   }
 
@@ -1207,6 +1468,17 @@ export function WordPuzzleStudio() {
     }
 
     const cleaned = sanitizeGuess(value).slice(0, word.answer.length);
+    const placement = getPlacementByWordId(state, word.id);
+    if (placement) {
+      const clueLabel = `${placement.clueNumber} ${placement.direction}`;
+      if (cleaned.length === word.length && cleaned === word.normalized) {
+        setAnnouncement(`${clueLabel} solved. ${Math.min(state.run.words.length, solvedCount + 1)} of ${state.run.words.length} complete.`);
+      } else if (cleaned.length === word.length) {
+        setAnnouncement(`${clueLabel} is not correct yet.`);
+      } else {
+        setAnnouncement(`${clueLabel} selected, ${word.length} letters.`);
+      }
+    }
 
     const nowMs = readNow();
     setState((current) => {
@@ -1240,14 +1512,13 @@ export function WordPuzzleStudio() {
   }
 
   function selectWordFromCell(cell: PuzzleBoardCell) {
-    if (!canMutateAttempt(state) || cell.wordIds.length === 0) {
+    if (cell.wordIds.length === 0) {
       return;
     }
 
     const currentIndex = cell.wordIds.findIndex((wordId) => wordId === state.activeWordId);
     const nextWordId = currentIndex === -1 ? cell.wordIds[0] : cell.wordIds[(currentIndex + 1) % cell.wordIds.length];
-    setFocusedCellKey(getCellKey(cell.row, cell.col));
-    selectWord(nextWordId);
+    selectWord(nextWordId, "cell", getCellKey(cell.row, cell.col));
   }
 
 function getClueTone(word: PuzzleWord) {
@@ -1572,8 +1843,8 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
           </div>
         </section>
 
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.9fr)_21rem]">
-          <section className="space-y-6">
+        <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.9fr)_21rem]">
+          <section className="min-w-0 space-y-6">
             <div className="glass-card rounded-[2rem] p-5 sm:p-6">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div className="space-y-2">
@@ -1589,29 +1860,33 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 <div className="space-y-3 lg:max-w-md lg:text-right">
                   <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Run controls</div>
                   <div className="flex flex-wrap gap-2 lg:justify-end">
-                    <button type="button" onClick={togglePause} className={secondaryPillClass}>{state.paused ? "Resume" : "Pause"}</button>
+                    {!finished ? <button type="button" onClick={togglePause} className={secondaryPillClass}>{state.paused ? "Resume" : "Pause"}</button> : null}
                     <button type="button" onClick={() => startNewRun(state.run.options)} className={secondaryPillClass}>Restart</button>
                   </div>
                   <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Review tools</div>
                   <div className="flex flex-wrap gap-2 lg:justify-end">
-                    <button type="button" onClick={confirmRevealWord} className={secondaryPillClass}>Review Word</button>
-                    <button type="button" onClick={confirmRevealPuzzle} className={secondaryPillClass}>Review Puzzle</button>
+                    <button type="button" onClick={confirmRevealWord} disabled={state.paused && !Boolean(activeWord && (state.solvedIds.includes(activeWord.id) || state.assists.revealedWordIds.includes(activeWord.id) || state.assists.puzzleRevealed))} className={`${secondaryPillClass} disabled:cursor-not-allowed disabled:opacity-40`}>Review Word</button>
+                    <button type="button" onClick={confirmRevealPuzzle} disabled={state.paused && !state.assists.puzzleRevealed} className={`${secondaryPillClass} disabled:cursor-not-allowed disabled:opacity-40`}>Review Puzzle</button>
                   </div>
                 </div>
               </div>
 
-              <div className={`mt-4 grid gap-2 lg:hidden ${reviewMode === "none" ? "grid-cols-3" : "grid-cols-4"}`}>
-                {([
-                  ["board", "Board"],
-                  ["clues", "Clues"],
-                  ...(reviewMode === "none" ? [] : [["review", reviewMode === "word" ? "Word" : "Puzzle"] as const]),
-                  ["archive", "Archive"],
-                ] as const).map(([panelId, label]) => (
+              <div role={compactWorkspace ? "tablist" : undefined} aria-label={compactWorkspace ? "Puzzle workspace views" : undefined} className={`mt-4 grid gap-2 xl:hidden ${visibleReviewKind ? "grid-cols-4" : "grid-cols-3"}`}>
+                {workspacePanels.map(({ id: panelId, label }) => (
                   <button
                     key={panelId}
+                    id={`workspace-tab-${panelId}`}
+                    ref={(node) => {
+                      workspaceTabRefs.current[panelId] = node;
+                    }}
                     type="button"
                     onClick={() => setMobilePanel(panelId)}
-                    className={`rounded-2xl border px-3 py-2 text-sm transition ${mobilePanel === panelId ? "accent-chip" : "border-white/10 bg-white/4 text-slate-200"}`}
+                    onKeyDown={(event) => handleWorkspaceTabKey(event, panelId)}
+                    role={compactWorkspace ? "tab" : undefined}
+                    aria-selected={compactWorkspace ? mobilePanel === panelId : undefined}
+                    aria-controls={compactWorkspace ? `studio-${panelId}` : undefined}
+                    tabIndex={compactWorkspace ? (mobilePanel === panelId ? 0 : -1) : 0}
+                    className={`min-h-11 rounded-2xl border px-3 py-2 text-sm transition ${mobilePanel === panelId ? "accent-chip" : "border-white/10 bg-white/4 text-slate-200"}`}
                   >
                     {label}
                   </button>
@@ -1619,8 +1894,8 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
               </div>
             </div>
 
-            <div className="space-y-6">
-              <div id="studio-board" className={`${mobilePanel === "board" ? "block" : "hidden"} glass-card rounded-[2rem] p-4 sm:p-6 lg:block`}>
+            <div className="min-w-0 space-y-6">
+              <div id="studio-board" role={compactWorkspace ? "tabpanel" : "region"} aria-labelledby={compactWorkspace ? "workspace-tab-board" : undefined} hidden={compactWorkspace && mobilePanel !== "board"} className={`${mobilePanel === "board" ? "block" : "hidden"} min-w-0 max-w-full overflow-hidden glass-card rounded-[2rem] p-4 sm:p-6 xl:block`}>
                 <div className="mb-4 flex items-center justify-between">
                   <div>
                     <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Puzzle</div>
@@ -1638,10 +1913,68 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                   <span className="rounded-full border border-white/10 px-3 py-1.5">review stays separate</span>
                 </div>
 
-                <div className="overflow-auto pb-2">
-                  <div className={`mx-auto grid w-max gap-1 rounded-[1.5rem] border ${classicBoardShellClass}`}>
+                {!isQuestView && activeWord ? (
+                  <div data-testid="active-clue-panel" className={`mb-5 rounded-[1.5rem] border bg-white/4 p-4 ${activeGuessIncorrect ? "border-rose-400/45" : "border-white/10"}`}>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Active clue</div>
+                        <div className="mt-1 text-lg font-semibold text-white">{activeClueName} · {activeWord.length} letters</div>
+                        <p id={activeCluePromptId} className="mt-2 text-sm text-slate-300">{activeWord.prompt}</p>
+                      </div>
+                      <div className={`rounded-full border px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] ${getClueTone(activeWord)}`}>{getFrequencyLabel(activeWord.frequencyBand)}</div>
+                    </div>
+                    <label htmlFor="active-answer-input" className="mt-4 block text-[11px] uppercase tracking-[0.22em] text-slate-400">Answer for {activeClueName}</label>
+                    <input
+                      id="active-answer-input"
+                      ref={activeAnswerInputRef}
+                      data-testid="active-answer-input"
+                      aria-label={`Answer for ${activeClueName}, ${activeWord.length} letters`}
+                      aria-describedby={[activeCluePromptId, activeClueFeedbackId].filter(Boolean).join(" ")}
+                      aria-invalid={activeGuessIncorrect || undefined}
+                      value={activeGuess}
+                      onChange={(event) => updateWordGuess(activeWord, event.target.value)}
+                      onKeyDown={(event) => {
+                        const target = event.currentTarget;
+                        const cursorAtStart = (target.selectionStart ?? 0) === 0 && (target.selectionEnd ?? 0) === 0;
+                        const cursorAtEnd = (target.selectionStart ?? target.value.length) === target.value.length && (target.selectionEnd ?? target.value.length) === target.value.length;
+
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          jumpToAdjacentClue(event.shiftKey ? -1 : 1);
+                          return;
+                        }
+                        if ((event.key === "ArrowRight" || event.key === "ArrowDown") && cursorAtEnd) {
+                          event.preventDefault();
+                          jumpToAdjacentClue(1);
+                          return;
+                        }
+                        if ((event.key === "ArrowLeft" || event.key === "ArrowUp") && cursorAtStart) {
+                          event.preventDefault();
+                          jumpToAdjacentClue(-1);
+                          return;
+                        }
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          const targetCellKey = boardFocusKey ?? getFirstOpenCellKey(state, activeWord.id);
+                          if (targetCellKey) {
+                            focusBoardCellKey(targetCellKey);
+                          }
+                        }
+                      }}
+                      disabled={!canMutateAttempt(state) || state.solvedIds.includes(activeWord.id)}
+                      placeholder={state.paused ? "Paused" : `${activeWord.length} letters`}
+                      className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm uppercase tracking-[0.25em] text-white placeholder:text-slate-500 disabled:opacity-60"
+                    />
+                    <div id={activeClueFeedbackId} className={`mt-3 text-sm font-medium ${activeGuessIncorrect ? "text-rose-200" : state.solvedIds.includes(activeWord.id) ? "text-emerald-200" : "text-slate-400"}`}>
+                      {state.solvedIds.includes(activeWord.id) ? "✓ Solved" : activeGuessIncorrect ? "Not correct yet" : `${activeFilledCount}/${activeWord.length} letters filled`}
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="max-w-full overflow-auto pb-2">
+                  <div role={isQuestView ? undefined : "grid"} aria-label={isQuestView ? undefined : "Crossword puzzle board"} aria-rowcount={isQuestView ? undefined : state.run.board.size} aria-colcount={isQuestView ? undefined : state.run.board.size} className={`mx-auto grid w-max gap-1 rounded-[1.5rem] border ${classicBoardShellClass}`}>
                     {Array.from({ length: state.run.board.size }, (_, row) => (
-                      <div key={row} className="flex gap-1">
+                      <div key={row} role={isQuestView ? undefined : "row"} aria-rowindex={isQuestView ? undefined : row + 1} className="flex gap-1">
                         {Array.from({ length: state.run.board.size }, (_, col) => {
                           const key = getCellKey(row, col);
                           const cell = cellMap.get(key);
@@ -1651,7 +1984,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                           const selectedQuestCell = questPath.cells.includes(key);
 
                           if (!cell && !isQuestView) {
-                            return <div key={key} className={`${boardCellSizeClass} ${classicEmptyCellClass}`} />;
+                            return <div key={key} role="gridcell" aria-colindex={col + 1} aria-label={`Row ${row + 1} column ${col + 1}, blocked`} className={`${boardCellSizeClass} ${classicEmptyCellClass}`} />;
                           }
 
                           const displayLetter = cell
@@ -1675,6 +2008,11 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                               data-testid={`board-cell-${row}-${col}`}
                               data-active-cell={activeCell ? "true" : "false"}
                               type="button"
+                              role={isQuestView ? undefined : "gridcell"}
+                              aria-colindex={isQuestView ? undefined : col + 1}
+                              aria-label={!isQuestView && cell ? getCrosswordCellLabel(state, cell, state.activeWordId) : undefined}
+                              aria-selected={!isQuestView ? activeCell : undefined}
+                              aria-readonly={!isQuestView ? !canMutateAttempt(state) : undefined}
                               tabIndex={cell && boardFocusKey === key ? 0 : -1}
                               onClick={() => {
                                 if (isQuestView) {
@@ -1724,7 +2062,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                   <div className="mt-5 rounded-[1.5rem] border border-white/10 bg-white/4 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <div className="text-xs uppercase tracking-[0.24em] text-slate-400">{isQuestView ? "Solve focus" : "Active clue"}</div>
+                        <div className="text-xs uppercase tracking-[0.24em] text-slate-400">{isQuestView ? "Solve focus" : "Clue support"}</div>
                         <div className="mt-1 text-lg font-semibold text-white">{isQuestView ? activeWord.answer.length + " letters · starts with " + (activeWord.answer[0]?.toUpperCase() ?? "?") : `${activePlacement?.clueNumber}. ${getActiveClueSummary(activeWord, state.run.options.challenge)}`}</div>
                         <div className="mt-2 text-sm text-slate-300">{activeWord.prompt}</div>
                         <div className="mt-2 text-xs uppercase tracking-[0.2em] text-slate-400">{isQuestView ? `${questPath.cells.length || 1}/${activeWord.length} trail cells` : `${activeFilledCount}/${activeWord.length} letters filled`}</div>
@@ -1736,50 +2074,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                       <div className="mt-4 rounded-2xl border border-dashed border-white/12 bg-slate-950/45 px-4 py-3 text-sm text-slate-200">
                         Trace the word directly on the board. Start on the first letter, drag in a straight line, and release on the last letter.
                       </div>
-                    ) : (
-                      <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/45 p-4">
-                        <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Answer lane</div>
-                        <p className="mt-2 text-sm text-slate-300">Type straight through, then use the shortcut row to keep momentum across neighboring clues.</p>
-                        <input
-                          ref={activeAnswerInputRef}
-                          data-testid="active-answer-input"
-                          aria-label="Active clue answer"
-                          value={activeGuess}
-                          onChange={(event) => updateWordGuess(activeWord, event.target.value)}
-                          onKeyDown={(event) => {
-                            const target = event.currentTarget;
-                            const cursorAtStart = (target.selectionStart ?? 0) === 0 && (target.selectionEnd ?? 0) === 0;
-                            const cursorAtEnd = (target.selectionStart ?? target.value.length) === target.value.length && (target.selectionEnd ?? target.value.length) === target.value.length;
-
-                            if (event.key === "Enter") {
-                              event.preventDefault();
-                              jumpToAdjacentClue(event.shiftKey ? -1 : 1);
-                              return;
-                            }
-
-                            if ((event.key === "ArrowRight" || event.key === "ArrowDown") && cursorAtEnd) {
-                              event.preventDefault();
-                              jumpToAdjacentClue(1);
-                              return;
-                            }
-
-                            if ((event.key === "ArrowLeft" || event.key === "ArrowUp") && cursorAtStart) {
-                              event.preventDefault();
-                              jumpToAdjacentClue(-1);
-                              return;
-                            }
-
-                            if (event.key === "Escape") {
-                              event.preventDefault();
-                              clearActiveWord();
-                            }
-                          }}
-                          disabled={!canMutateAttempt(state) || state.solvedIds.includes(activeWord.id)}
-                          placeholder={state.paused ? "Paused" : `${activeWord.length} letters`}
-                          className="mt-4 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm uppercase tracking-[0.25em] text-white outline-none placeholder:text-slate-500 disabled:opacity-60"
-                        />
-                      </div>
-                    )}
+                    ) : null}
 
                     <div className="mt-4 grid gap-3 sm:grid-cols-3">
                       {activeWord.visuals.slice(0, 3).map((visual, index) => (
@@ -1885,7 +2180,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 ) : null}
               </div>
 
-              <div id="studio-clues" className={`${mobilePanel === "clues" ? "block" : "hidden"} glass-card rounded-[2rem] p-5 sm:p-6 lg:block`}>
+              <div id="studio-clues" role={compactWorkspace ? "tabpanel" : "region"} aria-labelledby={compactWorkspace ? "workspace-tab-clues" : undefined} hidden={compactWorkspace && mobilePanel !== "clues"} className={`${mobilePanel === "clues" ? "block" : "hidden"} glass-card rounded-[2rem] p-5 sm:p-6 xl:block`}>
                 <div>
                   <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Across &amp; down</div>
                   <h3 className="mt-1 text-lg font-semibold text-white">Clues</h3>
@@ -1906,11 +2201,13 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                           if (!word) {
                             return null;
                           }
+                          const solved = state.solvedIds.includes(word.id);
+                          const active = state.activeWordId === placement.wordId;
 
                           return (
-                            <button key={placement.wordId} type="button" onClick={() => selectWord(placement.wordId)} className={`w-full rounded-2xl border p-3 text-left transition ${state.activeWordId === placement.wordId ? "accent-ring bg-white/6" : "border-white/10 bg-white/4"}`}>
+                            <button key={placement.wordId} type="button" aria-current={active ? "true" : undefined} onClick={() => selectWord(placement.wordId, "answer")} className={`w-full rounded-2xl border p-3 text-left transition ${active ? "accent-ring bg-white/6" : "border-white/10 bg-white/4"}`}>
                               <div className="mb-2 flex items-center justify-between gap-2 text-[11px] uppercase tracking-[0.18em] text-slate-400">
-                                <span>{state.activeWordId === placement.wordId ? "active clue" : "ready"}</span>
+                                <span className={solved ? "text-emerald-300" : undefined}>{solved ? "✓ solved" : active ? "active clue" : "ready"}</span>
                                 <span>{word.topicLabel}</span>
                               </div>
                               <div className="flex items-start justify-between gap-3">
@@ -1930,44 +2227,44 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
               </div>
             </div>
 
-            {reviewMode !== "none" ? (
-              <div id="studio-review" className={`${mobilePanel === "review" ? "block" : "hidden"} glass-card rounded-[2rem] p-5 sm:p-6 lg:block`}>
+            {visibleReviewKind ? (
+              <div id="studio-review" role={compactWorkspace ? "tabpanel" : "region"} aria-labelledby={compactWorkspace ? "workspace-tab-review" : undefined} hidden={compactWorkspace && mobilePanel !== "review"} className={`${mobilePanel === "review" ? "block" : "hidden"} glass-card rounded-[2rem] p-5 sm:p-6 xl:block`}>
                 <div className="mb-4 flex items-center justify-between">
                   <div>
                     <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Review</div>
-                    <h3 className="mt-1 text-lg font-semibold text-white">{reviewMode === "word" ? "Word Review" : "Puzzle Review"}</h3>
+                    <h3 ref={reviewHeadingRef} tabIndex={-1} className="mt-1 text-lg font-semibold text-white">{visibleReviewKind === "word" ? "Word Review" : "Puzzle Review"}</h3>
                   </div>
-                  <button type="button" onClick={() => { setReviewMode("none"); setMobilePanel("board"); }} className="rounded-full border border-white/10 px-3 py-1 text-sm text-slate-300">Close</button>
+                  <button type="button" onClick={closeReview} className="rounded-full border border-white/10 px-3 py-1 text-sm text-slate-300">Close</button>
                 </div>
 
-                {reviewMode === "word" && activeWord ? (
+                {visibleReviewKind === "word" && reviewedWord ? (
                   <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
                     <div className="rounded-3xl border border-white/10 bg-white/4 p-5">
                       <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Answer unlocked</div>
-                      <div className="mt-2 text-[11px] uppercase tracking-[0.18em] text-slate-400">{activeWord.topicLabel} · {getFrequencyLabel(activeWord.frequencyBand)}</div>
-                      <div data-testid="review-word-answer" className="mt-2 text-3xl font-semibold uppercase tracking-[0.16em] text-white">{activeWord.answer}</div>
-                      <p className="mt-3 text-sm text-slate-300">{activeWord.prompt}</p>
+                      <div className="mt-2 text-[11px] uppercase tracking-[0.18em] text-slate-400">{reviewedWord.topicLabel} · {getFrequencyLabel(reviewedWord.frequencyBand)}</div>
+                      <div data-testid="review-word-answer" className="mt-2 text-3xl font-semibold uppercase tracking-[0.16em] text-white">{reviewedWord.answer}</div>
+                      <p className="mt-3 text-sm text-slate-300">{reviewedWord.prompt}</p>
                       {state.run.options.learningMode ? (
                         <div data-testid="review-vocabulary-support" className="mt-4 rounded-2xl border border-white/10 bg-slate-950/40 p-4 text-left">
                           <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Vocabulary support</div>
                           <div className="mt-2 text-[11px] uppercase tracking-[0.22em] text-slate-500">Meaning cue</div>
-                          <p className="mt-1 text-sm text-slate-200">{activeWord.learningNote}</p>
+                          <p className="mt-1 text-sm text-slate-200">{reviewedWord.learningNote}</p>
                           <div className="mt-3 text-[11px] uppercase tracking-[0.22em] text-slate-500">Plain meaning</div>
-                          <p className="mt-1 text-sm text-slate-200">{activeWord.plainMeaning}</p>
+                          <p className="mt-1 text-sm text-slate-200">{reviewedWord.plainMeaning}</p>
                           <div className="mt-3 text-[11px] uppercase tracking-[0.22em] text-slate-500">Example</div>
-                          <p className="mt-1 text-sm text-slate-300">{activeWord.usageExample}</p>
+                          <p className="mt-1 text-sm text-slate-300">{reviewedWord.usageExample}</p>
                           <div className="mt-3 text-[11px] uppercase tracking-[0.22em] text-slate-500">Pronunciation</div>
                           <div className="mt-3 flex items-center gap-2">
-                            <p className="text-sm text-slate-300">{activeWord.pronunciationHint}</p>
-                            <button type="button" onClick={() => speakWord(activeWord.answer)} className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] text-slate-100">
+                            <p className="text-sm text-slate-300">{reviewedWord.pronunciationHint}</p>
+                            <button type="button" onClick={() => speakWord(reviewedWord.answer)} className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] text-slate-100">
                               Speak
                             </button>
                           </div>
                           <div className="mt-3 text-[11px] uppercase tracking-[0.22em] text-slate-500">Extra cue</div>
-                          <p className="mt-1 text-sm text-slate-400">{activeWord.microHint}</p>
-                          <p className="mt-3 text-sm text-slate-400">{activeWord.translationAid}</p>
+                          <p className="mt-1 text-sm text-slate-400">{reviewedWord.microHint}</p>
+                          <p className="mt-3 text-sm text-slate-400">{reviewedWord.translationAid}</p>
                           <div className="mt-3 flex flex-wrap gap-2">
-                            {activeWord.relatedWords.map((related) => (
+                            {reviewedWord.relatedWords.map((related) => (
                               <span key={related} className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] capitalize text-slate-200">
                                 {related}
                               </span>
@@ -1980,13 +2277,13 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                       <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Hint ladder</div>
                       <p className="mt-2 text-sm text-slate-300">A clean recap of the clue trail that led to this answer.</p>
                       <div className="mt-3 space-y-2 text-sm text-slate-200">
-                        {createHintLadder(activeWord).map((hint, index) => <div key={hint} className="rounded-2xl border border-white/10 px-3 py-2">{index + 1}. {hint}</div>)}
+                        {createHintLadder(reviewedWord).map((hint, index) => <div key={hint} className="rounded-2xl border border-white/10 px-3 py-2">{index + 1}. {hint}</div>)}
                       </div>
                     </div>
                   </div>
                 ) : null}
 
-                {reviewMode === "puzzle" ? (
+                {visibleReviewKind === "puzzle" ? (
                   <div>
                     <p className="mb-4 text-sm text-slate-300">Every solved answer, clue reference, and direction in one quick scan.</p>
                     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -2022,7 +2319,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                   <span className="h-2 w-2 rounded-full bg-amber-300 animate-pulse [animation-delay:360ms]" />
                 </div>
                 <div className="text-xs uppercase tracking-[0.28em] text-slate-400">Run complete</div>
-                <h3 className="mt-2 text-3xl font-semibold text-white">Puzzle cleared.</h3>
+                <h3 ref={completionHeadingRef} tabIndex={-1} className="mt-2 text-3xl font-semibold text-white">Puzzle cleared.</h3>
                 <p className="mt-3 text-sm text-slate-300">{isCanonicalDailyCompletion ? "This canonical clear is saved in your local archive and streak." : "This run is saved in your local history without changing the canonical daily streak."} Replay this exact seed, review the board, or share the result.</p>
 
                 <div className="mt-5">
@@ -2054,7 +2351,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                   <button type="button" onClick={() => startNewRun(state.run.options)} className="accent-chip rounded-full px-4 py-2 text-sm font-semibold">
                     Replay run
                   </button>
-                  <button type="button" onClick={() => { setReviewMode("puzzle"); setMobilePanel("review"); }} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">
+                  <button type="button" onClick={(event) => { reviewOriginRef.current = { element: event.currentTarget, panel: mobilePanel }; openAuthorizedReview({ kind: "puzzle", attemptId: state.attemptId }); }} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">
                     Review full puzzle
                   </button>
                   <button type="button" onClick={startTodayDailyRun} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">
@@ -2143,7 +2440,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
             </div>
           </section>
 
-          <aside id="studio-archive" className={`${mobilePanel === "archive" ? "block" : "hidden"} space-y-6 xl:sticky xl:top-6 xl:block ${archiveRailClass}`}>
+          <aside id="studio-archive" role={compactWorkspace ? "tabpanel" : "region"} aria-labelledby={compactWorkspace ? "workspace-tab-archive" : undefined} hidden={compactWorkspace && mobilePanel !== "archive"} className={`${mobilePanel === "archive" ? "block" : "hidden"} min-w-0 space-y-6 xl:sticky xl:top-6 xl:block ${archiveRailClass}`}>
             <div className="hidden xl:flex justify-end">
               <button data-testid="toggle-right-panel" type="button" aria-expanded={rightSidebarOpen} aria-controls="studio-archive-rail" aria-label={rightSidebarOpen ? "Collapse archive rail" : "Expand archive rail"} onClick={() => setRightSidebarOpen((current) => !current)} className={`rounded-full border border-white/10 bg-white/4 text-slate-200 ${rightSidebarOpen ? "px-3 py-1.5 text-xs" : "size-9 text-sm"}`}>
                 <span aria-hidden="true">{rightSidebarOpen ? "Collapse archive" : "←"}</span>
@@ -2235,7 +2532,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                   ))}
                 </div>
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <button type="button" onClick={togglePause} className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs text-slate-100">{state.paused ? "Resume" : "Pause"}</button>
+                  {!finished ? <button type="button" onClick={togglePause} className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs text-slate-100">{state.paused ? "Resume" : "Pause"}</button> : null}
                   <button type="button" onClick={() => startNewRun(state.run.options)} className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs text-slate-100">Restart</button>
                   <button type="button" onClick={shareCurrentRunLink} className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs text-slate-100">Share link</button>
                 </div>
@@ -2289,19 +2586,32 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
           </aside>
         </div>
 
-        {revealConfirm !== "none" ? (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/72 px-4">
-            <div className="glass-card w-full max-w-md rounded-[2rem] p-6">
+        <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">{liveMessage}</div>
+
+        <dialog
+          ref={revealDialogRef}
+          aria-modal="true"
+          aria-labelledby="reveal-dialog-title"
+          aria-describedby="reveal-dialog-description"
+          onCancel={(event) => {
+            event.preventDefault();
+            closeRevealDialog();
+          }}
+          onKeyDown={trapRevealDialogFocus}
+          className="glass-card fixed inset-0 m-auto w-[min(28rem,calc(100%-2rem))] rounded-[2rem] p-6 text-slate-100 backdrop:bg-slate-950/80"
+        >
+          {revealConfirm.kind !== "none" ? (
+            <div>
               <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Review gate</div>
-              <h3 className="mt-2 text-2xl font-semibold text-white">{revealConfirm === "word" ? "Reveal this word?" : "Reveal the full puzzle?"}</h3>
-              <p className="mt-3 text-sm text-slate-300">{revealConfirm === "word" ? "This will show the current answer in review mode." : "This will open the full puzzle review with every answer visible."}</p>
+              <h3 id="reveal-dialog-title" className="mt-2 text-2xl font-semibold text-white">{revealConfirm.kind === "word" ? "Reveal this word?" : "Reveal the full puzzle?"}</h3>
+              <p id="reveal-dialog-description" className="mt-3 text-sm text-slate-300">{revealConfirm.kind === "word" ? "This will record one word reveal and show only the selected answer in review." : "This will record a full-puzzle reveal and open every answer in review."}</p>
               <div className="mt-5 flex flex-wrap justify-end gap-2">
-                <button type="button" onClick={() => setRevealConfirm("none")} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">Cancel</button>
-                <button type="button" onClick={acceptReveal} className="accent-chip rounded-full px-4 py-2 text-sm font-semibold">{revealConfirm === "word" ? "Reveal word" : "Reveal puzzle"}</button>
+                <button ref={revealCancelRef} type="button" onClick={() => closeRevealDialog()} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">Cancel</button>
+                <button type="button" onClick={acceptReveal} className="accent-chip rounded-full px-4 py-2 text-sm font-semibold">{revealConfirm.kind === "word" ? "Reveal word" : "Reveal puzzle"}</button>
               </div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
+        </dialog>
 
         {toast ? (
           <div className="pointer-events-none fixed inset-x-4 bottom-4 z-50 flex justify-center">

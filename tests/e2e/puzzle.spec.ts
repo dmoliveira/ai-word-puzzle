@@ -15,6 +15,10 @@ const deterministicQuery = new URLSearchParams({
   learningMode: "false",
 });
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 async function openPuzzle(page: Page, overrides: Record<string, string> = {}) {
   const query = new URLSearchParams(deterministicQuery);
   Object.entries(overrides).forEach(([key, value]) => query.set(key, value));
@@ -66,10 +70,19 @@ async function readStoredAttempt(page: Page) {
     return (JSON.parse(raw) as {
       currentAttempt: {
         attemptId: string;
+        activeWordId: string | null;
         completedAt: string | null;
         elapsedMs: number;
         cellEntries: Record<string, string>;
-        run: { seed: string; puzzleId: string };
+        run: {
+          seed: string;
+          puzzleId: string;
+          words: Array<{ id: string; answer: string; prompt: string; length: number }>;
+          board: {
+            cells: Array<{ row: number; col: number; wordIds: string[] }>;
+            placements: Array<{ wordId: string; clueNumber: number; direction: "across" | "down" }>;
+          };
+        };
       };
     }).currentAttempt;
   }, sessionStorageKey);
@@ -90,6 +103,8 @@ test("loads a deterministic puzzle with the primary play controls", async ({ pag
   await expect(page.getByRole("button", { name: "Fresh run", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Pause", exact: true }).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Puzzle board" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Clues" })).toBeVisible();
+  await expect(page.getByRole("tablist")).toHaveCount(0);
 });
 
 test("crossword answers stay out of the rendered page until deliberate review", async ({ page }) => {
@@ -98,8 +113,12 @@ test("crossword answers stay out of the rendered page until deliberate review", 
 
   await expect(page.getByRole("heading", { name: "Clue progress" })).toBeVisible();
   await expect(page.getByText(/Vocabulary examples, pronunciation, and translation notes unlock/i)).toBeVisible();
+  const visibleText = (await page.locator("body").innerText()).toLowerCase();
+  const ariaSnapshot = (await page.locator("body").ariaSnapshot()).toLowerCase();
   for (const answer of answers) {
-    await expect(page.getByText(answer, { exact: true })).toHaveCount(0);
+    const token = new RegExp(`(^|[^a-z])${escapeRegExp(answer.toLowerCase())}([^a-z]|$)`);
+    expect(visibleText).not.toMatch(token);
+    expect(ariaSnapshot).not.toMatch(token);
   }
 
   await openWordReview(page);
@@ -148,6 +167,137 @@ test("player can type and navigate directly on the crossword grid", async ({ pag
   await page.locator(":focus").press("Backspace");
 });
 
+test("crossword grid exposes answer-safe names and preserves focus while switching direction", async ({ page }) => {
+  await openPuzzle(page);
+  const attempt = await readStoredAttempt(page);
+  const intersection = attempt.run.board.cells.find((cell) => cell.wordIds.length > 1);
+  expect(intersection).toBeTruthy();
+
+  const playableCells = page.locator('button[role="gridcell"]');
+  await expect(page.getByRole("grid", { name: "Crossword puzzle board" })).toBeVisible();
+  expect(await playableCells.count()).toBeGreaterThan(0);
+  await expect(page.locator('button[role="gridcell"][tabindex="0"]')).toHaveCount(1);
+  for (const label of await playableCells.evaluateAll((cells) => cells.map((cell) => cell.getAttribute("aria-label") ?? ""))) {
+    expect(label).toMatch(/^Row \d+ column \d+,/);
+    for (const word of attempt.run.words) {
+      expect(label.toLowerCase()).not.toMatch(new RegExp(`(^|[^a-z])${escapeRegExp(word.answer.toLowerCase())}([^a-z]|$)`));
+    }
+  }
+
+  const intersectionCell = page.getByTestId(`board-cell-${intersection!.row}-${intersection!.col}`);
+  await intersectionCell.click();
+  const startingDirection = ((await page.getByTestId("active-clue-badge").textContent()) ?? "").trim();
+  await intersectionCell.press("Enter");
+  await expect(page.getByTestId("active-clue-badge")).not.toHaveText(startingDirection);
+  await expect(intersectionCell).toBeFocused();
+  await expect(intersectionCell).toHaveAttribute("tabindex", "0");
+  const outlineStyle = await intersectionCell.evaluate((cell) => getComputedStyle(cell).outlineStyle);
+  expect(outlineStyle).not.toBe("none");
+});
+
+test("clue selection retains partial input and Escape returns to the grid without clearing", async ({ page }) => {
+  await openPuzzle(page);
+  const attempt = await readStoredAttempt(page);
+  const selectedWord = attempt.run.words.find((word) => word.id !== attempt.activeWordId && word.length >= 3)!;
+  const placement = attempt.run.board.placements.find((entry) => entry.wordId === selectedWord.id)!;
+  const clueButton = page.getByRole("button").filter({ hasText: selectedWord.prompt }).first();
+
+  await clueButton.click();
+  const input = page.getByTestId("active-answer-input");
+  await expect(input).toBeFocused();
+  await input.fill("ab");
+  await expect(page.getByTestId("active-clue-badge")).toHaveText(new RegExp(`${placement.clueNumber}\\s+${placement.direction}`, "i"));
+  await expect.poll(async () => Object.keys((await readStoredAttempt(page)).cellEntries).length).toBeGreaterThan(0);
+  const beforeEscape = await readStoredAttempt(page);
+
+  await input.press("Escape");
+  await expect(page.locator(':focus[role="gridcell"]')).toBeVisible();
+  await expect(input).toHaveValue("ab");
+  expect((await readStoredAttempt(page)).cellEntries).toEqual(beforeEscape.cellEntries);
+});
+
+test("full wrong and solved entries expose visible and spoken status", async ({ page }) => {
+  await openPuzzle(page);
+  const attempt = await readStoredAttempt(page);
+  const activeWord = attempt.run.words.find((word) => word.id === attempt.activeWordId)!;
+  const input = page.getByTestId("active-answer-input");
+  const wrongAnswer = activeWord.answer.replace(/./g, activeWord.answer.toLowerCase() === "z".repeat(activeWord.length) ? "x" : "z");
+
+  await input.fill(wrongAnswer);
+  await expect(input).toHaveAttribute("aria-invalid", "true");
+  await expect(page.getByText("Not correct yet", { exact: true })).toBeVisible();
+  await expect(page.getByRole("status")).toContainText(/not correct yet/i);
+
+  await input.fill(activeWord.answer);
+  await expect(page.getByTestId("progress-label")).toContainText("1/7");
+  await expect(page.getByRole("status")).toContainText(/solved/i);
+  await expect(page.getByRole("button").filter({ hasText: activeWord.prompt }).first()).toContainText(/solved/i);
+});
+
+test("review confirmation contains focus and restores or advances it safely", async ({ page }) => {
+  await openPuzzle(page);
+  const trigger = page.getByRole("button", { name: "Review Word", exact: true });
+  await trigger.click();
+  const dialog = page.getByRole("dialog");
+  const cancel = dialog.getByRole("button", { name: "Cancel" });
+  const reveal = dialog.getByRole("button", { name: "Reveal word" });
+  await expect(dialog).toBeVisible();
+  await expect(cancel).toBeFocused();
+  await cancel.press("Tab");
+  await expect(reveal).toBeFocused();
+  await reveal.press("Tab");
+  await expect(cancel).toBeFocused();
+  await cancel.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+
+  await trigger.click();
+  await dialog.getByRole("button", { name: "Reveal word" }).click();
+  await expect(page.getByRole("heading", { name: "Word Review" })).toBeFocused();
+});
+
+test("closing compact review restores its originating panel and control", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openPuzzle(page);
+  const cluesTab = page.getByRole("tab", { name: "Clues", exact: true });
+  const trigger = page.getByRole("button", { name: "Review Word", exact: true });
+  await expect(cluesTab).toHaveAttribute("aria-selected", "true");
+
+  await trigger.click();
+  await page.getByRole("dialog").getByRole("button", { name: "Reveal word" }).click();
+  await expect(page.getByRole("tab", { name: "Word", exact: true })).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+
+  await expect(cluesTab).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("heading", { name: "Clues" })).toBeVisible();
+  await expect(trigger).toBeFocused();
+});
+
+test("word review remains bound to its authorized attempt and word", async ({ page }) => {
+  await openPuzzle(page, { learningMode: "true" });
+  const attempt = await readStoredAttempt(page);
+  const firstWord = attempt.run.words.find((word) => word.id === attempt.activeWordId)!;
+  const secondWord = attempt.run.words.find((word) => word.id !== firstWord.id)!;
+  await openWordReview(page);
+  await expect(page.getByTestId("review-word-answer")).toHaveText(firstWord.answer);
+
+  await page.getByRole("button").filter({ hasText: secondWord.prompt }).first().click();
+  await expect(page.getByTestId("review-word-answer")).toHaveText(firstWord.answer);
+  await expect(page.getByText(secondWord.answer, { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/Vocabulary examples, pronunciation, and translation notes unlock/i)).toBeVisible();
+});
+
+test("short-word scramble never reveals the exact answer", async ({ page }) => {
+  await openPuzzle(page, { seed: "greek-short", topics: "greek", puzzleSize: "4" });
+  const attempt = await readStoredAttempt(page);
+  const shortWord = attempt.run.words.find((word) => word.length === 3);
+  expect(shortWord).toBeTruthy();
+  await page.getByRole("button").filter({ hasText: shortWord!.prompt }).first().click();
+  await page.getByRole("button", { name: "Show scramble" }).click();
+  const scramble = ((await page.getByText(/^Scramble:/).textContent()) ?? "").replace(/^Scramble:\s*/i, "").trim();
+  expect(scramble.toLowerCase()).not.toBe(shortWord!.answer.toLowerCase());
+});
+
 test("setup exposes advanced learning and board controls", async ({ page }) => {
   await openPuzzle(page);
   await openSetup(page);
@@ -174,19 +324,32 @@ test("setup advertises only certified crossword options and keeps trace topics b
   await expect(page.getByLabel("Target count")).toHaveAttribute("max", "12");
 });
 
-test("mobile player can switch between board, clues, and archive", async ({ page }) => {
+test("mobile crossword starts clue-first and switches accessible workspace tabs", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openPuzzle(page);
 
-  await expect(page.getByRole("heading", { name: "Puzzle board" })).toBeVisible();
-  await page.getByRole("button", { name: "Clues", exact: true }).click();
+  const cluesTab = page.getByRole("tab", { name: "Clues", exact: true });
+  await expect(cluesTab).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("heading", { name: "Clues" })).toBeVisible();
+  expect(await page.evaluate(() => window.scrollY)).toBeLessThan(10);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(await page.evaluate(() => document.documentElement.clientWidth));
 
-  await page.getByRole("button", { name: "Archive", exact: true }).click();
+  await page.getByRole("tab", { name: "Archive", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Quest progress" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Board", exact: true }).click();
+  await page.getByRole("tab", { name: "Board", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Puzzle board" })).toBeVisible();
+});
+
+test("compact crossword and quest modes preserve their intended first panel", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  await openPuzzle(page);
+  await expect(page.getByRole("tab", { name: "Clues", exact: true })).toHaveAttribute("aria-selected", "true");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(await page.evaluate(() => document.documentElement.clientWidth));
+
+  await openPuzzle(page, { boardView: "quest", seed: "mobile-quest" });
+  await expect(page.getByRole("tab", { name: "Board", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("heading", { name: "Quest board" })).toBeVisible();
 });
 
 test("pause and resume controls expose the current run state", async ({ page }) => {
@@ -235,9 +398,14 @@ test("paused gameplay actions cannot mutate persisted entries", async ({ page })
   await expect(page.getByText("Paused", { exact: true })).toBeVisible();
   const before = await readStoredAttempt(page);
 
-  const boardCell = page.locator('[data-testid^="board-cell-"]').first();
-  await boardCell.click();
-  await boardCell.press("Z");
+  await expect(page.getByRole("button", { name: "Review Word", exact: true })).toBeDisabled();
+  const attempt = await readStoredAttempt(page);
+  const startCell = attempt.run.board.cells.find((cell) => attempt.run.board.cells.some((candidate) => candidate.row === cell.row && candidate.col > cell.col))!;
+  const boardCell = page.getByTestId(`board-cell-${startCell.row}-${startCell.col}`);
+  await boardCell.focus();
+  await boardCell.press("ArrowRight");
+  await expect(page.locator(':focus[role="gridcell"]')).not.toHaveAttribute("data-testid", `board-cell-${startCell.row}-${startCell.col}`);
+  await page.locator(':focus[role="gridcell"]').press("Z");
   await page.waitForTimeout(200);
   const after = await readStoredAttempt(page);
 
@@ -249,13 +417,19 @@ test("completion freezes its timestamp and elapsed time", async ({ page }) => {
   await openPuzzle(page, { timerEnabled: "true" });
   await solveRunFromPersistedFixture(page);
   await expect(page.getByTestId("completion-card")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Puzzle cleared." })).toBeFocused();
   await expect.poll(async () => (await readStoredAttempt(page)).completedAt).not.toBeNull();
   const completed = await readStoredAttempt(page);
   expect(completed.completedAt).not.toBeNull();
 
   await page.waitForTimeout(1_100);
-  await page.getByRole("button", { name: "Pause", exact: true }).first().click();
-  const boardCell = page.locator('[data-testid^="board-cell-"]').first();
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toHaveCount(0);
+  const attempt = await readStoredAttempt(page);
+  const startCell = attempt.run.board.cells.find((cell) => attempt.run.board.cells.some((candidate) => candidate.row === cell.row && candidate.col > cell.col))!;
+  const boardCell = page.getByTestId(`board-cell-${startCell.row}-${startCell.col}`);
+  await boardCell.focus();
+  await boardCell.press("ArrowRight");
+  await expect(page.locator(':focus[role="gridcell"]')).not.toHaveAttribute("data-testid", `board-cell-${startCell.row}-${startCell.col}`);
   await boardCell.press("Z");
   await page.waitForTimeout(200);
   const after = await readStoredAttempt(page);
