@@ -448,9 +448,12 @@ export function buildPuzzleRun(input: Partial<PuzzleOptions> = {}): PuzzleRun {
   const placedWords = chosen.filter((word) => placedWordIds.has(word.id));
   const theme = getThemeStyle(options.style);
   const labelTopic = resolvedContentPack?.label ?? featuredContentPack?.label ?? topicCatalog.find((topic) => topic.id === options.topics[0])?.label ?? "Word Puzzle";
+  const puzzleId = `${hashString(`v2:${resolvedSeed}:${options.challenge}:${options.puzzleFamily}:${options.contentPackId}:${options.topics.join(",")}:${options.puzzleSize}:${options.boardView}`)}`;
 
   return {
-    id: `${hashString(`${resolvedSeed}:${options.challenge}:${options.puzzleFamily}:${options.contentPackId}:${options.topics.join(",")}:${options.puzzleSize}`)}`,
+    id: puzzleId,
+    puzzleId,
+    generatorVersion: 2,
     createdAt: new Date().toISOString(),
     seed: resolvedSeed,
     options,

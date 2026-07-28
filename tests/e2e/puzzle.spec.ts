@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const sessionStorageKey = "astra-lexa-session";
+const sessionStorageKey = "astra-lexa:v2";
 const deterministicQuery = new URLSearchParams({
   mode: "custom",
   seed: "e2e-baseline",
@@ -40,14 +40,15 @@ async function openWordReview(page: Page) {
 }
 
 async function solveRunFromPersistedFixture(page: Page) {
+  await expect.poll(() => page.evaluate((key) => window.localStorage.getItem(key) !== null, sessionStorageKey)).toBe(true);
   const answers = await page.evaluate((key) => {
     const raw = window.localStorage.getItem(key);
     if (!raw) {
       throw new Error("Expected the current run to be persisted before solving it");
     }
 
-    const state = JSON.parse(raw) as { run: { words: Array<{ answer: string }> } };
-    return state.run.words.map((word) => word.answer);
+    const game = JSON.parse(raw) as { currentAttempt: { run: { words: Array<{ answer: string }> } } };
+    return game.currentAttempt.run.words.map((word) => word.answer);
   }, sessionStorageKey);
 
   for (let index = 0; index < answers.length; index += 1) {
@@ -56,9 +57,24 @@ async function solveRunFromPersistedFixture(page: Page) {
   }
 }
 
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => window.localStorage.clear());
-});
+async function readStoredAttempt(page: Page) {
+  await expect.poll(() => page.evaluate((key) => window.localStorage.getItem(key) !== null, sessionStorageKey)).toBe(true);
+  return page.evaluate((key) => {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) {
+      throw new Error("Expected a persisted v2 game");
+    }
+    return (JSON.parse(raw) as {
+      currentAttempt: {
+        attemptId: string;
+        completedAt: string | null;
+        elapsedMs: number;
+        cellEntries: Record<string, string>;
+        run: { seed: string; puzzleId: string };
+      };
+    }).currentAttempt;
+  }, sessionStorageKey);
+}
 
 test("loads a deterministic puzzle with the primary play controls", async ({ page }) => {
   await openPuzzle(page);
@@ -119,6 +135,7 @@ test("setup exposes advanced learning and board controls", async ({ page }) => {
   await page.getByLabel("Learning mode").check();
   await expect(page.getByLabel("Learning mode")).toBeChecked();
   await page.getByLabel("Board mode").selectOption("quest");
+  await page.getByRole("button", { name: "Start Fresh Run" }).click();
   await expect(page.getByRole("heading", { name: "Quest board" })).toBeVisible();
 });
 
@@ -144,6 +161,145 @@ test("pause and resume controls expose the current run state", async ({ page }) 
   await expect(page.getByText("Paused", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Resume", exact: true }).first().click();
   await expect(page.getByText("Live", { exact: true })).toBeVisible();
+});
+
+test("unfinished progress survives a reload without a placeholder overwrite", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator('main[data-hydrated="true"]')).toBeVisible();
+  await page.getByTestId("active-answer-input").fill("ab");
+  await expect(page.getByTestId("active-answer-input")).toHaveValue("ab");
+  await expect.poll(async () => Object.keys((await readStoredAttempt(page)).cellEntries).length).toBeGreaterThan(0);
+  const beforeReload = await readStoredAttempt(page);
+
+  await page.reload();
+  await expect(page.locator('main[data-hydrated="true"]')).toBeVisible();
+  await expect(page.getByTestId("active-answer-input")).toHaveValue("ab");
+  const afterReload = await readStoredAttempt(page);
+
+  expect(afterReload.attemptId).toBe(beforeReload.attemptId);
+  expect(afterReload.cellEntries).toEqual(beforeReload.cellEntries);
+});
+
+test("a valid shared link overrides an unfinished saved attempt", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator('main[data-hydrated="true"]')).toBeVisible();
+  await page.getByTestId("active-answer-input").fill("ab");
+  const saved = await readStoredAttempt(page);
+
+  await openPuzzle(page, { seed: "shared-wins" });
+  await expect.poll(async () => (await readStoredAttempt(page)).run.seed).toBe("shared-wins");
+  const shared = await readStoredAttempt(page);
+
+  expect(shared.attemptId).not.toBe(saved.attemptId);
+  expect(shared.run.seed).toBe("shared-wins");
+});
+
+test("paused gameplay actions cannot mutate persisted entries", async ({ page }) => {
+  await openPuzzle(page);
+  await page.getByRole("button", { name: "Pause", exact: true }).first().click();
+  await expect(page.getByText("Paused", { exact: true })).toBeVisible();
+  const before = await readStoredAttempt(page);
+
+  const boardCell = page.locator('[data-testid^="board-cell-"]').first();
+  await boardCell.click();
+  await boardCell.press("Z");
+  await page.waitForTimeout(200);
+  const after = await readStoredAttempt(page);
+
+  expect(after.cellEntries).toEqual(before.cellEntries);
+  await expect(page.getByTestId("progress-label")).toContainText("0/");
+});
+
+test("completion freezes its timestamp and elapsed time", async ({ page }) => {
+  await openPuzzle(page, { timerEnabled: "true" });
+  await solveRunFromPersistedFixture(page);
+  await expect(page.getByTestId("completion-card")).toBeVisible();
+  await expect.poll(async () => (await readStoredAttempt(page)).completedAt).not.toBeNull();
+  const completed = await readStoredAttempt(page);
+  expect(completed.completedAt).not.toBeNull();
+
+  await page.waitForTimeout(1_100);
+  await page.getByRole("button", { name: "Pause", exact: true }).first().click();
+  const boardCell = page.locator('[data-testid^="board-cell-"]').first();
+  await boardCell.press("Z");
+  await page.waitForTimeout(200);
+  const after = await readStoredAttempt(page);
+
+  expect(after.completedAt).toBe(completed.completedAt);
+  expect(after.elapsedMs).toBe(completed.elapsedMs);
+});
+
+test("a completed canonical daily remains available after reload", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator('main[data-hydrated="true"]')).toBeVisible();
+  await solveRunFromPersistedFixture(page);
+  await expect.poll(async () => (await readStoredAttempt(page)).completedAt).not.toBeNull();
+  const completed = await readStoredAttempt(page);
+
+  await page.reload();
+  await expect(page.locator('main[data-hydrated="true"]')).toBeVisible();
+  await expect(page.getByTestId("completion-card")).toBeVisible();
+  const restored = await readStoredAttempt(page);
+
+  expect(restored.attemptId).toBe(completed.attemptId);
+  expect(restored.completedAt).toBe(completed.completedAt);
+});
+
+test("a completed custom run yields to a fresh canonical daily", async ({ page }) => {
+  await openPuzzle(page);
+  await solveRunFromPersistedFixture(page);
+  await expect.poll(async () => (await readStoredAttempt(page)).completedAt).not.toBeNull();
+  const completedCustom = await readStoredAttempt(page);
+  const today = await page.evaluate(() => new Date().toISOString().slice(0, 10));
+
+  await page.goto("/");
+  await expect(page.locator('main[data-hydrated="true"]')).toBeVisible();
+  await expect(page.locator("span").filter({ hasText: new RegExp(`^seed ${today}$`) }).first()).toBeVisible();
+  await expect.poll(async () => (await readStoredAttempt(page)).run.seed).toBe(`daily:${today}`);
+  const daily = await readStoredAttempt(page);
+
+  expect(daily.attemptId).not.toBe(completedCustom.attemptId);
+});
+
+test("an invalid shared link falls back safely without crashing", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator('main[data-hydrated="true"]')).toBeVisible();
+  await page.getByTestId("active-answer-input").fill("ab");
+  await expect.poll(async () => Object.keys((await readStoredAttempt(page)).cellEntries).length).toBeGreaterThan(0);
+  const saved = await readStoredAttempt(page);
+  const today = await page.evaluate(() => new Date().toISOString().slice(0, 10));
+
+  await page.goto("/?mode=daily&seed=not-a-date&timerEnabled=maybe");
+
+  await expect(page.locator('main[data-hydrated="true"]')).toBeVisible();
+  await expect(page.locator("span").filter({ hasText: new RegExp(`^seed ${today}$`) }).first()).toBeVisible();
+  await expect.poll(async () => (await readStoredAttempt(page)).attemptId).not.toBe(saved.attemptId);
+  expect((await readStoredAttempt(page)).cellEntries).toEqual({});
+  await openSetup(page);
+  await expect(page.getByText(/shared puzzle link was invalid/i)).toBeVisible();
+});
+
+test("the visible timer does not persist once per second", async ({ page }) => {
+  await page.addInitScript(() => {
+    const original = Storage.prototype.setItem;
+    Object.defineProperty(window, "__storageWriteCount", { value: 0, writable: true });
+    Storage.prototype.setItem = function setItem(key: string, value: string) {
+      (window as typeof window & { __storageWriteCount: number }).__storageWriteCount += 1;
+      return original.call(this, key, value);
+    };
+  });
+  await openPuzzle(page, { timerEnabled: "true" });
+  await readStoredAttempt(page);
+  await page.waitForTimeout(200);
+  await page.evaluate(() => {
+    (window as typeof window & { __storageWriteCount: number }).__storageWriteCount = 0;
+  });
+
+  await page.waitForTimeout(2_200);
+  expect(await page.evaluate(() => (window as typeof window & { __storageWriteCount: number }).__storageWriteCount)).toBe(0);
+
+  await page.getByRole("button", { name: "Pause", exact: true }).first().click();
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __storageWriteCount: number }).__storageWriteCount)).toBeGreaterThan(0);
 });
 
 test("shared daily options reopen the requested seeded run", async ({ page }) => {
