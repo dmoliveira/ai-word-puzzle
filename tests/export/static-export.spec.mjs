@@ -1,7 +1,9 @@
 import { expect, test } from "@playwright/test";
 import { smokeDeployment } from "../../scripts/smoke-deployment.mjs";
 
-const expectedSiteUrl = process.env.EXPECTED_SITE_URL ?? "https://dmoliveira.github.io/ai-word-puzzle/";
+const configuredSiteUrl = new URL(process.env.EXPECTED_SITE_URL ?? "https://dmoliveira.github.io/ai-word-puzzle/");
+configuredSiteUrl.pathname = `${configuredSiteUrl.pathname.replace(/\/+$/, "")}/`;
+const expectedSiteUrl = configuredSiteUrl.href;
 const expectedBasePath = process.env.EXPECTED_BASE_PATH ?? "";
 
 test("mounted static export loads, hydrates, and keeps deployment URLs intact", async ({ page, baseURL }) => {
