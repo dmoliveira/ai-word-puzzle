@@ -74,18 +74,57 @@ async function readStoredAttempt(page: Page) {
         completedAt: string | null;
         elapsedMs: number;
         cellEntries: Record<string, string>;
+        solvedIds: string[];
         run: {
           seed: string;
           puzzleId: string;
           words: Array<{ id: string; answer: string; prompt: string; length: number }>;
           board: {
             cells: Array<{ row: number; col: number; wordIds: string[] }>;
-            placements: Array<{ wordId: string; clueNumber: number; direction: "across" | "down" }>;
+            placements: Array<{ wordId: string; clueNumber: number; direction: "across" | "down"; row: number; col: number }>;
           };
         };
       };
     }).currentAttempt;
   }, sessionStorageKey);
+}
+
+function getQuestEndpoints(attempt: Awaited<ReturnType<typeof readStoredAttempt>>, wordId: string) {
+  const word = attempt.run.words.find((entry) => entry.id === wordId);
+  const placement = attempt.run.board.placements.find((entry) => entry.wordId === wordId);
+  if (!word || !placement) {
+    throw new Error(`Missing quest placement for ${wordId}`);
+  }
+
+  return {
+    start: { row: placement.row, col: placement.col },
+    end: {
+      row: placement.row + (placement.direction === "down" ? word.length - 1 : 0),
+      col: placement.col + (placement.direction === "across" ? word.length - 1 : 0),
+    },
+    word,
+    placement,
+  };
+}
+
+async function solveQuestWordByEndpoints(page: Page, wordId: string, action: "click" | "tap" = "click") {
+  const attempt = await readStoredAttempt(page);
+  const { start, end } = getQuestEndpoints(attempt, wordId);
+  const startCell = page.getByTestId(`board-cell-${start.row}-${start.col}`);
+  const endCell = page.getByTestId(`board-cell-${end.row}-${end.col}`);
+  await startCell[action]();
+  await endCell[action]();
+  await expect.poll(async () => (await readStoredAttempt(page)).solvedIds).toContain(wordId);
+}
+
+async function solveQuestRunFromPersistedFixture(page: Page) {
+  const initial = await readStoredAttempt(page);
+  for (const word of initial.run.words) {
+    const current = await readStoredAttempt(page);
+    if (!current.solvedIds.includes(word.id)) {
+      await solveQuestWordByEndpoints(page, word.id);
+    }
+  }
 }
 
 async function readStoredAnswers(page: Page) {
@@ -568,6 +607,172 @@ test("learning mode exposes vocabulary support after deliberate review", async (
   await expect(support).toContainText(/Plain meaning:/);
   await expect(support).toContainText(/Pronunciation:/);
   await expect(support.getByRole("button", { name: "Speak" })).toBeVisible();
+});
+
+test("quest grid is semantic and solves a target with keyboard endpoints", async ({ page }) => {
+  await openPuzzle(page, { boardView: "quest", seed: "quest-keyboard" });
+  const attempt = await readStoredAttempt(page);
+  const activeWord = attempt.run.words.find((word) => word.id === attempt.activeWordId)!;
+  const { start, end, placement } = getQuestEndpoints(attempt, activeWord.id);
+  const grid = page.getByRole("grid", { name: "Quest word search board" });
+
+  await expect(grid.getByRole("row")).toHaveCount(14);
+  await expect(grid.getByRole("gridcell")).toHaveCount(196);
+  await expect(grid.locator('[role="gridcell"][tabindex="0"]')).toHaveCount(1);
+  await expect(grid.getByRole("gridcell").first()).toHaveAccessibleName(/^Row 1 column 1, letter [A-Z]/);
+  const startCell = page.getByTestId(`board-cell-${start.row}-${start.col}`);
+  await startCell.focus();
+  await startCell.press("Enter");
+  await expect(page.getByTestId("quest-status")).toContainText(/start selected/i);
+  await expect(startCell).toHaveAttribute("aria-selected", "true");
+
+  const directionKey = placement.direction === "down" ? "ArrowDown" : "ArrowRight";
+  for (let index = 1; index < activeWord.length; index += 1) {
+    await page.locator(':focus[role="gridcell"]').press(directionKey);
+  }
+  const endCell = page.getByTestId(`board-cell-${end.row}-${end.col}`);
+  await expect(endCell).toBeFocused();
+  await endCell.press("Enter");
+
+  await expect(page.getByTestId("progress-label")).toContainText("1/7");
+  await expect(page.getByTestId("quest-status")).toContainText(/found/i);
+  await expect(grid.locator('[role="gridcell"][aria-selected="true"]')).toHaveCount(0);
+  await expect(grid.locator('[role="gridcell"][tabindex="0"]')).toHaveCount(1);
+});
+
+test("quest selection reports invalid paths and Escape clearing", async ({ page }) => {
+  await openPuzzle(page, { boardView: "quest", seed: "quest-status" });
+  const first = page.getByTestId("board-cell-0-0");
+  await first.focus();
+  await first.press("Enter");
+  await first.press("ArrowRight");
+  await page.locator(':focus[role="gridcell"]').press("ArrowRight");
+  await page.locator(':focus[role="gridcell"]').press("ArrowDown");
+  await page.locator(':focus[role="gridcell"]').press("Enter");
+  await expect(page.getByTestId("quest-status")).toContainText(/not aligned/i);
+  await expect(page.locator('[role="gridcell"][aria-selected="true"]')).toHaveCount(0);
+
+  await first.focus();
+  await first.press("Enter");
+  await first.press("ArrowRight");
+  await page.locator(':focus[role="gridcell"]').press("Enter");
+  await expect(page.getByTestId("quest-status")).toContainText(/no unsolved target/i);
+  await expect(page.locator('[role="gridcell"][aria-selected="true"]')).toHaveCount(0);
+
+  await first.focus();
+  await first.press("Enter");
+  await first.press("Escape");
+  await expect(page.getByTestId("quest-status")).toContainText(/selection cleared/i);
+  await expect(page.locator('[role="gridcell"][aria-selected="true"]')).toHaveCount(0);
+});
+
+test("quest target and adjacent controls focus the selected word start", async ({ page }) => {
+  await openPuzzle(page, { boardView: "quest", seed: "quest-focus" });
+  const initial = await readStoredAttempt(page);
+  const target = initial.run.words.find((word) => word.id !== initial.activeWordId)!;
+  const targetStart = getQuestEndpoints(initial, target.id).start;
+  await page.getByTestId(`target-word-${target.id}`).click();
+  await expect(page.getByTestId(`board-cell-${targetStart.row}-${targetStart.col}`)).toBeFocused();
+  await expect.poll(async () => (await readStoredAttempt(page)).activeWordId).toBe(target.id);
+
+  await page.getByRole("button", { name: "Next clue" }).click();
+  await expect.poll(async () => (await readStoredAttempt(page)).activeWordId).not.toBe(target.id);
+  const afterNext = await readStoredAttempt(page);
+  const nextStart = getQuestEndpoints(afterNext, afterNext.activeWordId!).start;
+  await expect(page.getByTestId(`board-cell-${nextStart.row}-${nextStart.col}`)).toBeFocused();
+
+  await page.getByRole("button", { name: "Previous clue" }).click();
+  await expect.poll(async () => (await readStoredAttempt(page)).activeWordId).toBe(target.id);
+  const afterPrevious = await readStoredAttempt(page);
+  const previousStart = getQuestEndpoints(afterPrevious, afterPrevious.activeWordId!).start;
+  await expect(page.getByTestId(`board-cell-${previousStart.row}-${previousStart.col}`)).toBeFocused();
+});
+
+test("real touch taps solve one quest target without residual selection", async ({ browser }) => {
+  const context = await browser.newContext({
+    baseURL: "http://127.0.0.1:3100",
+    hasTouch: true,
+    isMobile: true,
+    viewport: { width: 390, height: 844 },
+  });
+  const touchPage = await context.newPage();
+  try {
+    await openPuzzle(touchPage, { boardView: "quest", seed: "quest-touch" });
+    const attempt = await readStoredAttempt(touchPage);
+    await solveQuestWordByEndpoints(touchPage, attempt.activeWordId!, "tap");
+    await expect(touchPage.getByTestId("progress-label")).toContainText("1/7");
+    await expect(touchPage.locator('[role="gridcell"][aria-selected="true"]')).toHaveCount(0);
+  } finally {
+    await context.close();
+  }
+});
+
+test("paused and completed quest grids navigate without mutating results", async ({ page }) => {
+  await openPuzzle(page, { boardView: "quest", seed: "quest-lifecycle" });
+  const anchor = page.getByTestId("board-cell-0-0");
+  await anchor.focus();
+  await anchor.press("Enter");
+  await page.getByRole("button", { name: "Pause", exact: true }).first().click();
+  await expect(page.getByTestId("quest-status")).toContainText(/paused/i);
+  await expect(page.locator('[role="gridcell"][aria-selected="true"]')).toHaveCount(0);
+  await expect(anchor).toHaveAttribute("aria-readonly", "true");
+  await expect(anchor).not.toBeDisabled();
+  const pausedBefore = await readStoredAttempt(page);
+  await anchor.focus();
+  await anchor.press("ArrowRight");
+  await expect(page.getByTestId("board-cell-0-1")).toBeFocused();
+  await page.getByTestId("board-cell-0-1").press("Enter");
+  const pausedAfter = await readStoredAttempt(page);
+  expect(pausedAfter.solvedIds).toEqual(pausedBefore.solvedIds);
+  expect(pausedAfter.cellEntries).toEqual(pausedBefore.cellEntries);
+
+  await page.getByRole("button", { name: "Resume", exact: true }).first().click();
+  await solveQuestRunFromPersistedFixture(page);
+  await expect(page.getByTestId("completion-card")).toBeVisible();
+  await expect(anchor).toHaveAttribute("aria-readonly", "true");
+  const completedBefore = await readStoredAttempt(page);
+  await anchor.focus();
+  await anchor.press("ArrowRight");
+  await expect(page.getByTestId("board-cell-0-1")).toBeFocused();
+  await page.getByTestId("board-cell-0-1").press("Enter");
+  const completedAfter = await readStoredAttempt(page);
+  expect(completedAfter.solvedIds).toEqual(completedBefore.solvedIds);
+  expect(completedAfter.cellEntries).toEqual(completedBefore.cellEntries);
+  expect(completedAfter.completedAt).toBe(completedBefore.completedAt);
+  await expect(page.getByTestId("quest-status")).toContainText(/cleared/i);
+});
+
+test("responsive workspace keeps panels and board overflow contained", async ({ page }) => {
+  for (const width of [768, 1024]) {
+    await page.setViewportSize({ width, height: 900 });
+    await openPuzzle(page, { seed: `responsive-${width}` });
+    await expect(page.getByRole("tab", { name: "Clues", exact: true })).toHaveAttribute("aria-selected", "true");
+    await expect(page.locator('[role="tabpanel"]:visible')).toHaveCount(1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(await page.evaluate(() => document.documentElement.clientWidth));
+    for (const tab of await page.getByRole("tab").all()) {
+      expect((await tab.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+      const controls = await tab.getAttribute("aria-controls");
+      expect(controls).toBeTruthy();
+      await expect(page.locator(`#${controls}`)).toHaveAttribute("role", "tabpanel");
+    }
+  }
+
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ width, height: 800 });
+    await openPuzzle(page, { boardView: "quest", seed: `responsive-quest-${width}` });
+    const scroller = page.getByTestId("board-scroller");
+    expect(await scroller.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+    await scroller.evaluate((element) => { element.scrollLeft = 80; });
+    expect(await scroller.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(await page.evaluate(() => document.documentElement.clientWidth));
+  }
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openPuzzle(page, { seed: "responsive-desktop" });
+  await expect(page.getByRole("tablist")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Puzzle board workspace" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Puzzle clues" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Progress and history" })).toBeVisible();
 });
 
 test("quest mode renders and solves a full trace grid with a pointer", async ({ page }) => {

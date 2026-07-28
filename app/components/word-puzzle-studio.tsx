@@ -151,6 +151,14 @@ function getCrosswordCellLabel(state: PersistedRunState, cell: PuzzleBoardCell, 
   return parts.join(", ");
 }
 
+function getQuestCellLabel(row: number, col: number, letter: string, selected: boolean, anchor: boolean) {
+  return [
+    `Row ${row + 1} column ${col + 1}`,
+    `letter ${letter.toUpperCase()}`,
+    anchor ? "start selected" : selected ? "selected path" : null,
+  ].filter((part): part is string => Boolean(part)).join(", ");
+}
+
 function deriveGuessFromCells(state: PersistedRunState, wordId: string) {
   const placement = getWordPlacement(state, wordId);
   if (!placement) {
@@ -401,6 +409,10 @@ export function WordPuzzleStudio() {
   const completionHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const completionTransitionRef = useRef({ hydrated: false, finished: false });
   const workspaceTabRefs = useRef<Record<MobilePanel, HTMLButtonElement | null>>({ board: null, clues: null, review: null, archive: null });
+  const questPointerStartRef = useRef<string | null>(null);
+  const questPointerMovedRef = useRef(false);
+  const questPointerPreviousPathRef = useRef<QuestPathState>({ anchor: null, cells: [] });
+  const suppressQuestClickRef = useRef(false);
   const [options, setOptions] = useState<PuzzleOptions>(defaultOptions);
   const [state, setState] = useState<PersistedRunState>(() => createFreshState(defaultOptions));
   const [reviewTarget, setReviewTarget] = useState<ReviewTarget>({ kind: "none" });
@@ -411,7 +423,6 @@ export function WordPuzzleStudio() {
   const [revealConfirm, setRevealConfirm] = useState<ReviewTarget>({ kind: "none" });
   const [shownAnagrams, setShownAnagrams] = useState<Record<string, string>>({});
   const [questPath, setQuestPath] = useState<QuestPathState>({ anchor: null, cells: [] });
-  const [questSelecting, setQuestSelecting] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState>(null);
@@ -763,7 +774,9 @@ export function WordPuzzleStudio() {
         setRevealConfirm({ kind: "none" });
         setShownAnagrams({});
         setQuestPath({ anchor: null, cells: [] });
-        setQuestSelecting(false);
+        questPointerStartRef.current = null;
+        questPointerMovedRef.current = false;
+        suppressQuestClickRef.current = false;
         setReviewTarget({ kind: "none" });
         setAnnouncement("New puzzle ready.");
       });
@@ -876,6 +889,9 @@ export function WordPuzzleStudio() {
 
     const nowMs = readNow();
     const willPause = !state.paused;
+    if (willPause && isQuestView) {
+      clearQuestPathSelection();
+    }
     setState((current) => setAttemptPaused(current, willPause, nowMs));
     setAnnouncement(willPause ? "Puzzle paused. Entries and new assists are locked." : `${activeClueName} selected. Puzzle resumed.`);
     setClockNow(nowMs);
@@ -1019,9 +1035,13 @@ export function WordPuzzleStudio() {
     }
   }
 
-  function clearQuestPathSelection() {
+  function clearQuestPathSelection(message = "Quest selection cleared.") {
     setQuestPath({ anchor: null, cells: [] });
-    setQuestSelecting(false);
+    questPointerStartRef.current = null;
+    questPointerMovedRef.current = false;
+    if (isQuestView) {
+      setAnnouncement(message);
+    }
   }
 
   function solveWordById(wordId: string) {
@@ -1060,11 +1080,7 @@ export function WordPuzzleStudio() {
     return path?.map((entry) => getCellKey(entry.row, entry.col)) ?? null;
   }
 
-  function finalizeQuestPath(pathKeys: string[], fallbackKey: string) {
-    if (!canMutateAttempt(state)) {
-      return false;
-    }
-
+  function findQuestPathMatch(pathKeys: string[]) {
     const forward = pathKeys
       .map((pathKey) => {
         const [pathRow, pathCol] = pathKey.split(":").map(Number);
@@ -1073,105 +1089,160 @@ export function WordPuzzleStudio() {
       .join("")
       .toLowerCase();
     const backward = forward.split("").reverse().join("");
-    const match = state.run.words.find((word) => !state.solvedIds.includes(word.id) && (word.answer === forward || word.answer === backward));
+    return state.run.words.find((word) => !state.solvedIds.includes(word.id) && (word.answer === forward || word.answer === backward)) ?? null;
+  }
+
+  function transitionQuestEndpoint(row: number, col: number, anchorOverride?: string | null) {
+    if (!canMutateAttempt(state)) {
+      setAnnouncement(state.paused ? "Puzzle paused. Quest selection is locked." : "Puzzle complete. Quest selection is read only.");
+      return false;
+    }
+
+    const key = getCellKey(row, col);
+    const anchor = anchorOverride === undefined ? questPath.anchor : anchorOverride;
+    const letter = getQuestDisplayLetter(cellMap.get(key), state.run.seed, row, col).toUpperCase();
+    if (!anchor || anchor === key) {
+      setQuestPath({ anchor: key, cells: [key] });
+      setAnnouncement(`Quest start selected at row ${row + 1} column ${col + 1}, letter ${letter}. Choose a straight-line endpoint.`);
+      return false;
+    }
+
+    const pathKeys = getQuestPathKeys(anchor, row, col);
+    if (!pathKeys || pathKeys.length <= 1) {
+      clearQuestPathSelection("That endpoint is not aligned with the start. Quest selection cleared.");
+      return false;
+    }
+
+    const match = findQuestPathMatch(pathKeys);
 
     if (match) {
       solveWordById(match.id);
-      setQuestPath({ anchor: null, cells: [] });
-      setQuestSelecting(false);
+      clearQuestPathSelection(`${match.answer.toUpperCase()} found. ${Math.min(state.run.words.length, solvedCount + 1)} of ${state.run.words.length} complete.`);
       showToast(`Found ${match.answer.toUpperCase()}.`);
       return true;
     }
 
-    setQuestPath({ anchor: fallbackKey, cells: [fallbackKey] });
-    setQuestSelecting(false);
+    clearQuestPathSelection("No unsolved target matches that path. Quest selection cleared.");
     return false;
   }
 
-  function beginQuestSelection(row: number, col: number) {
+  function getQuestPointerCell(event: React.PointerEvent<HTMLButtonElement>, fallbackRow: number, fallbackCol: number) {
+    const element = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-quest-cell='true']");
+    const row = Number(element?.dataset.row);
+    const col = Number(element?.dataset.col);
+    return Number.isInteger(row) && Number.isInteger(col) ? { row, col } : { row: fallbackRow, col: fallbackCol };
+  }
+
+  function beginQuestPointer(event: React.PointerEvent<HTMLButtonElement>, row: number, col: number) {
     if (!canMutateAttempt(state)) {
       return;
     }
 
-    const key = getCellKey(row, col);
-
-    if (questPath.anchor && !questSelecting && questPath.anchor !== key) {
-      const pathKeys = getQuestPathKeys(questPath.anchor, row, col);
-      if (pathKeys) {
-        setQuestPath({ anchor: questPath.anchor, cells: pathKeys });
-      }
-      setQuestSelecting(true);
-      return;
+    questPointerStartRef.current = getCellKey(row, col);
+    questPointerMovedRef.current = false;
+    questPointerPreviousPathRef.current = questPath;
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture is an enhancement; endpoint clicks remain available.
     }
-
-    setQuestPath({ anchor: key, cells: [key] });
-    setQuestSelecting(true);
   }
 
-  function extendQuestSelection(row: number, col: number) {
-    if (!canMutateAttempt(state) || !questSelecting || !questPath.anchor) {
+  function moveQuestPointer(event: React.PointerEvent<HTMLButtonElement>, fallbackRow: number, fallbackCol: number) {
+    const startKey = questPointerStartRef.current;
+    if (!canMutateAttempt(state) || !startKey) {
       return;
     }
 
-    const pathKeys = getQuestPathKeys(questPath.anchor, row, col);
+    const endpoint = getQuestPointerCell(event, fallbackRow, fallbackCol);
+    const endpointKey = getCellKey(endpoint.row, endpoint.col);
+    if (endpointKey === startKey) {
+      return;
+    }
+
+    questPointerMovedRef.current = true;
+    const pathKeys = getQuestPathKeys(startKey, endpoint.row, endpoint.col);
     if (!pathKeys) {
       return;
     }
 
-    setQuestPath({ anchor: questPath.anchor, cells: pathKeys });
+    setQuestPath({ anchor: startKey, cells: pathKeys });
   }
 
-  function finishQuestSelection(row: number, col: number) {
-    if (!canMutateAttempt(state) || !questPath.anchor) {
+  function finishQuestPointer(event: React.PointerEvent<HTMLButtonElement>, fallbackRow: number, fallbackCol: number) {
+    const startKey = questPointerStartRef.current;
+    if (!startKey) {
       return;
     }
 
-    const key = getCellKey(row, col);
-    const pathKeys = getQuestPathKeys(questPath.anchor, row, col) ?? [questPath.anchor];
-
-    if (pathKeys.length <= 1) {
-      setQuestPath({ anchor: key, cells: [key] });
-      setQuestSelecting(false);
-      return;
+    const moved = questPointerMovedRef.current;
+    const endpoint = getQuestPointerCell(event, fallbackRow, fallbackCol);
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // The pointer may already have been released by the browser.
     }
+    questPointerStartRef.current = null;
+    questPointerMovedRef.current = false;
 
-    finalizeQuestPath(pathKeys, key);
+    if (moved) {
+      suppressQuestClickRef.current = true;
+      window.setTimeout(() => {
+        suppressQuestClickRef.current = false;
+      }, 0);
+      transitionQuestEndpoint(endpoint.row, endpoint.col, startKey);
+    }
   }
 
-  function handleQuestSelection(row: number, col: number) {
-    if (!canMutateAttempt(state)) {
+  function cancelQuestPointer(event: React.PointerEvent<HTMLButtonElement>) {
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // The pointer may already have been released by the browser.
+    }
+    setQuestPath(questPointerPreviousPathRef.current);
+    questPointerStartRef.current = null;
+    questPointerMovedRef.current = false;
+    setAnnouncement("Quest drag canceled.");
+  }
+
+  function handleQuestClick(row: number, col: number) {
+    if (suppressQuestClickRef.current) {
+      suppressQuestClickRef.current = false;
+      return;
+    }
+    transitionQuestEndpoint(row, col);
+  }
+
+  function moveQuestCellFocus(row: number, col: number, rowStep: number, colStep: number) {
+    const nextRow = row + rowStep;
+    const nextCol = col + colStep;
+    if (nextRow < 0 || nextCol < 0 || nextRow >= state.run.board.size || nextCol >= state.run.board.size) {
+      return;
+    }
+    focusBoardCellKey(getCellKey(nextRow, nextCol));
+  }
+
+  function handleQuestCellKeyDown(event: React.KeyboardEvent<HTMLButtonElement>, row: number, col: number) {
+    const movement = {
+      ArrowUp: [-1, 0],
+      ArrowDown: [1, 0],
+      ArrowLeft: [0, -1],
+      ArrowRight: [0, 1],
+    }[event.key];
+    if (movement) {
+      event.preventDefault();
+      moveQuestCellFocus(row, col, movement[0], movement[1]);
       return;
     }
 
-    const key = getCellKey(row, col);
-
-    if (!questPath.anchor) {
-      setQuestPath({ anchor: key, cells: [key] });
-      return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      transitionQuestEndpoint(row, col);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      clearQuestPathSelection();
     }
-
-    const [startRow, startCol] = questPath.anchor.split(":").map(Number);
-    const path = buildLinearQuestPath({ row: startRow, col: startCol }, { row, col });
-    if (!path) {
-      setQuestPath({ anchor: key, cells: [key] });
-      return;
-    }
-
-    const pathKeys = path.map((cell) => getCellKey(cell.row, cell.col));
-    setQuestPath({ anchor: questPath.anchor, cells: pathKeys });
-
-    const forward = path.map((cell) => getQuestDisplayLetter(cellMap.get(getCellKey(cell.row, cell.col)), state.run.seed, cell.row, cell.col)).join("").toLowerCase();
-    const backward = forward.split("").reverse().join("");
-    const match = state.run.words.find((word) => !state.solvedIds.includes(word.id) && (word.answer === forward || word.answer === backward));
-
-    if (match) {
-      solveWordById(match.id);
-      setQuestPath({ anchor: null, cells: [] });
-      showToast(`Found ${match.answer.toUpperCase()}.`);
-      return;
-    }
-
-    setQuestPath({ anchor: key, cells: [key] });
   }
 
   function selectWord(wordId: string, intent: WordSelectionIntent = "answer", selectedCellKey?: string) {
@@ -1189,17 +1260,24 @@ export function WordPuzzleStudio() {
         activeWordId: wordId,
       };
     });
+    const questMode = state.run.options.boardView === "quest";
+    const resolvedIntent = questMode ? "cell" : intent;
     const targetCellKey = selectedCellKey ?? getFirstOpenCellKey(state, wordId);
     setFocusedCellKey(targetCellKey);
     setMobilePanel("board");
     const placement = getPlacementByWordId(state, wordId);
     const word = getWordById(state, wordId);
     if (placement && word) {
-      setAnnouncement(`${placement.clueNumber} ${placement.direction} selected, ${word.length} letters.`);
+      if (questMode) {
+        setQuestPath({ anchor: null, cells: [] });
+        setAnnouncement(`${word.answer.toUpperCase()} selected, ${word.length} letters. Its first board cell is focused.`);
+      } else {
+        setAnnouncement(`${placement.clueNumber} ${placement.direction} selected, ${word.length} letters.`);
+      }
     }
 
     window.requestAnimationFrame(() => {
-      if (intent === "answer" && canMutateAttempt(state) && !state.solvedIds.includes(wordId)) {
+      if (resolvedIntent === "answer" && canMutateAttempt(state) && !state.solvedIds.includes(wordId)) {
         activeAnswerInputRef.current?.focus();
       } else if (targetCellKey) {
         boardCellRefs.current[targetCellKey]?.focus();
@@ -1209,9 +1287,12 @@ export function WordPuzzleStudio() {
 
   function focusBoardCellKey(cellKey: string) {
     setFocusedCellKey(cellKey);
-    window.requestAnimationFrame(() => {
-      boardCellRefs.current[cellKey]?.focus();
-    });
+    const cell = boardCellRefs.current[cellKey];
+    if (cell) {
+      cell.focus();
+    } else {
+      window.requestAnimationFrame(() => boardCellRefs.current[cellKey]?.focus());
+    }
   }
 
   function jumpToStudioSection(panel: MobilePanel) {
@@ -1895,7 +1976,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
             </div>
 
             <div className="min-w-0 space-y-6">
-              <div id="studio-board" role={compactWorkspace ? "tabpanel" : "region"} aria-labelledby={compactWorkspace ? "workspace-tab-board" : undefined} hidden={compactWorkspace && mobilePanel !== "board"} className={`${mobilePanel === "board" ? "block" : "hidden"} min-w-0 max-w-full overflow-hidden glass-card rounded-[2rem] p-4 sm:p-6 xl:block`}>
+              <div id="studio-board" role={compactWorkspace ? "tabpanel" : "region"} aria-label={compactWorkspace ? undefined : "Puzzle board workspace"} aria-labelledby={compactWorkspace ? "workspace-tab-board" : undefined} hidden={compactWorkspace && mobilePanel !== "board"} className={`${mobilePanel === "board" ? "block" : "hidden"} min-w-0 max-w-full overflow-hidden glass-card rounded-[2rem] p-4 sm:p-6 xl:block`}>
                 <div className="mb-4 flex items-center justify-between">
                   <div>
                     <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Puzzle</div>
@@ -1908,10 +1989,21 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                   </div>
                 </div>
                 <div className="mb-4 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.18em] text-slate-400">
-                  <span className="rounded-full border border-white/10 px-3 py-1.5">tap board to jump</span>
-                  <span className="rounded-full border border-white/10 px-3 py-1.5">active clue stays highlighted</span>
-                  <span className="rounded-full border border-white/10 px-3 py-1.5">review stays separate</span>
+                  <span className="rounded-full border border-white/10 px-3 py-1.5">{isQuestView ? "tap two endpoints" : "tap board to jump"}</span>
+                  <span className="rounded-full border border-white/10 px-3 py-1.5">{isQuestView ? "drag a straight path" : "active clue stays highlighted"}</span>
+                  <span className="rounded-full border border-white/10 px-3 py-1.5">{isQuestView ? "arrows move · enter selects" : "review stays separate"}</span>
                 </div>
+
+                {isQuestView ? (
+                  <div className="mb-5 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(14rem,0.7fr)]">
+                    <div id="quest-grid-instructions" className="rounded-2xl border border-white/10 bg-white/4 px-4 py-3 text-sm leading-6 text-slate-300">
+                      Tap a start and endpoint, drag a straight path, or use arrows with Enter or Space. Escape clears the current selection.
+                    </div>
+                    <div id="quest-grid-status" data-testid="quest-status" className="rounded-2xl border border-cyan-400/20 bg-cyan-500/8 px-4 py-3 text-sm font-medium leading-6 text-cyan-100">
+                      {liveMessage}
+                    </div>
+                  </div>
+                ) : null}
 
                 {!isQuestView && activeWord ? (
                   <div data-testid="active-clue-panel" className={`mb-5 rounded-[1.5rem] border bg-white/4 p-4 ${activeGuessIncorrect ? "border-rose-400/45" : "border-white/10"}`}>
@@ -1971,10 +2063,10 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                   </div>
                 ) : null}
 
-                <div className="max-w-full overflow-auto pb-2">
-                  <div role={isQuestView ? undefined : "grid"} aria-label={isQuestView ? undefined : "Crossword puzzle board"} aria-rowcount={isQuestView ? undefined : state.run.board.size} aria-colcount={isQuestView ? undefined : state.run.board.size} className={`mx-auto grid w-max gap-1 rounded-[1.5rem] border ${classicBoardShellClass}`}>
+                <div data-testid="board-scroller" className="max-w-full overflow-auto pb-2">
+                  <div role="grid" aria-label={isQuestView ? "Quest word search board" : "Crossword puzzle board"} aria-describedby={isQuestView ? "quest-grid-instructions quest-grid-status" : undefined} aria-rowcount={state.run.board.size} aria-colcount={state.run.board.size} className={`mx-auto grid w-max gap-1 rounded-[1.5rem] border ${classicBoardShellClass}`}>
                     {Array.from({ length: state.run.board.size }, (_, row) => (
-                      <div key={row} role={isQuestView ? undefined : "row"} aria-rowindex={isQuestView ? undefined : row + 1} className="flex gap-1">
+                      <div key={row} role="row" aria-rowindex={row + 1} className="flex gap-1">
                         {Array.from({ length: state.run.board.size }, (_, col) => {
                           const key = getCellKey(row, col);
                           const cell = cellMap.get(key);
@@ -2007,46 +2099,56 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                               }}
                               data-testid={`board-cell-${row}-${col}`}
                               data-active-cell={activeCell ? "true" : "false"}
+                              data-quest-cell={isQuestView ? "true" : undefined}
+                              data-row={isQuestView ? row : undefined}
+                              data-col={isQuestView ? col : undefined}
                               type="button"
-                              role={isQuestView ? undefined : "gridcell"}
-                              aria-colindex={isQuestView ? undefined : col + 1}
-                              aria-label={!isQuestView && cell ? getCrosswordCellLabel(state, cell, state.activeWordId) : undefined}
-                              aria-selected={!isQuestView ? activeCell : undefined}
-                              aria-readonly={!isQuestView ? !canMutateAttempt(state) : undefined}
-                              tabIndex={cell && boardFocusKey === key ? 0 : -1}
+                              role="gridcell"
+                              aria-colindex={col + 1}
+                              aria-label={isQuestView ? getQuestCellLabel(row, col, displayLetter, selectedQuestCell, questPath.anchor === key) : cell ? getCrosswordCellLabel(state, cell, state.activeWordId) : undefined}
+                              aria-selected={isQuestView ? selectedQuestCell : activeCell}
+                              aria-readonly={!canMutateAttempt(state)}
+                              tabIndex={(isQuestView || cell) && boardFocusKey === key ? 0 : -1}
                               onClick={() => {
                                 if (isQuestView) {
-                                  handleQuestSelection(row, col);
+                                  handleQuestClick(row, col);
                                 } else if (cell) {
                                   selectWordFromCell(cell);
                                 }
                               }}
-                              onPointerDown={() => {
+                              onPointerDown={(event) => {
                                 if (isQuestView) {
-                                  beginQuestSelection(row, col);
+                                  beginQuestPointer(event, row, col);
                                 }
                               }}
-                              onPointerEnter={() => {
+                              onPointerMove={(event) => {
                                 if (isQuestView) {
-                                  extendQuestSelection(row, col);
+                                  moveQuestPointer(event, row, col);
                                 }
                               }}
-                              onPointerUp={() => {
+                              onPointerUp={(event) => {
                                 if (isQuestView) {
-                                  finishQuestSelection(row, col);
+                                  finishQuestPointer(event, row, col);
+                                }
+                              }}
+                              onPointerCancel={(event) => {
+                                if (isQuestView) {
+                                  cancelQuestPointer(event);
                                 }
                               }}
                               onFocus={() => {
-                                if (cell) {
+                                if (isQuestView || cell) {
                                   setFocusedCellKey(key);
                                 }
                               }}
                               onKeyDown={(event) => {
-                                if (cell) {
+                                if (isQuestView) {
+                                  handleQuestCellKeyDown(event, row, col);
+                                } else if (cell) {
                                   handleBoardCellKeyDown(event, cell);
                                 }
                               }}
-                              className={`relative border font-semibold uppercase transition ${boardCellSizeClass} ${selectedQuestCell ? "border-cyan-300/55 bg-cyan-400/18 text-white" : buttonClass} ${solvedCell ? "shadow-[0_0_18px_rgba(255,255,255,0.06)]" : ""} ${cell && boardFocusKey === key ? "ring-2 ring-white/55" : ""}`}
+                              className={`relative border font-semibold uppercase transition ${boardCellSizeClass} ${selectedQuestCell ? "border-cyan-300/55 bg-cyan-400/18 text-white" : buttonClass} ${solvedCell ? "shadow-[0_0_18px_rgba(255,255,255,0.06)]" : ""} ${(isQuestView || cell) && boardFocusKey === key ? "ring-2 ring-white/55" : ""}`}
                             >
                               {!isQuestView && cell?.clueNumbers[0] ? <span className="absolute left-1 top-0.5 text-[9px] font-medium text-slate-400">{cell.clueNumbers[0]}</span> : null}
                               <span>{displayLetter}</span>
@@ -2072,7 +2174,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
 
                     {isQuestView ? (
                       <div className="mt-4 rounded-2xl border border-dashed border-white/12 bg-slate-950/45 px-4 py-3 text-sm text-slate-200">
-                        Trace the word directly on the board. Start on the first letter, drag in a straight line, and release on the last letter.
+                        Trace directly on the board: drag a straight line, tap its two endpoints, or use arrows and Enter to mark the same path.
                       </div>
                     ) : null}
 
@@ -2136,10 +2238,10 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                     <div className="mt-4">
                       <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Keyboard flow</div>
                       <div className="mt-3 flex flex-wrap gap-2">
-                      <span className="rounded-full border border-white/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-slate-300">Enter next</span>
-                      <span className="rounded-full border border-white/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-slate-300">Shift+Enter back</span>
-                      <span className="rounded-full border border-white/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-slate-300">Arrows move clues</span>
-                      <span className="rounded-full border border-white/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-slate-300">Esc exits clue</span>
+                      {(isQuestView
+                        ? ["Arrows move cells", "Enter selects endpoints", "Esc clears trail"]
+                        : ["Enter next", "Shift+Enter back", "Arrows move clues", "Esc exits clue"]
+                      ).map((label) => <span key={label} className="rounded-full border border-white/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-slate-300">{label}</span>)}
                       </div>
                     </div>
 
@@ -2155,7 +2257,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                       <button type="button" onClick={revealActiveLetter} disabled={!canMutateAttempt(state) || state.solvedIds.includes(activeWord.id)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
                         Reveal letter
                       </button>
-                      <button type="button" onClick={isQuestView ? clearQuestPathSelection : clearActiveWord} disabled={!canMutateAttempt(state) || state.solvedIds.includes(activeWord.id)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
+                      <button type="button" onClick={() => isQuestView ? clearQuestPathSelection() : clearActiveWord()} disabled={!canMutateAttempt(state) || state.solvedIds.includes(activeWord.id)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
                         {isQuestView ? "Clear trail" : "Clear word"}
                       </button>
                       <button type="button" onClick={() => revealAnagram(activeWord)} disabled={!canMutateAttempt(state) || state.solvedIds.includes(activeWord.id)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
@@ -2180,7 +2282,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 ) : null}
               </div>
 
-              <div id="studio-clues" role={compactWorkspace ? "tabpanel" : "region"} aria-labelledby={compactWorkspace ? "workspace-tab-clues" : undefined} hidden={compactWorkspace && mobilePanel !== "clues"} className={`${mobilePanel === "clues" ? "block" : "hidden"} glass-card rounded-[2rem] p-5 sm:p-6 xl:block`}>
+              <div id="studio-clues" role={compactWorkspace ? "tabpanel" : "region"} aria-label={compactWorkspace ? undefined : "Puzzle clues"} aria-labelledby={compactWorkspace ? "workspace-tab-clues" : undefined} hidden={compactWorkspace && mobilePanel !== "clues"} className={`${mobilePanel === "clues" ? "block" : "hidden"} glass-card rounded-[2rem] p-5 sm:p-6 xl:block`}>
                 <div>
                   <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Across &amp; down</div>
                   <h3 className="mt-1 text-lg font-semibold text-white">Clues</h3>
@@ -2228,7 +2330,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
             </div>
 
             {visibleReviewKind ? (
-              <div id="studio-review" role={compactWorkspace ? "tabpanel" : "region"} aria-labelledby={compactWorkspace ? "workspace-tab-review" : undefined} hidden={compactWorkspace && mobilePanel !== "review"} className={`${mobilePanel === "review" ? "block" : "hidden"} glass-card rounded-[2rem] p-5 sm:p-6 xl:block`}>
+              <div id="studio-review" role={compactWorkspace ? "tabpanel" : "region"} aria-label={compactWorkspace ? undefined : "Puzzle review"} aria-labelledby={compactWorkspace ? "workspace-tab-review" : undefined} hidden={compactWorkspace && mobilePanel !== "review"} className={`${mobilePanel === "review" ? "block" : "hidden"} glass-card rounded-[2rem] p-5 sm:p-6 xl:block`}>
                 <div className="mb-4 flex items-center justify-between">
                   <div>
                     <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Review</div>
@@ -2440,7 +2542,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
             </div>
           </section>
 
-          <aside id="studio-archive" role={compactWorkspace ? "tabpanel" : "region"} aria-labelledby={compactWorkspace ? "workspace-tab-archive" : undefined} hidden={compactWorkspace && mobilePanel !== "archive"} className={`${mobilePanel === "archive" ? "block" : "hidden"} min-w-0 space-y-6 xl:sticky xl:top-6 xl:block ${archiveRailClass}`}>
+          <aside id="studio-archive" role={compactWorkspace ? "tabpanel" : "region"} aria-label={compactWorkspace ? undefined : "Progress and history"} aria-labelledby={compactWorkspace ? "workspace-tab-archive" : undefined} hidden={compactWorkspace && mobilePanel !== "archive"} className={`${mobilePanel === "archive" ? "block" : "hidden"} min-w-0 space-y-6 xl:sticky xl:top-6 xl:block ${archiveRailClass}`}>
             <div className="hidden xl:flex justify-end">
               <button data-testid="toggle-right-panel" type="button" aria-expanded={rightSidebarOpen} aria-controls="studio-archive-rail" aria-label={rightSidebarOpen ? "Collapse archive rail" : "Expand archive rail"} onClick={() => setRightSidebarOpen((current) => !current)} className={`rounded-full border border-white/10 bg-white/4 text-slate-200 ${rightSidebarOpen ? "px-3 py-1.5 text-xs" : "size-9 text-sm"}`}>
                 <span aria-hidden="true">{rightSidebarOpen ? "Collapse archive" : "←"}</span>
@@ -2499,7 +2601,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                        ? getWordCells(state, placement).map((cell) => (state.cellEntries[getCellKey(cell.row, cell.col)] ?? "•").toUpperCase()).join(" ")
                        : `${word.length} letters`;
                      return (
-                      <button key={word.id} type="button" onClick={() => selectWord(word.id)} className={`relative w-full overflow-hidden rounded-2xl border px-4 py-3 text-left transition ${getTargetChipClass(word, solved, state.activeWordId === word.id)}`}>
+                      <button key={word.id} data-testid={`target-word-${word.id}`} type="button" aria-current={state.activeWordId === word.id ? "true" : undefined} onClick={() => selectWord(word.id)} className={`relative w-full overflow-hidden rounded-2xl border px-4 py-3 text-left transition ${getTargetChipClass(word, solved, state.activeWordId === word.id)}`}>
                         <div className="absolute inset-y-0 left-0 w-1 bg-white/12" />
                         <div className="flex items-center justify-between gap-3">
                           <span className="text-sm font-semibold uppercase tracking-[0.12em] text-white/95">{isQuestView || solved ? word.answer : maskedAnswer}</span>
@@ -2515,13 +2617,19 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Controls</div>
                 <h3 className="mt-1 text-lg font-semibold text-white">Play guide</h3>
                 <div className="mt-4 space-y-3 text-sm text-slate-200">
-                  {[
+                  {(isQuestView ? [
+                    ["⌗", "Choose a start", "Tap or press Enter on the first letter"],
+                    ["↔", "Choose an endpoint", "Tap, drag, or use arrows and Enter"],
+                    ["⎋", "Clear a trail", "Escape cancels the current selection"],
+                    ["💡", "Get a hint", "Use clue tips when you get stuck"],
+                    ["👁", "Review word", "Open review for the current word or puzzle"],
+                  ] : [
                     ["⌗", "Select a cell", "Tap a cell to start typing"],
                     ["⌨", "Type a letter", "Use your keyboard to fill the answer"],
                     ["⌫", "Delete", "Backspace clears the current entry"],
                     ["💡", "Get a hint", "Use hints when you get stuck"],
                     ["👁", "Reveal word", "Open review for the current word or puzzle"],
-                  ].map(([icon, title, text]) => (
+                  ]).map(([icon, title, text]) => (
                     <div key={title} className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/4 px-4 py-3">
                       <div className="grid size-10 shrink-0 place-items-center rounded-xl border border-white/10 bg-slate-950/50 text-sm">{icon}</div>
                       <div>
