@@ -1,16 +1,15 @@
 "use client";
 
 import { startTransition, useEffect, useRef, useState } from "react";
-import type { PersistedRunState, ProgressSnapshot, PuzzleBoardCell, PuzzlePlacement, PuzzleOptions, PuzzleWord, RunSummary, TopicId } from "@/lib/game-types";
+import type { AssistSummary, PersistedRunState, ProgressSnapshot, PuzzleBoardCell, PuzzlePlacement, PuzzleOptions, PuzzleWord, RunSummary, TopicId } from "@/lib/game-types";
 import { buildPuzzleRun, createHintLadder, PuzzleGenerationError, sanitizeGuess } from "@/lib/puzzle-generator";
 import { isCrosswordContentPack, isCrosswordTopic } from "@/lib/clue-catalog";
-import { getCanonicalDailyOptions, getPuzzleSizeRange, getUtcDay, normalizePuzzleOptions, parseSharedOptions } from "@/lib/puzzle-options";
+import { getCanonicalDailyOptions, getPuzzleSizeRange, getUtcDay, isCanonicalDailyOptions, normalizePuzzleOptions, parseSharedOptions } from "@/lib/puzzle-options";
 import { buildDailyArchive, createEmptyProgress, recordRunProgress } from "@/lib/progress";
 import {
   canMutateAttempt,
   createAttemptFromRun,
   finalizeAttempt,
-  getAssistCount,
   getDisplayedElapsedMs,
   recordAnagram,
   recordHintStep,
@@ -19,6 +18,7 @@ import {
   recordWordReveal,
   setAttemptPaused,
   setAttemptVisibility,
+  summarizeAssists,
 } from "@/lib/run-state";
 import { prepareStoredAttempt, readStoredGame, shouldRestoreAttempt, writeStoredGame } from "@/lib/session-storage";
 import { getThemeStyle, themeStyles } from "@/lib/themes";
@@ -80,6 +80,22 @@ function formatElapsed(ms: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatAssistBreakdown(assists: AssistSummary) {
+  if (assists.total === 0) {
+    return "No assists";
+  }
+
+  const parts = [
+    assists.hintSteps > 0 ? `${assists.hintSteps} hint ${assists.hintSteps === 1 ? "step" : "steps"}` : null,
+    assists.revealedLetters > 0 ? `${assists.revealedLetters} ${assists.revealedLetters === 1 ? "letter" : "letters"}` : null,
+    assists.anagrams > 0 ? `${assists.anagrams} ${assists.anagrams === 1 ? "anagram" : "anagrams"}` : null,
+    assists.revealedWords > 0 ? `${assists.revealedWords} ${assists.revealedWords === 1 ? "word" : "words"} revealed` : null,
+    assists.puzzleRevealed ? "full puzzle revealed" : null,
+  ].filter((part): part is string => Boolean(part));
+
+  return parts.join(" · ");
 }
 
 function getCellKey(row: number, col: number) {
@@ -329,25 +345,6 @@ function buildAnagram(answer: string) {
   return rotated === answer.toUpperCase() ? chars.reverse().join("") : rotated;
 }
 
-function countFinishedRunsSince(history: ProgressSnapshot["history"], days: number, mode?: RunSummary["mode"]) {
-  const now = new Date();
-  const cutoff = new Date(now);
-  cutoff.setDate(now.getDate() - (days - 1));
-  cutoff.setHours(0, 0, 0, 0);
-
-  return history.filter((entry) => {
-    if (!entry.finished || !entry.completedAt) {
-      return false;
-    }
-
-    if (mode && entry.mode !== mode) {
-      return false;
-    }
-
-    return new Date(entry.completedAt) >= cutoff;
-  }).length;
-}
-
 export function WordPuzzleStudio() {
   const activeAnswerInputRef = useRef<HTMLInputElement | null>(null);
   const boardCellRefs = useRef<Record<string, HTMLButtonElement | null>>({});
@@ -425,7 +422,7 @@ export function WordPuzzleStudio() {
 
     const handle = window.setTimeout(() => {
       const nowMs = readNow();
-      const nextProgress = recordRunProgress(progressRef.current, state);
+      const nextProgress = recordRunProgress(progressRef.current, state, nowMs);
       progressRef.current = nextProgress;
       setProgress(nextProgress);
       writeStoredGame(window.localStorage, state, nextProgress, nowMs);
@@ -447,7 +444,7 @@ export function WordPuzzleStudio() {
     const handlePageHide = () => {
       const nowMs = readNow();
       const current = setAttemptVisibility(stateRef.current, false, nowMs);
-      const nextProgress = recordRunProgress(progressRef.current, current);
+      const nextProgress = recordRunProgress(progressRef.current, current, nowMs);
       writeStoredGame(window.localStorage, current, nextProgress, nowMs);
     };
 
@@ -488,20 +485,18 @@ export function WordPuzzleStudio() {
   const progressLabel = `${solvedCount}/${state.run.words.length} solved`;
   const runStateLabel = finished ? "Done" : state.paused ? "Paused" : "Live";
   const cellMap = new Map(state.run.board.cells.map((cell) => [getCellKey(cell.row, cell.col), cell]));
-  const archive = buildDailyArchive(progress.history, 10);
+  const archive = buildDailyArchive(progress.history, 10, clockNow);
   const activeFilledCount = countFilledLetters(activeGuess);
   const boardFocusKey = focusedCellKey ?? getFirstOpenCellKey(state, state.activeWordId);
-  const hintsUsed = getAssistCount(state);
+  const assistSummary = summarizeAssists(state);
+  const assistsUsed = assistSummary.total;
   const displayedElapsedMs = getDisplayedElapsedMs(state, clockNow, typeof document === "undefined" || !document.hidden);
   const rareSolvedCount = state.run.words.filter((word) => word.frequencyBand === "rare").length;
   const uncommonSolvedCount = state.run.words.filter((word) => word.frequencyBand === "uncommon").length;
   const commonSolvedCount = state.run.words.filter((word) => word.frequencyBand === "common").length;
   const finishedHistoryCount = progress.history.filter((entry) => entry.finished).length;
-  const activeHistoryCount = progress.history.filter((entry) => !entry.finished).length;
-  const dailyClearCount = progress.history.filter((entry) => entry.mode === "daily" && entry.finished).length;
-  const weeklyDailyClearCount = countFinishedRunsSince(progress.history, 7, "daily");
-  const monthlyDailyClearCount = countFinishedRunsSince(progress.history, 30, "daily");
-  const weeklyFinishedRunCount = countFinishedRunsSince(progress.history, 7);
+  const dailyClearCount = progress.history.filter((entry) => entry.canonicalDaily && entry.finished).length;
+  const historicalAssistCount = progress.history.reduce((total, entry) => total + entry.assists.total, 0);
   const availableTopics = topicCatalog.filter((topic) => options.boardView === "quest" || isCrosswordTopic(topic.id));
   const selectedTopicLabels = availableTopics.filter((topic) => options.topics.includes(topic.id)).map((topic) => topic.label);
   const availableContentPacks = contentCatalog.filter((pack) => options.topics.includes(pack.topicId) && (options.boardView === "quest" || isCrosswordContentPack(pack.id)));
@@ -519,7 +514,6 @@ export function WordPuzzleStudio() {
   const progressPercent = state.run.words.length === 0 ? 0 : (solvedCount / state.run.words.length) * 100;
   const progressRingCircumference = 2 * Math.PI * 42;
   const progressRingOffset = progressRingCircumference - (progressRingCircumference * progressPercent) / 100;
-  const dailyRewardPercent = Math.min(100, (dailyClearCount % 7) * (100 / 7));
   const secondaryActionClass = "inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/4 px-4 py-2.5 text-sm font-medium text-slate-100 transition hover:border-white/20";
   const secondaryPillClass = "inline-flex items-center justify-center rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm font-medium text-slate-100 transition hover:border-white/20";
   const compactPillClass = "inline-flex items-center justify-center rounded-full border border-white/10 bg-white/4 px-3.5 py-2 text-sm font-medium text-slate-100 transition hover:border-white/20";
@@ -535,6 +529,24 @@ export function WordPuzzleStudio() {
       ? "opacity-85"
       : "opacity-100";
   const isQuestView = state.run.options.boardView === "quest";
+  const runDay = state.run.seed.replace(/^daily:/, "");
+  const today = getUtcDay(clockNow);
+  const isCanonicalDailyAttempt = isCanonicalDailyOptions(state.run.options, state.run.seed) && state.startedAt.slice(0, 10) === runDay;
+  const isCanonicalDailyCompletion = isCanonicalDailyAttempt && state.completedAt?.slice(0, 10) === runDay;
+  const runContextLabel = state.run.options.mode === "custom"
+    ? "Custom puzzle"
+    : runDay === today
+      ? "Today’s daily"
+      : `${runDay} daily replay`;
+  const todayArchiveEntry = archive.find((entry) => entry.day === today)?.summary ?? null;
+  const currentIsTodayDaily = isCanonicalDailyAttempt && runDay === today;
+  const todayDailyFinished = Boolean(todayArchiveEntry?.finished || (currentIsTodayDaily && finished));
+  const todayDailySolved = currentIsTodayDaily
+    ? solvedCount
+    : todayArchiveEntry?.solvedCount ?? 0;
+  const todayDailyTotal = currentIsTodayDaily
+    ? state.run.words.length
+    : todayArchiveEntry?.totalWords ?? getCanonicalDailyOptions(clockNow).puzzleSize;
   const activeVocabularyUnlocked = isQuestView || (activeWord ? state.solvedIds.includes(activeWord.id) : false) || reviewMode !== "none";
   const filteredHistory = progress.history
     .filter((entry) => (historyModeFilter === "all" ? true : entry.mode === historyModeFilter))
@@ -672,7 +684,7 @@ export function WordPuzzleStudio() {
       `Astra Lexa`,
       `${state.run.title}`,
       `${state.run.words.length} words cleared in ${formatElapsed(displayedElapsedMs)}`,
-      `${hintsUsed} hints used`,
+      `${assistsUsed} assists (${formatAssistBreakdown(assistSummary)})`,
       `seed ${state.run.seed.replace(/^daily:/, "")}`,
     ].join(" | ");
 
@@ -690,7 +702,7 @@ export function WordPuzzleStudio() {
       `Astra Lexa Daily ${dailySeed}`,
       `${state.run.words.length} words`,
       `${formatElapsed(displayedElapsedMs)}`,
-      `${hintsUsed} hints`,
+      `${assistsUsed} assists`,
       `${commonSolvedCount}/${uncommonSolvedCount}/${rareSolvedCount} mix`,
     ].join(" | ");
   }
@@ -1300,8 +1312,8 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 <div className="flex items-center gap-3 rounded-full border border-white/10 bg-slate-950/45 px-3 py-2">
                   <div className="grid size-8 place-items-center rounded-full border border-white/10 bg-[linear-gradient(135deg,rgba(168,85,247,0.22),rgba(96,165,250,0.18))] text-sm">✦</div>
                   <div>
-                    <div className="quest-logo text-sm font-black uppercase tracking-[0.12em]">Word Quest</div>
-                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Quest studio</div>
+                    <div className="quest-logo text-sm font-black uppercase tracking-[0.12em]">Astra Lexa</div>
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Word puzzle studio</div>
                   </div>
                 </div>
                 <nav className="flex flex-wrap gap-2 text-sm text-slate-300">
@@ -1314,7 +1326,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
 
               <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_8.5rem] lg:items-center">
                 <div className="space-y-3">
-                  <div className="text-sm font-semibold text-fuchsia-300">Today&apos;s Quest</div>
+                  <div className="text-sm font-semibold text-fuchsia-300">{runContextLabel}</div>
                   <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">{state.run.title}</h1>
                   <p className="max-w-3xl text-sm leading-6 text-slate-300">{state.run.blurb}</p>
                   <div className="flex flex-wrap gap-2 text-xs text-slate-200">
@@ -1361,9 +1373,9 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 </div>
               </div>
               <div className="rounded-[1.5rem] border border-white/10 bg-white/4 px-4 py-3 text-sm text-slate-200">
-                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Hints</div>
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Assists</div>
                 <div className="mt-2 flex items-center justify-between gap-2">
-                  <span className="text-lg font-semibold text-white">{hintsUsed}</span>
+                  <span className="text-lg font-semibold text-white">{assistsUsed}</span>
                   <span className="text-xl">💡</span>
                 </div>
               </div>
@@ -2011,7 +2023,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 </div>
                 <div className="text-xs uppercase tracking-[0.28em] text-slate-400">Run complete</div>
                 <h3 className="mt-2 text-3xl font-semibold text-white">Puzzle cleared.</h3>
-                <p className="mt-3 text-sm text-slate-300">Your archive and streaks are updated. Replay this exact seed, take a quick review pass, or share the finished run.</p>
+                <p className="mt-3 text-sm text-slate-300">{isCanonicalDailyCompletion ? "This canonical clear is saved in your local archive and streak." : "This run is saved in your local history without changing the canonical daily streak."} Replay this exact seed, review the board, or share the result.</p>
 
                 <div className="mt-5">
                   <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Run recap</div>
@@ -2021,8 +2033,9 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                     <div className="mt-2 text-2xl font-semibold text-white">{formatElapsed(displayedElapsedMs)}</div>
                   </div>
                   <div className="rounded-3xl border border-white/10 bg-white/4 p-4 text-left">
-                    <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Hints used</div>
-                    <div className="mt-2 text-2xl font-semibold text-white">{hintsUsed}</div>
+                    <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Assists used</div>
+                    <div className="mt-2 text-2xl font-semibold text-white">{assistsUsed}</div>
+                    <div className="mt-1 text-xs leading-5 text-slate-400">{formatAssistBreakdown(assistSummary)}</div>
                   </div>
                   <div className="rounded-3xl border border-white/10 bg-white/4 p-4 text-left">
                     <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Word mix</div>
@@ -2070,86 +2083,62 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
               <div className="glass-card quest-card-glow rounded-[2rem] p-5 sm:p-6">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Goals</div>
-                    <h3 className="mt-1 text-lg font-semibold text-white">Solve 1 puzzle</h3>
-                    <p className="mt-1 text-sm text-slate-300">Keep your streak alive with a full clear.</p>
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Canonical daily</div>
+                    <h3 className="mt-1 text-lg font-semibold text-white">Today&apos;s puzzle</h3>
+                    <p className="mt-1 text-sm text-slate-300">Only today&apos;s standard rules count toward your daily streak.</p>
                   </div>
-                  <div className="text-4xl opacity-80">🎯</div>
+                  <span className={`rounded-full border px-3 py-1 text-xs ${todayDailyFinished ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-200" : "border-white/10 text-slate-300"}`}>
+                    {todayDailyFinished ? "Cleared" : todayDailySolved > 0 ? "In progress" : "Ready"}
+                  </span>
                 </div>
                 <div className="mt-5 flex items-center justify-between gap-3 text-sm text-slate-300">
-                  <span>{finished ? "1/1 completed" : "0/1 in progress"}</span>
-                  <span className="rounded-full border border-white/10 px-3 py-1 text-xs">{finished ? "Done" : progressLabel}</span>
+                  <span>{todayDailySolved}/{todayDailyTotal} words solved</span>
+                  <span>{today}</span>
                 </div>
                 <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/8">
-                  <div className="h-full rounded-full bg-[linear-gradient(90deg,#818cf8,#a855f7)]" style={{ width: `${finished ? 100 : Math.min(100, progressPercent)}%` }} />
+                  <div className="h-full rounded-full bg-[linear-gradient(90deg,#60a5fa,#c084fc)]" style={{ width: `${todayDailyTotal === 0 ? 0 : Math.min(100, (todayDailySolved / todayDailyTotal) * 100)}%` }} />
                 </div>
+                <button type="button" onClick={currentIsTodayDaily && !finished ? () => jumpToStudioSection("board") : startTodayDailyRun} className="mt-5 rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm font-medium text-slate-100">
+                  {currentIsTodayDaily && !finished ? "Continue today’s daily" : todayDailyFinished ? "Replay today’s daily" : "Start today’s daily"}
+                </button>
               </div>
 
-              <div className="glass-card quest-card-glow rounded-[2rem] p-5 sm:p-6 bg-[linear-gradient(135deg,rgba(168,85,247,0.18),rgba(15,23,42,0.18))]">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Daily reward</div>
-                    <h3 className="mt-1 text-lg font-semibold text-white">Solve today&apos;s puzzle</h3>
-                    <p className="mt-1 text-sm text-slate-300">Come back every day and keep the quest chest glowing.</p>
-                  </div>
-                  <div className="text-4xl opacity-85">🎁</div>
+              <div className="glass-card quest-card-frame rounded-[2rem] p-5 sm:p-6">
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Local record</div>
+                  <h3 className="mt-1 text-lg font-semibold text-white">Facts saved on this device</h3>
+                  <p className="mt-1 text-sm text-slate-300">No account or remote leaderboard is implied; clearing browser data removes this record.</p>
                 </div>
-                <div className="mt-5 flex items-center justify-between gap-3 text-sm text-slate-300">
-                  <span>{state.run.options.mode === "daily" && finished ? "Daily cleared" : "Daily ready"}</span>
-                  <span className="rounded-full border border-white/10 px-3 py-1 text-xs">{dailyClearCount} wins</span>
-                </div>
-                <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/8">
-                  <div className="h-full rounded-full bg-[linear-gradient(90deg,#60a5fa,#c084fc)]" style={{ width: `${Math.min(100, (dailyClearCount % 7) * (100 / 7))}%` }} />
-                </div>
-              </div>
-            </div>
-
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_20rem]">
-              <div className={`glass-card quest-card-frame rounded-[2rem] p-5 sm:p-6 ${activePlay ? "opacity-95" : "opacity-100"}`}>
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Achievements</div>
-                    <h3 className="mt-1 text-lg font-semibold text-white">Achievements</h3>
-                    <p className="mt-1 text-sm text-slate-300">Milestones worth checking after the board work is done.</p>
-                  </div>
-                  <button type="button" className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-200">View all</button>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="mt-5 grid grid-cols-2 gap-3 text-center">
                   {[
-                    ["🏅", "First Clear"],
-                    ["⚡", "Speed Runner"],
-                    ["🌙", "Daily Keeper"],
-                    ["🛡", "Veteran Hunter"],
-                  ].map(([icon, label]) => (
-                    <div key={label} className="quest-card-glow quest-card-frame rounded-2xl border border-white/10 bg-white/4 px-4 py-4 text-center">
-                      <div className="quest-badge mx-auto grid size-16 place-items-center border border-white/10 bg-white/6 text-2xl">{icon}</div>
-                      <div className="mt-3 text-sm font-semibold text-white">{label}</div>
+                    [String(dailyClearCount), "Daily clears"],
+                    [String(finishedHistoryCount), "Completed runs"],
+                    [String(progress.history.length), "Attempts saved"],
+                    [String(historicalAssistCount), "Assists recorded"],
+                  ].map(([value, label]) => (
+                    <div key={label} className="rounded-2xl border border-white/10 bg-white/4 px-3 py-3">
+                      <div className="text-xl font-semibold text-white">{value}</div>
+                      <div className="mt-1 text-[10px] uppercase tracking-[0.18em] text-slate-500">{label}</div>
                     </div>
                   ))}
                 </div>
               </div>
+            </div>
 
-              <div className={`glass-card quest-card-frame rounded-[2rem] p-5 sm:p-6 bg-[linear-gradient(135deg,rgba(91,33,182,0.22),rgba(15,23,42,0.2))] ${activePlay ? "opacity-85" : "opacity-100"}`}>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">After the clear</div>
-                    <h3 className="mt-1 text-lg font-semibold text-white">Reward Chest</h3>
-                    <p className="mt-1 text-sm text-slate-300">Your streak perks wait here once the current puzzle is settled.</p>
-                  </div>
-                  <div className="relative text-5xl">
-                    🪙
-                    <span className="absolute -bottom-1 -right-2 text-2xl opacity-70">✨</span>
-                  </div>
-                </div>
-                <div className="mt-5 flex items-center gap-2">
-                  {[0, 1, 2, 3, 4].map((index) => (
-                    <div key={index} className={`h-2 flex-1 rounded-full ${index < Math.max(1, Math.min(5, progress.streak || 1)) ? "bg-fuchsia-300" : "bg-white/10"}`} />
-                  ))}
-                </div>
-                <div className="mt-4 flex items-center justify-between gap-2 text-xs text-slate-300">
-                  <span className="rounded-full border border-white/10 px-3 py-1">Daily reward</span>
-                  <span className="rounded-full border border-white/10 px-3 py-1">Chest tier {Math.max(1, Math.min(5, progress.streak || 1))}</span>
-                </div>
+            <div className={`glass-card quest-card-frame rounded-[2rem] p-5 sm:p-6 ${activePlay ? "opacity-95" : "opacity-100"}`}>
+              <div className="mb-4">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Daily activity</div>
+                <h3 className="mt-1 text-lg font-semibold text-white">Last seven UTC days</h3>
+                <p className="mt-1 text-sm text-slate-300">Completed and in-progress markers come only from canonical daily attempts saved in this browser.</p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-4 xl:grid-cols-7">
+                {archive.slice(0, 7).map((entry) => (
+                  <button key={entry.day} type="button" disabled={!entry.summary} onClick={() => entry.summary && replaySavedRun(entry.summary)} className="rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-left text-sm transition enabled:hover:border-white/20 disabled:cursor-default">
+                    <div className="text-xs font-medium text-white">{entry.day === today ? "Today" : entry.day.slice(5)}</div>
+                    <div className="mt-2 text-[11px] text-slate-400">{entry.summary?.finished ? "Cleared" : entry.summary ? `${entry.summary.solvedCount}/${entry.summary.totalWords} solved` : "No attempt"}</div>
+                    {entry.summary ? <div className="mt-2 text-[10px] uppercase tracking-[0.16em] text-fuchsia-200">Replay</div> : null}
+                  </button>
+                ))}
               </div>
             </div>
           </section>
@@ -2191,8 +2180,8 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-2">
                     <div className="text-lg">💡</div>
-                    <div className="mt-1">{Math.max(0, state.run.words.length * 3 - hintsUsed)}</div>
-                    <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Hints left</div>
+                    <div className="mt-1">{assistsUsed}</div>
+                    <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Assists</div>
                   </div>
                 </div>
               </div>
@@ -2260,15 +2249,40 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                     <div className="mt-2 text-xl font-semibold text-white">{finishedHistoryCount}</div>
                   </div>
                 </div>
+                <div className="mt-6">
+                  <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Local history</div>
+                  <p className="mt-2 text-xs leading-5 text-slate-400">History cards always start a fresh replay. Only the current saved attempt resumes when you return to the app.</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {(["all", "daily", "custom"] as const).map((mode) => (
+                      <button key={mode} type="button" aria-pressed={historyModeFilter === mode} onClick={() => setHistoryModeFilter(mode)} className={`rounded-full border px-3 py-1.5 text-xs capitalize ${historyModeFilter === mode ? "border-fuchsia-400/30 bg-fuchsia-500/10 text-fuchsia-100" : "border-white/10 text-slate-300"}`}>
+                        {mode}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {(["all", "finished", "active"] as const).map((status) => (
+                      <button key={status} type="button" aria-pressed={historyStatusFilter === status} onClick={() => setHistoryStatusFilter(status)} className={`rounded-full border px-3 py-1.5 text-xs capitalize ${historyStatusFilter === status ? "border-sky-400/30 bg-sky-500/10 text-sky-100" : "border-white/10 text-slate-300"}`}>
+                        {status === "active" ? "In progress" : status}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <div className="mt-4 space-y-2">
-                  {filteredHistory.slice(0, 2).map((entry) => (
+                  {filteredHistory.slice(0, 4).map((entry) => (
                     <button key={entry.attemptId} data-testid="recent-run-card" type="button" onClick={() => replaySavedRun(entry)} className="w-full rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-left text-sm text-slate-200 transition hover:border-white/20">
                       <div className="flex items-center justify-between gap-3">
                         <span className="font-medium text-white">{entry.title}</span>
-                        <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] ${entry.finished ? "bg-emerald-500/12 text-emerald-200" : "bg-white/6 text-slate-300"}`}>{entry.finished ? "replay" : "resume"}</span>
+                        <span className="rounded-full bg-white/6 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-300">Replay</span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-400">
+                        <span>{entry.mode}{entry.canonicalDaily ? " · canonical" : ""}</span>
+                        <span>{entry.solvedCount}/{entry.totalWords} solved</span>
+                        <span>{formatElapsed(entry.elapsedMs)}</span>
+                        <span>{entry.assists.total} assists</span>
                       </div>
                     </button>
                   ))}
+                  {filteredHistory.length === 0 ? <div className="rounded-2xl border border-dashed border-white/10 px-3 py-4 text-center text-xs text-slate-400">No saved runs match these filters.</div> : null}
                 </div>
               </div>
             </div>

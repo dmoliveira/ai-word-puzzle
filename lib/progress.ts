@@ -1,5 +1,6 @@
-import type { PersistedRunState, ProgressSnapshot, PuzzleOptions, RunSummary } from "@/lib/game-types";
-import { normalizePuzzleOptions } from "@/lib/puzzle-options";
+import type { AssistSummary, PersistedRunState, ProgressSnapshot, PuzzleOptions, RunSummary } from "@/lib/game-types";
+import { isCanonicalDailyOptions, normalizePuzzleOptions } from "@/lib/puzzle-options";
+import { summarizeAssists } from "@/lib/run-state";
 
 export const legacyProgressStorageKey = "astra-lexa-progress";
 
@@ -20,6 +21,34 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function isIsoTimestamp(value: unknown): value is string {
   return typeof value === "string" && !Number.isNaN(Date.parse(value));
+}
+
+function createEmptyAssistSummary(): AssistSummary {
+  return {
+    total: 0,
+    hintSteps: 0,
+    revealedLetters: 0,
+    anagrams: 0,
+    revealedWords: 0,
+    puzzleRevealed: false,
+  };
+}
+
+function decodeAssistSummary(value: unknown): AssistSummary {
+  if (!isObject(value)) {
+    return createEmptyAssistSummary();
+  }
+
+  const readCount = (key: string) => typeof value[key] === "number" && Number.isInteger(value[key]) && (value[key] as number) >= 0
+    ? value[key] as number
+    : 0;
+  const hintSteps = readCount("hintSteps");
+  const revealedLetters = readCount("revealedLetters");
+  const anagrams = readCount("anagrams");
+  const revealedWords = readCount("revealedWords");
+  const puzzleRevealed = value.puzzleRevealed === true;
+  const total = hintSteps + revealedLetters + anagrams + revealedWords + (puzzleRevealed ? 1 : 0);
+  return { total, hintSteps, revealedLetters, anagrams, revealedWords, puzzleRevealed };
 }
 
 function decodeRunSummary(value: unknown): RunSummary | null {
@@ -51,6 +80,14 @@ function decodeRunSummary(value: unknown): RunSummary | null {
   const finished = value.finished === true && solvedCount === totalWords;
   const attemptId = typeof value.attemptId === "string" && value.attemptId ? value.attemptId : `legacy-${runId}-${createdAt}`;
   const puzzleId = typeof value.puzzleId === "string" && value.puzzleId ? value.puzzleId : runId;
+  const dailySeed = seed.replace(/^daily:/, "");
+  const canonicalDaily = options.mode === "daily"
+    && isCanonicalDailyOptions(options, seed)
+    && createdAt.slice(0, 10) === dailySeed
+    && (!finished || completedAt?.slice(0, 10) === dailySeed);
+  const elapsedMs = typeof value.elapsedMs === "number" && Number.isFinite(value.elapsedMs) && value.elapsedMs >= 0
+    ? Math.floor(value.elapsedMs)
+    : 0;
 
   return {
     attemptId,
@@ -65,6 +102,9 @@ function decodeRunSummary(value: unknown): RunSummary | null {
     solvedCount,
     totalWords,
     finished,
+    canonicalDaily,
+    elapsedMs,
+    assists: decodeAssistSummary(value.assists),
     createdAt,
     completedAt: finished ? completedAt : null,
   };
@@ -106,6 +146,10 @@ export function readLegacyProgress(storage: Pick<Storage, "getItem">) {
 
 function buildRunSummary(state: PersistedRunState, existing?: RunSummary): RunSummary {
   const finished = state.completedAt !== null;
+  const dailySeed = state.run.seed.replace(/^daily:/, "");
+  const canonicalDaily = isCanonicalDailyOptions(state.run.options, state.run.seed)
+    && state.startedAt.slice(0, 10) === dailySeed
+    && (!finished || state.completedAt?.slice(0, 10) === dailySeed);
 
   return {
     attemptId: state.attemptId,
@@ -120,16 +164,63 @@ function buildRunSummary(state: PersistedRunState, existing?: RunSummary): RunSu
     solvedCount: state.solvedIds.length,
     totalWords: state.run.words.length,
     finished,
+    canonicalDaily,
+    elapsedMs: state.elapsedMs,
+    assists: summarizeAssists(state),
     createdAt: state.startedAt,
     completedAt: state.completedAt ?? existing?.completedAt ?? null,
   };
 }
 
-function getDayKey(timestamp: string) {
-  return new Date(timestamp).toISOString().slice(0, 10);
+function getDayDistance(left: string, right: string) {
+  return (new Date(`${left}T00:00:00Z`).getTime() - new Date(`${right}T00:00:00Z`).getTime()) / 86400000;
 }
 
-export function recordRunProgress(snapshot: ProgressSnapshot, state: PersistedRunState) {
+function calculateStreaks(history: RunSummary[], nowMs: number) {
+  const summariesByDay = new Map<string, RunSummary>();
+  for (const summary of history) {
+    if (!summary.finished || !summary.canonicalDaily || !summary.completedAt) {
+      continue;
+    }
+
+    const day = summary.seed.replace(/^daily:/, "");
+    const current = summariesByDay.get(day);
+    if (!current || summary.completedAt > (current.completedAt ?? "")) {
+      summariesByDay.set(day, summary);
+    }
+  }
+
+  const days = [...summariesByDay.keys()].sort();
+  let bestStreak = 0;
+  let sequence = 0;
+  for (let index = 0; index < days.length; index += 1) {
+    sequence = index > 0 && getDayDistance(days[index], days[index - 1]) === 1 ? sequence + 1 : 1;
+    bestStreak = Math.max(bestStreak, sequence);
+  }
+
+  const latestDay = days.at(-1) ?? null;
+  const today = new Date(nowMs).toISOString().slice(0, 10);
+  let streak = 0;
+  if (latestDay && getDayDistance(today, latestDay) >= 0 && getDayDistance(today, latestDay) <= 1) {
+    streak = 1;
+    for (let index = days.length - 1; index > 0; index -= 1) {
+      if (getDayDistance(days[index], days[index - 1]) !== 1) {
+        break;
+      }
+      streak += 1;
+    }
+  }
+
+  const latestSummary = latestDay ? summariesByDay.get(latestDay) ?? null : null;
+  return {
+    streak,
+    bestStreak,
+    lastDailySeed: latestDay,
+    lastCompletedAt: latestSummary?.completedAt ?? null,
+  };
+}
+
+export function recordRunProgress(snapshot: ProgressSnapshot, state: PersistedRunState, nowMs = Date.now()) {
   const existing = snapshot.history.find((entry) => entry.attemptId === state.attemptId);
   const summary = buildRunSummary(state, existing);
   const history = [summary, ...snapshot.history.filter((entry) => entry.attemptId !== summary.attemptId)].slice(0, 30);
@@ -138,29 +229,12 @@ export function recordRunProgress(snapshot: ProgressSnapshot, state: PersistedRu
     schemaVersion: 2,
     history,
   };
-
-  if (!summary.finished || summary.mode !== "daily" || !summary.completedAt) {
-    return nextSnapshot;
-  }
-
-  const dailySeed = summary.seed.replace(/^daily:/, "");
-  if (snapshot.lastDailySeed === dailySeed) {
-    return nextSnapshot;
-  }
-
-  const previousDay = snapshot.lastCompletedAt ? getDayKey(snapshot.lastCompletedAt) : null;
-  const currentDay = getDayKey(summary.completedAt);
-  const dayDistance = previousDay
-    ? (new Date(`${currentDay}T00:00:00Z`).getTime() - new Date(`${previousDay}T00:00:00Z`).getTime()) / 86400000
-    : null;
-  const streak = dayDistance === 1 ? snapshot.streak + 1 : 1;
+  const streaks = calculateStreaks(history, nowMs);
 
   return {
     ...nextSnapshot,
-    streak,
-    bestStreak: Math.max(snapshot.bestStreak, streak),
-    lastDailySeed: dailySeed,
-    lastCompletedAt: summary.completedAt,
+    ...streaks,
+    bestStreak: Math.max(snapshot.bestStreak, streaks.bestStreak),
   };
 }
 
@@ -169,7 +243,7 @@ export function buildDailyArchive(history: RunSummary[], days: number, nowMs = D
   const lookup = new Map<string, RunSummary>();
 
   for (const entry of history) {
-    if (entry.mode !== "daily") {
+    if (entry.mode !== "daily" || !entry.canonicalDaily) {
       continue;
     }
 

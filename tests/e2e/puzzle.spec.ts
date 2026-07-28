@@ -377,8 +377,12 @@ test("starting another run records local history", async ({ page }) => {
   await openPuzzle(page);
   await page.getByRole("button", { name: "Fresh run", exact: true }).click();
 
-  await expect(page.getByTestId("recent-run-card").first()).toBeVisible();
-  await expect(page.getByTestId("recent-run-card").first()).toContainText(/resume/i);
+  const historyCard = page.getByTestId("recent-run-card").first();
+  await expect(historyCard).toBeVisible();
+  await expect(historyCard).toContainText(/replay/i);
+  const beforeReplay = await readStoredAttempt(page);
+  await historyCard.click();
+  await expect.poll(async () => (await readStoredAttempt(page)).attemptId).not.toBe(beforeReplay.attemptId);
 });
 
 test("learning mode exposes vocabulary support after deliberate review", async ({ page }) => {

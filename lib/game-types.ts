@@ -186,6 +186,15 @@ export type PersistedRunState = {
   lastTickAt: number | null;
 };
 
+export type AssistSummary = {
+  total: number;
+  hintSteps: number;
+  revealedLetters: number;
+  anagrams: number;
+  revealedWords: number;
+  puzzleRevealed: boolean;
+};
+
 export type RunSummary = {
   attemptId: string;
   puzzleId: string;
@@ -199,6 +208,9 @@ export type RunSummary = {
   solvedCount: number;
   totalWords: number;
   finished: boolean;
+  canonicalDaily: boolean;
+  elapsedMs: number;
+  assists: AssistSummary;
   createdAt: string;
   completedAt: string | null;
 };

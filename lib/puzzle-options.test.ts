@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getCanonicalDailyOptions, normalizePuzzleOptions, parseSharedOptions } from "@/lib/puzzle-options";
+import { getCanonicalDailyOptions, isCanonicalDailyOptions, normalizePuzzleOptions, parseSharedOptions } from "@/lib/puzzle-options";
 
 const now = Date.parse("2026-04-24T12:00:00.000Z");
 
@@ -11,6 +11,16 @@ test("canonical daily options use a stable UTC day and fixed content preset", ()
   assert.equal(options.seed, "2026-04-24");
   assert.deepEqual(options.topics, ["myth", "cosmos", "greek"]);
   assert.equal(options.puzzleSize, 7);
+});
+
+test("canonical daily identity rejects puzzle changes but allows presentation preferences", () => {
+  const options = getCanonicalDailyOptions(now);
+
+  assert.equal(isCanonicalDailyOptions(options, options.seed), true);
+  assert.equal(isCanonicalDailyOptions({ ...options, puzzleSize: 6 }, options.seed), false);
+  assert.equal(isCanonicalDailyOptions({ ...options, topics: [...options.topics].reverse() }, options.seed), false);
+  assert.equal(isCanonicalDailyOptions({ ...options, style: "classic", timerEnabled: false }, options.seed), true);
+  assert.equal(isCanonicalDailyOptions(options, "2026-04-25"), false);
 });
 
 test("shared options parse supported values without unchecked casts", () => {

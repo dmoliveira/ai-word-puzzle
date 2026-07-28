@@ -103,6 +103,24 @@ export function getCanonicalDailyOptions(nowMs = Date.now()): PuzzleOptions {
   };
 }
 
+export function isCanonicalDailyOptions(options: PuzzleOptions, seed: string) {
+  const day = seed.replace(/^daily:/, "");
+  if (!isUtcDay(day)) {
+    return false;
+  }
+
+  const expected = getCanonicalDailyOptions(Date.parse(`${day}T12:00:00.000Z`));
+  return options.mode === "daily"
+    && options.seed.replace(/^daily:/, "") === day
+    && options.challenge === expected.challenge
+    && options.puzzleFamily === expected.puzzleFamily
+    && options.contentPackId === expected.contentPackId
+    && options.puzzleSize === expected.puzzleSize
+    && options.boardView === expected.boardView
+    && options.topics.length === expected.topics.length
+    && options.topics.every((topic, index) => topic === expected.topics[index]);
+}
+
 export function normalizePuzzleOptions(input: Partial<PuzzleOptions> = {}, nowMs = Date.now()): PuzzleOptions {
   const defaults = getCanonicalDailyOptions(nowMs);
   const puzzleFamily = families.includes(input.puzzleFamily as PuzzleFamily) ? input.puzzleFamily! : defaults.puzzleFamily;

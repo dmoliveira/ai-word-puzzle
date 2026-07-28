@@ -1,4 +1,4 @@
-import type { AssistLedger, PersistedRunState, PuzzleRun } from "@/lib/game-types";
+import type { AssistLedger, AssistSummary, PersistedRunState, PuzzleRun } from "@/lib/game-types";
 
 export const runStateSchemaVersion = 2 as const;
 
@@ -217,10 +217,22 @@ export function recordPuzzleReveal(state: PersistedRunState) {
   };
 }
 
+export function summarizeAssists(state: PersistedRunState): AssistSummary {
+  const hintSteps = Object.values(state.assists.hintStepsByWord).reduce((total, level) => total + level, 0);
+  const revealedLetters = state.assists.revealedCellKeys.length;
+  const anagrams = state.assists.anagramWordIds.length;
+  const revealedWords = state.assists.revealedWordIds.length;
+  const puzzleRevealed = state.assists.puzzleRevealed;
+  return {
+    total: hintSteps + revealedLetters + anagrams + revealedWords + (puzzleRevealed ? 1 : 0),
+    hintSteps,
+    revealedLetters,
+    anagrams,
+    revealedWords,
+    puzzleRevealed,
+  };
+}
+
 export function getAssistCount(state: PersistedRunState) {
-  return Object.values(state.assists.hintStepsByWord).reduce((total, level) => total + level, 0)
-    + state.assists.revealedCellKeys.length
-    + state.assists.anagramWordIds.length
-    + state.assists.revealedWordIds.length
-    + (state.assists.puzzleRevealed ? 1 : 0);
+  return summarizeAssists(state).total;
 }
