@@ -139,6 +139,22 @@ Each task is an independently validated commit. Review checkpoints occur after `
 
 ## Validation gates
 
+### Frozen v3 and delivery baseline
+
+`lib/fixtures/generator-v3-goldens.json` freezes six representative v3 cases: two canonical calendar dailies, classic and themed crosswords, and classic and themed Quest runs. Each fixture records the exact puzzle ID, ordered word IDs, placements, and a SHA-256 digest of the complete board. Explicitly versioned and unversioned legacy share parsing must reproduce those fixtures.
+
+The root static export built at `fd1d8dc` with Next 16.2.12 established this pre-change delivery baseline:
+
+| Measure | Baseline |
+| --- | ---: |
+| `out/index.html` | 95,195 bytes |
+| Initial scripts | 7 files |
+| Initial JavaScript | 790,952 bytes raw / 231,348 bytes gzip |
+| Largest initial script | 71,016 bytes gzip |
+| All JavaScript | 10 files / 231,629 bytes gzip |
+
+Final enforced targets remain: answer-free static HTML at or below 45 KiB, initial JavaScript at or below 220 KiB gzip, no individual initial or lazy chunk above 250 KiB gzip, and no Quest lexicon request while opening a crossword daily.
+
 Per commit:
 
 - `git diff --check`

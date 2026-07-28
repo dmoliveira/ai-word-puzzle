@@ -1,0 +1,537 @@
+[
+  {
+    "name": "daily-new-year-2026",
+    "input": {
+      "mode": "daily",
+      "seed": "2026-01-01",
+      "topics": [
+        "myth",
+        "cosmos",
+        "greek"
+      ],
+      "challenge": "quest",
+      "puzzleFamily": "classic",
+      "contentPackId": "auto",
+      "puzzleSize": 7,
+      "boardView": "crossword",
+      "style": "alpha",
+      "timerEnabled": true,
+      "learningMode": false
+    },
+    "expected": {
+      "generatorVersion": 3,
+      "puzzleId": "968589984",
+      "seed": "daily:2026-01-01",
+      "wordIds": [
+        "myth-quest-14",
+        "myth-breeze-15",
+        "myth-breeze-3",
+        "myth-breeze-12",
+        "greek-breeze-4",
+        "greek-breeze-11",
+        "greek-breeze-12"
+      ],
+      "placements": [
+        {
+          "wordId": "myth-breeze-3",
+          "row": 1,
+          "col": 2,
+          "direction": "across",
+          "clueNumber": 1
+        },
+        {
+          "wordId": "greek-breeze-12",
+          "row": 1,
+          "col": 5,
+          "direction": "down",
+          "clueNumber": 2
+        },
+        {
+          "wordId": "myth-breeze-15",
+          "row": 3,
+          "col": 4,
+          "direction": "across",
+          "clueNumber": 3
+        },
+        {
+          "wordId": "greek-breeze-4",
+          "row": 3,
+          "col": 4,
+          "direction": "down",
+          "clueNumber": 3
+        },
+        {
+          "wordId": "myth-breeze-12",
+          "row": 5,
+          "col": 2,
+          "direction": "across",
+          "clueNumber": 4
+        },
+        {
+          "wordId": "greek-breeze-11",
+          "row": 5,
+          "col": 2,
+          "direction": "down",
+          "clueNumber": 4
+        },
+        {
+          "wordId": "myth-quest-14",
+          "row": 7,
+          "col": 1,
+          "direction": "across",
+          "clueNumber": 5
+        }
+      ],
+      "boardDigest": "21a44e408ecbb970436e63b1582585ff1be37e49640495fca080845188d3b989"
+    }
+  },
+  {
+    "name": "daily-leap-day-2028",
+    "input": {
+      "mode": "daily",
+      "seed": "2028-02-29",
+      "topics": [
+        "myth",
+        "cosmos",
+        "greek"
+      ],
+      "challenge": "quest",
+      "puzzleFamily": "classic",
+      "contentPackId": "auto",
+      "puzzleSize": 7,
+      "boardView": "crossword",
+      "style": "alpha",
+      "timerEnabled": true,
+      "learningMode": false
+    },
+    "expected": {
+      "generatorVersion": 3,
+      "puzzleId": "1279477989",
+      "seed": "daily:2028-02-29",
+      "wordIds": [
+        "cosmos-quest-13",
+        "cosmos-breeze-5",
+        "myth-breeze-18",
+        "greek-breeze-14",
+        "greek-breeze-10",
+        "greek-breeze-11",
+        "greek-breeze-15"
+      ],
+      "placements": [
+        {
+          "wordId": "greek-breeze-11",
+          "row": 1,
+          "col": 4,
+          "direction": "down",
+          "clueNumber": 1
+        },
+        {
+          "wordId": "greek-breeze-15",
+          "row": 2,
+          "col": 1,
+          "direction": "down",
+          "clueNumber": 2
+        },
+        {
+          "wordId": "cosmos-breeze-5",
+          "row": 3,
+          "col": 1,
+          "direction": "across",
+          "clueNumber": 3
+        },
+        {
+          "wordId": "greek-breeze-10",
+          "row": 4,
+          "col": 7,
+          "direction": "down",
+          "clueNumber": 4
+        },
+        {
+          "wordId": "cosmos-quest-13",
+          "row": 5,
+          "col": 1,
+          "direction": "across",
+          "clueNumber": 5
+        },
+        {
+          "wordId": "greek-breeze-14",
+          "row": 5,
+          "col": 4,
+          "direction": "down",
+          "clueNumber": 6
+        },
+        {
+          "wordId": "myth-breeze-18",
+          "row": 7,
+          "col": 1,
+          "direction": "across",
+          "clueNumber": 7
+        }
+      ],
+      "boardDigest": "b04e710859e417cd1f4c35f06f59a610b3fb935e693487b7801f8f0fdd5dea5b"
+    }
+  },
+  {
+    "name": "custom-crossword-classic",
+    "input": {
+      "mode": "custom",
+      "seed": "v3-golden-crossword",
+      "topics": [
+        "myth",
+        "cosmos",
+        "greek"
+      ],
+      "challenge": "mythic",
+      "puzzleFamily": "classic",
+      "contentPackId": "auto",
+      "puzzleSize": 8,
+      "boardView": "crossword",
+      "style": "classic",
+      "timerEnabled": false,
+      "learningMode": true
+    },
+    "expected": {
+      "generatorVersion": 3,
+      "puzzleId": "2602101901",
+      "seed": "v3-golden-crossword",
+      "wordIds": [
+        "myth-quest-2",
+        "cosmos-quest-20",
+        "myth-breeze-12",
+        "myth-breeze-15",
+        "greek-breeze-7",
+        "greek-breeze-12",
+        "greek-breeze-10",
+        "greek-breeze-2"
+      ],
+      "placements": [
+        {
+          "wordId": "myth-breeze-12",
+          "row": 3,
+          "col": 1,
+          "direction": "across",
+          "clueNumber": 1
+        },
+        {
+          "wordId": "greek-breeze-12",
+          "row": 3,
+          "col": 1,
+          "direction": "down",
+          "clueNumber": 1
+        },
+        {
+          "wordId": "greek-breeze-2",
+          "row": 3,
+          "col": 3,
+          "direction": "down",
+          "clueNumber": 2
+        },
+        {
+          "wordId": "myth-breeze-15",
+          "row": 3,
+          "col": 5,
+          "direction": "down",
+          "clueNumber": 3
+        },
+        {
+          "wordId": "greek-breeze-7",
+          "row": 3,
+          "col": 10,
+          "direction": "down",
+          "clueNumber": 4
+        },
+        {
+          "wordId": "greek-breeze-10",
+          "row": 4,
+          "col": 9,
+          "direction": "across",
+          "clueNumber": 5
+        },
+        {
+          "wordId": "myth-quest-2",
+          "row": 5,
+          "col": 1,
+          "direction": "across",
+          "clueNumber": 6
+        },
+        {
+          "wordId": "cosmos-quest-20",
+          "row": 7,
+          "col": 2,
+          "direction": "across",
+          "clueNumber": 7
+        }
+      ],
+      "boardDigest": "b03fdbf5835565f747cd802660dbaec74c9495e5ace3449b857613196e2faa39"
+    }
+  },
+  {
+    "name": "custom-crossword-themed",
+    "input": {
+      "mode": "custom",
+      "seed": "v3-golden-themed",
+      "topics": [
+        "myth"
+      ],
+      "challenge": "breeze",
+      "puzzleFamily": "themed",
+      "contentPackId": "myth-beings",
+      "puzzleSize": 6,
+      "boardView": "crossword",
+      "style": "nebula",
+      "timerEnabled": true,
+      "learningMode": false
+    },
+    "expected": {
+      "generatorVersion": 3,
+      "puzzleId": "2480974484",
+      "seed": "v3-golden-themed",
+      "wordIds": [
+        "myth-breeze-3",
+        "myth-breeze-2",
+        "myth-breeze-15",
+        "myth-breeze-1",
+        "myth-breeze-17",
+        "myth-quest-5"
+      ],
+      "placements": [
+        {
+          "wordId": "myth-quest-5",
+          "row": 1,
+          "col": 7,
+          "direction": "down",
+          "clueNumber": 1
+        },
+        {
+          "wordId": "myth-breeze-15",
+          "row": 5,
+          "col": 4,
+          "direction": "down",
+          "clueNumber": 2
+        },
+        {
+          "wordId": "myth-breeze-1",
+          "row": 6,
+          "col": 3,
+          "direction": "across",
+          "clueNumber": 3
+        },
+        {
+          "wordId": "myth-breeze-3",
+          "row": 9,
+          "col": 4,
+          "direction": "across",
+          "clueNumber": 4
+        },
+        {
+          "wordId": "myth-breeze-2",
+          "row": 9,
+          "col": 8,
+          "direction": "down",
+          "clueNumber": 5
+        },
+        {
+          "wordId": "myth-breeze-17",
+          "row": 11,
+          "col": 5,
+          "direction": "across",
+          "clueNumber": 6
+        }
+      ],
+      "boardDigest": "67ad17fd2e76f5161f165a71f6938701ef9404995bf1c1b8f22181612284edf0"
+    }
+  },
+  {
+    "name": "custom-quest-classic",
+    "input": {
+      "mode": "custom",
+      "seed": "v3-golden-quest",
+      "topics": [
+        "ocean",
+        "weather"
+      ],
+      "challenge": "quest",
+      "puzzleFamily": "classic",
+      "contentPackId": "auto",
+      "puzzleSize": 7,
+      "boardView": "quest",
+      "style": "sunforge",
+      "timerEnabled": true,
+      "learningMode": true
+    },
+    "expected": {
+      "generatorVersion": 3,
+      "puzzleId": "3391106363",
+      "seed": "v3-golden-quest",
+      "wordIds": [
+        "weather-quest-0",
+        "weather-quest-1",
+        "weather-breeze-15",
+        "weather-breeze-13",
+        "weather-quest-7",
+        "weather-breeze-4",
+        "weather-breeze-14"
+      ],
+      "placements": [
+        {
+          "wordId": "weather-quest-0",
+          "row": 5,
+          "col": 6,
+          "direction": "across",
+          "clueNumber": 1
+        },
+        {
+          "wordId": "weather-quest-1",
+          "row": 4,
+          "col": 1,
+          "direction": "across",
+          "clueNumber": 2
+        },
+        {
+          "wordId": "weather-breeze-15",
+          "row": 7,
+          "col": 7,
+          "direction": "across",
+          "clueNumber": 3
+        },
+        {
+          "wordId": "weather-breeze-13",
+          "row": 6,
+          "col": 0,
+          "direction": "across",
+          "clueNumber": 4
+        },
+        {
+          "wordId": "weather-quest-7",
+          "row": 1,
+          "col": 4,
+          "direction": "across",
+          "clueNumber": 5
+        },
+        {
+          "wordId": "weather-breeze-4",
+          "row": 0,
+          "col": 4,
+          "direction": "across",
+          "clueNumber": 6
+        },
+        {
+          "wordId": "weather-breeze-14",
+          "row": 3,
+          "col": 6,
+          "direction": "across",
+          "clueNumber": 7
+        }
+      ],
+      "boardDigest": "0964045db0cfb50c94caacbea17cd4b637f700b9833934130ffc264994749299"
+    }
+  },
+  {
+    "name": "custom-quest-themed",
+    "input": {
+      "mode": "custom",
+      "seed": "v3-golden-quest-themed",
+      "topics": [
+        "invent"
+      ],
+      "challenge": "mythic",
+      "puzzleFamily": "themed",
+      "contentPackId": "invent-workshop",
+      "puzzleSize": 10,
+      "boardView": "quest",
+      "style": "arcade",
+      "timerEnabled": false,
+      "learningMode": false
+    },
+    "expected": {
+      "generatorVersion": 3,
+      "puzzleId": "297160102",
+      "seed": "v3-golden-quest-themed",
+      "wordIds": [
+        "invent-mythic-3",
+        "invent-mythic-0",
+        "invent-quest-0",
+        "invent-quest-9",
+        "invent-quest-6",
+        "invent-quest-4",
+        "invent-quest-1",
+        "invent-quest-2",
+        "invent-quest-7",
+        "invent-quest-5"
+      ],
+      "placements": [
+        {
+          "wordId": "invent-mythic-3",
+          "row": 9,
+          "col": 1,
+          "direction": "across",
+          "clueNumber": 1
+        },
+        {
+          "wordId": "invent-mythic-0",
+          "row": 8,
+          "col": 3,
+          "direction": "across",
+          "clueNumber": 2
+        },
+        {
+          "wordId": "invent-quest-0",
+          "row": 7,
+          "col": 5,
+          "direction": "across",
+          "clueNumber": 3
+        },
+        {
+          "wordId": "invent-quest-9",
+          "row": 6,
+          "col": 4,
+          "direction": "across",
+          "clueNumber": 4
+        },
+        {
+          "wordId": "invent-quest-6",
+          "row": 5,
+          "col": 1,
+          "direction": "across",
+          "clueNumber": 5
+        },
+        {
+          "wordId": "invent-quest-4",
+          "row": 4,
+          "col": 0,
+          "direction": "across",
+          "clueNumber": 6
+        },
+        {
+          "wordId": "invent-quest-1",
+          "row": 3,
+          "col": 1,
+          "direction": "across",
+          "clueNumber": 7
+        },
+        {
+          "wordId": "invent-quest-2",
+          "row": 2,
+          "col": 6,
+          "direction": "across",
+          "clueNumber": 8
+        },
+        {
+          "wordId": "invent-quest-7",
+          "row": 1,
+          "col": 6,
+          "direction": "across",
+          "clueNumber": 9
+        },
+        {
+          "wordId": "invent-quest-5",
+          "row": 0,
+          "col": 6,
+          "direction": "across",
+          "clueNumber": 10
+        }
+      ],
+      "boardDigest": "dd408706abea9dfcbf6d6d1794e2cecf338c44b01f202bfe12d3a611305e19af"
+    }
+  }
+]
