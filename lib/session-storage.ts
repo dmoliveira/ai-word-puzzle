@@ -9,7 +9,8 @@ import type {
   PuzzleWord,
 } from "@/lib/game-types";
 import { decodeProgressSnapshot, legacyProgressStorageKey } from "@/lib/progress";
-import { normalizePuzzleOptions } from "@/lib/puzzle-options";
+import { isCanonicalDailyOptions, normalizePuzzleOptions } from "@/lib/puzzle-options";
+import { hasVerifiedPuzzleProvenance } from "@/lib/puzzle-provenance";
 import {
   finalizeAttempt,
   resumeStoredAttempt,
@@ -24,9 +25,11 @@ export const storageV3PrimaryKey = "astra-lexa:v3";
 export const storageV3PreviousKey = "astra-lexa:v3:previous";
 export const storageV3CommitKey = "astra-lexa:v3:commit";
 export const storageV3PagehidePrefix = "astra-lexa:v3:pagehide:";
+export const storageV3ImportUndoKey = "astra-lexa:v3:import-undo";
 export const maxV3EnvelopeBytes = 512 * 1024;
 export const maxV3AttemptBranchBytes = 384 * 1024;
 export const maxV3ProgressBranchBytes = 128 * 1024;
+export const maxPortableBackupBytes = maxV3EnvelopeBytes + 4 * 1024;
 
 export type StorageReadIssue =
   | "read-denied"
@@ -81,6 +84,39 @@ export type PagehideStageResult =
   | { ok: true; key: string }
   | { ok: false; code: "candidate-invalid" | "candidate-too-large" | "quota-exceeded" | "write-denied" | "readback-mismatch" };
 
+export type PortableBackupPreview = {
+  exportedAt: string;
+  bytes: number;
+  attemptStatus: "none" | "unfinished" | "completed";
+  historyCount: number;
+  creditedDays: number;
+  lateClearDays: number;
+};
+
+export type PortableBackupCandidate = {
+  preview: PortableBackupPreview;
+  envelopeRaw: string;
+};
+
+export type PortableBackupCodecResult =
+  | { ok: true; raw: string; bytes: number; filename: string }
+  | { ok: false; code: "candidate-invalid" | "candidate-too-large" };
+
+export type PortableBackupPreviewResult =
+  | { ok: true; candidate: PortableBackupCandidate }
+  | { ok: false; code: "invalid-backup" | "backup-too-large" | "future-version" };
+
+export type PortableStorageResult =
+  | {
+    ok: true;
+    saveId: string;
+    bytes: number;
+    currentAttempt: PersistedRunState | null;
+    progress: ProgressSnapshot;
+    undoAvailable: boolean;
+  }
+  | Exclude<StorageWriteResult, { ok: true }>;
+
 type StorageEnvelopeV3 = {
   format: "astra-lexa/local-save";
   storageVersion: 3;
@@ -89,12 +125,12 @@ type StorageEnvelopeV3 = {
   branches: {
     attempt: null | {
       branchVersion: 1;
-      stateSchemaVersion: 2;
+      stateSchemaVersion: 3;
       value: PersistedRunState;
     };
     progress: {
       branchVersion: 1;
-      stateSchemaVersion: 2;
+      stateSchemaVersion: 3;
       value: ProgressSnapshot;
     };
   };
@@ -114,6 +150,14 @@ type PagehideSnapshot = {
   baseSaveId: string | null;
   capturedAt: string;
   candidateRaw: string;
+};
+
+type PortableImportUndo = {
+  format: "astra-lexa/import-undo";
+  undoVersion: 1;
+  importedSaveId: string;
+  capturedAt: string;
+  previousEnvelopeRaw: string;
 };
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -312,6 +356,8 @@ function decodeRun(value: unknown, nowMs: number, allowLegacyDefaults: boolean):
   const generatorVersion = typeof value.generatorVersion === "number" && Number.isInteger(value.generatorVersion)
     ? value.generatorVersion
     : 1;
+  const hasProvenance = typeof value.corpusRevision === "string" && value.corpusRevision.length > 0
+    && value.fingerprintVersion === 1 && typeof value.puzzleFingerprint === "string";
   const allowRunDefaults = allowLegacyDefaults || generatorVersion < 3;
   const options = decodeOptions(value.options, nowMs, allowRunDefaults);
   const decodedWords = value.words.map((word) => hydratePuzzleWord(word, allowRunDefaults));
@@ -331,6 +377,9 @@ function decodeRun(value: unknown, nowMs: number, allowLegacyDefaults: boolean):
     id: value.id,
     puzzleId: typeof value.puzzleId === "string" && value.puzzleId ? value.puzzleId : value.id,
     generatorVersion,
+    corpusRevision: hasProvenance ? value.corpusRevision as string : null,
+    fingerprintVersion: hasProvenance ? 1 : null,
+    puzzleFingerprint: hasProvenance ? value.puzzleFingerprint as string : null,
     options,
     board,
     words,
@@ -446,7 +495,10 @@ function decodeAttempt(value: unknown, nowMs: number, allowLegacyDefaults: boole
   return finalizeAttempt(state, nowMs);
 }
 
-const runKeys = ["id", "puzzleId", "generatorVersion", "createdAt", "seed", "options", "title", "blurb", "words", "board"] as const;
+const legacyRunKeys = ["id", "puzzleId", "generatorVersion", "createdAt", "seed", "options", "title", "blurb", "words", "board"] as const;
+const provenanceRunKeys = [
+  "id", "puzzleId", "generatorVersion", "corpusRevision", "fingerprintVersion", "puzzleFingerprint", "createdAt", "seed", "options", "title", "blurb", "words", "board",
+] as const;
 const optionKeys = ["mode", "challenge", "puzzleFamily", "topics", "contentPackId", "puzzleSize", "boardView", "style", "timerEnabled", "learningMode", "seed"] as const;
 const wordKeys = [
   "id", "answer", "normalized", "source", "qualityStatus", "clue", "topicId", "topicLabel", "contentPackIds", "difficulty",
@@ -621,15 +673,21 @@ function inRange(value: number, size: number) {
   return Number.isInteger(value) && value >= 0 && value < size;
 }
 
-function validateStrictRunValue(value: unknown, run: PuzzleRun) {
-  if (!isObject(value) || !hasExactKeys(value, runKeys) || !isObject(value.options) || !hasExactKeys(value.options, optionKeys)
+function validateStrictRunValue(value: unknown, run: PuzzleRun, shape: "legacy" | "provenance") {
+  const expectedKeys = shape === "legacy" ? legacyRunKeys : provenanceRunKeys;
+  if (!isObject(value) || !hasExactKeys(value, expectedKeys) || !isObject(value.options) || !hasExactKeys(value.options, optionKeys)
     || !isObject(value.board) || !hasExactKeys(value.board, boardKeys)
     || !Array.isArray(value.words) || !value.words.every(validateStrictWord)
     || !Array.isArray(value.board.placements) || !value.board.placements.every((entry) => isObject(entry) && hasExactKeys(entry, placementKeys))
     || !Array.isArray(value.board.cells) || !value.board.cells.every((entry) => isObject(entry) && hasExactKeys(entry, cellKeys))) return false;
   if (!isCanonicalIsoTimestamp(run.createdAt) || !validBoundedString(run.seed, 256) || !validBoundedString(run.title) || !validBoundedString(run.blurb)
     || ![1, 2, 3].includes(run.generatorVersion) || run.id !== run.puzzleId || !validateBoardSemantics(run)) return false;
-  return run.generatorVersion !== 3 || run.puzzleId === recomputeV3PuzzleId(run);
+  if (run.generatorVersion === 3 && run.puzzleId !== recomputeV3PuzzleId(run)) return false;
+  if (shape === "legacy") {
+    return run.corpusRevision === null && run.fingerprintVersion === null && run.puzzleFingerprint === null;
+  }
+  const provenanceAbsent = run.corpusRevision === null && run.fingerprintVersion === null && run.puzzleFingerprint === null;
+  return provenanceAbsent || hasVerifiedPuzzleProvenance(run);
 }
 
 function deriveGuesses(run: PuzzleRun, cellEntries: Record<string, string>) {
@@ -655,14 +713,14 @@ function canonicalizeAttempt(state: PersistedRunState, nowMs: number) {
   }, nowMs);
 }
 
-function decodeStrictAttempt(value: unknown, nowMs: number) {
+function decodeStrictAttempt(value: unknown, nowMs: number, runShape: "legacy" | "provenance") {
   if (!isObject(value) || !hasExactKeys(value, ["schemaVersion", "attemptId", "startedAt", "completedAt", "run", "guesses", "cellEntries", "solvedIds", "activeWordId", "assists", "paused", "elapsedMs", "lastTickAt"])
     || value.schemaVersion !== 2 || value.lastTickAt !== null || !isCanonicalIsoTimestamp(value.startedAt)
     || (value.completedAt !== null && !isCanonicalIsoTimestamp(value.completedAt))
     || !Number.isInteger(value.elapsedMs) || (value.elapsedMs as number) < 0
     || typeof value.attemptId !== "string" || value.attemptId.length === 0 || value.attemptId.length > 160) return null;
   const decoded = decodeAttempt(value, nowMs, false);
-  if (!decoded || !validateStrictRunValue(value.run, decoded.run) || !isObject(value.assists)
+  if (!decoded || !validateStrictRunValue(value.run, decoded.run, runShape) || !isObject(value.assists)
     || !hasExactKeys(value.assists, ["hintStepsByWord", "revealedCellKeys", "anagramWordIds", "revealedWordIds", "puzzleRevealed"])) return null;
   const expectedGuesses = deriveGuesses(decoded.run, decoded.cellEntries);
   const expectedSolved = deriveSolvedIds(decoded.run, decoded.cellEntries);
@@ -677,19 +735,56 @@ function decodeStrictAttempt(value: unknown, nowMs: number) {
     || Object.values(assists.hintStepsByWord).some((level) => level < 1 || level > 3)) return null;
   const cells = new Map(decoded.run.board.cells.map((cell) => [`${cell.row}:${cell.col}`, cell.solution]));
   if (assists.revealedCellKeys.some((key) => decoded.cellEntries[key] !== cells.get(key))) return null;
+  if (runShape === "legacy") {
+    const { corpusRevision: _corpusRevision, fingerprintVersion: _fingerprintVersion, puzzleFingerprint: _puzzleFingerprint, ...legacyRun } = decoded.run;
+    return sameData({ ...decoded, run: legacyRun }, value) ? decoded : null;
+  }
   return sameData(decoded, value) ? decoded : null;
 }
 
-function decodeStrictProgress(value: unknown) {
-  if (!isObject(value) || !hasExactKeys(value, ["schemaVersion", "streak", "bestStreak", "lastDailySeed", "lastCompletedAt", "history"])
-    || value.schemaVersion !== 2 || !Array.isArray(value.history) || value.history.length > 30) return null;
+function decodeStrictProgress(value: unknown, schemaVersion: 2 | 3) {
+  const progressKeys = schemaVersion === 2
+    ? ["schemaVersion", "streak", "bestStreak", "lastDailySeed", "lastCompletedAt", "history"] as const
+    : ["schemaVersion", "streak", "bestStreak", "lastDailySeed", "lastCompletedAt", "dailyLedger", "history"] as const;
+  if (!isObject(value) || !hasExactKeys(value, progressKeys)
+    || value.schemaVersion !== schemaVersion || !Array.isArray(value.history) || value.history.length > 30) return null;
   const decoded = decodeProgressSnapshot(value);
-  if (!decoded || !sameData(decoded, value) || new Set(decoded.history.map((entry) => entry.attemptId)).size !== decoded.history.length) return null;
+  if (!decoded || new Set(decoded.history.map((entry) => entry.attemptId)).size !== decoded.history.length) return null;
+  if (schemaVersion === 2) {
+    const legacyHistory = decoded.history.map((entry) => {
+      const {
+        generatorVersion: _generatorVersion,
+        corpusRevision: _corpusRevision,
+        fingerprintVersion: _fingerprintVersion,
+        puzzleFingerprint: _puzzleFingerprint,
+        dailyOutcome: _dailyOutcome,
+        ...legacy
+      } = entry;
+      const day = entry.seed.replace(/^daily:/, "");
+      return {
+        ...legacy,
+        canonicalDaily: isCanonicalDailyOptions(entry.options, entry.seed)
+          && entry.createdAt.slice(0, 10) === day
+          && (!entry.finished || entry.completedAt?.slice(0, 10) === day),
+      };
+    });
+    const legacySnapshot = {
+      schemaVersion: 2,
+      streak: decoded.streak,
+      bestStreak: decoded.bestStreak,
+      lastDailySeed: decoded.lastDailySeed,
+      lastCompletedAt: decoded.lastCompletedAt,
+      history: legacyHistory,
+    };
+    if (!sameData(legacySnapshot, value)) return null;
+  } else if (!sameData(decoded, value)) return null;
   if (decoded.lastCompletedAt !== null && !isCanonicalIsoTimestamp(decoded.lastCompletedAt)) return null;
   if (decoded.lastDailySeed !== null && !/^\d{4}-\d{2}-\d{2}$/.test(decoded.lastDailySeed)) return null;
   for (const entry of decoded.history) {
     if (!isCanonicalIsoTimestamp(entry.createdAt) || (entry.completedAt !== null && !isCanonicalIsoTimestamp(entry.completedAt))
       || entry.attemptId.length > 160 || entry.puzzleId.length > 128 || entry.runId.length > 128
+      || (entry.corpusRevision !== null && entry.corpusRevision.length > 128)
+      || (entry.puzzleFingerprint !== null && !/^p1-[a-f0-9]{64}$/.test(entry.puzzleFingerprint))
       || !Number.isInteger(entry.elapsedMs) || entry.elapsedMs < 0
       || entry.assists.total !== entry.assists.hintSteps + entry.assists.revealedLetters + entry.assists.anagrams + entry.assists.revealedWords + (entry.assists.puzzleRevealed ? 1 : 0)
       || entry.finished !== (entry.solvedCount === entry.totalWords)
@@ -710,26 +805,28 @@ type DecodedEnvelope = {
 
 function decodeAttemptBranch(value: unknown, nowMs: number): DecodedBranch<PersistedRunState> {
   if (value === null) return { status: "null", value: null };
-  if (isObject(value) && ((typeof value.branchVersion === "number" && value.branchVersion > 1) || (typeof value.stateSchemaVersion === "number" && value.stateSchemaVersion > 2))) {
+  if (isObject(value) && ((typeof value.branchVersion === "number" && value.branchVersion > 1) || (typeof value.stateSchemaVersion === "number" && value.stateSchemaVersion > 3))) {
     return { status: "future", value: null };
   }
-  if (!isObject(value) || !hasExactKeys(value, ["branchVersion", "stateSchemaVersion", "value"]) || value.branchVersion !== 1 || value.stateSchemaVersion !== 2) {
+  if (!isObject(value) || !hasExactKeys(value, ["branchVersion", "stateSchemaVersion", "value"]) || value.branchVersion !== 1
+    || (value.stateSchemaVersion !== 2 && value.stateSchemaVersion !== 3)) {
     return { status: "invalid", value: null };
   }
   if (utf8Bytes(JSON.stringify(value.value)) > maxV3AttemptBranchBytes) return { status: "invalid", value: null };
-  const decoded = decodeStrictAttempt(value.value, nowMs);
+  const decoded = decodeStrictAttempt(value.value, nowMs, value.stateSchemaVersion === 2 ? "legacy" : "provenance");
   return decoded ? { status: "valid", value: decoded } : { status: "invalid", value: null };
 }
 
 function decodeProgressBranch(value: unknown): DecodedBranch<ProgressSnapshot> {
-  if (isObject(value) && ((typeof value.branchVersion === "number" && value.branchVersion > 1) || (typeof value.stateSchemaVersion === "number" && value.stateSchemaVersion > 2))) {
+  if (isObject(value) && ((typeof value.branchVersion === "number" && value.branchVersion > 1) || (typeof value.stateSchemaVersion === "number" && value.stateSchemaVersion > 3))) {
     return { status: "future", value: null };
   }
-  if (!isObject(value) || !hasExactKeys(value, ["branchVersion", "stateSchemaVersion", "value"]) || value.branchVersion !== 1 || value.stateSchemaVersion !== 2) {
+  if (!isObject(value) || !hasExactKeys(value, ["branchVersion", "stateSchemaVersion", "value"]) || value.branchVersion !== 1
+    || (value.stateSchemaVersion !== 2 && value.stateSchemaVersion !== 3)) {
     return { status: "invalid", value: null };
   }
   if (utf8Bytes(JSON.stringify(value.value)) > maxV3ProgressBranchBytes) return { status: "invalid", value: null };
-  const decoded = decodeStrictProgress(value.value);
+  const decoded = decodeStrictProgress(value.value, value.stateSchemaVersion);
   return decoded ? { status: "valid", value: decoded } : { status: "invalid", value: null };
 }
 
@@ -758,6 +855,127 @@ function decodeV3Envelope(raw: string | null, nowMs: number): DecodedEnvelope | 
     };
   } catch {
     return null;
+  }
+}
+
+export function createPortableBackup(
+  state: PersistedRunState | null,
+  progress: ProgressSnapshot,
+  nowMs = Date.now(),
+): PortableBackupCodecResult {
+  try {
+    const envelopeRaw = serializeStoredGame(state, progress, nowMs, createSaveId(nowMs, `save-backup-${nowMs.toString(36)}-0000`));
+    const envelope = decodeV3Envelope(envelopeRaw, nowMs);
+    if (!envelope?.full) return { ok: false, code: "candidate-invalid" };
+    const raw = JSON.stringify({
+      format: "astra-lexa/portable-backup",
+      backupVersion: 1,
+      exportedAt: new Date(nowMs).toISOString(),
+      containsAnswers: true,
+      envelope: JSON.parse(envelopeRaw) as unknown,
+    });
+    const bytes = utf8Bytes(raw);
+    return bytes <= maxPortableBackupBytes
+      ? { ok: true, raw, bytes, filename: `astra-lexa-backup-${new Date(nowMs).toISOString().slice(0, 10)}.json` }
+      : { ok: false, code: "candidate-too-large" };
+  } catch {
+    return { ok: false, code: "candidate-invalid" };
+  }
+}
+
+function envelopeHasFuturePuzzleVersion(value: unknown) {
+  if (!isObject(value) || !isObject(value.branches) || !isObject(value.branches.attempt)
+    || !isObject(value.branches.attempt.value) || !isObject(value.branches.attempt.value.run)) return false;
+  const run = value.branches.attempt.value.run;
+  return (typeof run.generatorVersion === "number" && run.generatorVersion > 3)
+    || (typeof run.fingerprintVersion === "number" && run.fingerprintVersion > 1);
+}
+
+export function previewPortableBackup(raw: string, nowMs = Date.now()): PortableBackupPreviewResult {
+  if (utf8Bytes(raw) > maxPortableBackupBytes) return { ok: false, code: "backup-too-large" };
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (isObject(value) && typeof value.backupVersion === "number" && value.backupVersion > 1) {
+      return { ok: false, code: "future-version" };
+    }
+    if (!isObject(value) || !hasExactKeys(value, ["format", "backupVersion", "exportedAt", "containsAnswers", "envelope"])
+      || value.format !== "astra-lexa/portable-backup" || value.backupVersion !== 1 || value.containsAnswers !== true
+      || !isCanonicalIsoTimestamp(value.exportedAt) || !isObject(value.envelope)) {
+      return { ok: false, code: "invalid-backup" };
+    }
+    if (envelopeHasFuturePuzzleVersion(value.envelope)) return { ok: false, code: "future-version" };
+    const envelopeRaw = JSON.stringify(value.envelope);
+    const envelope = decodeV3Envelope(envelopeRaw, nowMs);
+    if (envelope?.future) return { ok: false, code: "future-version" };
+    if (!envelope?.full || envelope.progress.status !== "valid"
+      || (envelope.attempt.status !== "valid" && envelope.attempt.status !== "null")) {
+      return { ok: false, code: "invalid-backup" };
+    }
+    const attempt = envelope.attempt.status === "valid" ? envelope.attempt.value : null;
+    const progress = envelope.progress.value;
+    return {
+      ok: true,
+      candidate: {
+        envelopeRaw,
+        preview: {
+          exportedAt: value.exportedAt,
+          bytes: utf8Bytes(raw),
+          attemptStatus: attempt === null ? "none" : attempt.completedAt ? "completed" : "unfinished",
+          historyCount: progress.history.length,
+          creditedDays: Object.values(progress.dailyLedger).filter((outcome) => outcome === "credited").length,
+          lateClearDays: Object.values(progress.dailyLedger).filter((outcome) => outcome === "late-clear").length,
+        },
+      },
+    };
+  } catch {
+    return { ok: false, code: "invalid-backup" };
+  }
+}
+
+function reEnvelopeRaw(raw: string, saveId: string, nowMs: number) {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (!isObject(value)) return null;
+    const candidateRaw = JSON.stringify({ ...value, saveId, savedAt: new Date(nowMs).toISOString() });
+    const candidate = decodeV3Envelope(candidateRaw, nowMs);
+    return candidate?.full && candidate.saveId === saveId ? candidateRaw : null;
+  } catch {
+    return null;
+  }
+}
+
+function decodeImportUndo(raw: string | null, nowMs: number) {
+  if (!raw || utf8Bytes(raw) > maxV3EnvelopeBytes + 2_048) return null;
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (!isObject(value) || !hasExactKeys(value, ["format", "undoVersion", "importedSaveId", "capturedAt", "previousEnvelopeRaw"])
+      || value.format !== "astra-lexa/import-undo" || value.undoVersion !== 1
+      || typeof value.importedSaveId !== "string" || !isCanonicalIsoTimestamp(value.capturedAt)
+      || typeof value.previousEnvelopeRaw !== "string" || !decodeV3Envelope(value.previousEnvelopeRaw, nowMs)?.full) return null;
+    return value as unknown as PortableImportUndo;
+  } catch {
+    return null;
+  }
+}
+
+export function hasPortableImportUndo(storage: Pick<Storage, "getItem">, committedSaveId: string | null, nowMs = Date.now()) {
+  if (!committedSaveId) return false;
+  try {
+    return decodeImportUndo(storage.getItem(storageV3ImportUndoKey), nowMs)?.importedSaveId === committedSaveId;
+  } catch {
+    return false;
+  }
+}
+
+function advanceImportUndo(storage: Pick<Storage, "getItem" | "setItem">, previousSaveId: string | null, nextSaveId: string, nowMs: number) {
+  if (!previousSaveId) return;
+  try {
+    const undo = decodeImportUndo(storage.getItem(storageV3ImportUndoKey), nowMs);
+    if (!undo || undo.importedSaveId !== previousSaveId) return;
+    const nextRaw = JSON.stringify({ ...undo, importedSaveId: nextSaveId });
+    storage.setItem(storageV3ImportUndoKey, nextRaw);
+  } catch {
+    // A lifecycle save remains valid even if its optional import-undo receipt expires.
   }
 }
 
@@ -906,11 +1124,12 @@ function readMigrationSources(storage: Pick<Storage, "getItem">, nowMs: number):
 
 function createEmptyStorageProgress(): ProgressSnapshot {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     streak: 0,
     bestStreak: 0,
     lastDailySeed: null,
     lastCompletedAt: null,
+    dailyLedger: {},
     history: [],
   };
 }
@@ -1044,7 +1263,7 @@ function createSaveId(nowMs: number, supplied?: string) {
 }
 
 export function serializeStoredGame(
-  state: PersistedRunState,
+  state: PersistedRunState | null,
   progress: ProgressSnapshot,
   nowMs = Date.now(),
   saveId = createSaveId(nowMs),
@@ -1055,14 +1274,14 @@ export function serializeStoredGame(
     saveId,
     savedAt: new Date(nowMs).toISOString(),
     branches: {
-      attempt: {
+      attempt: state ? {
         branchVersion: 1,
-        stateSchemaVersion: 2,
+        stateSchemaVersion: 3,
         value: canonicalizeAttempt(state, nowMs),
-      },
+      } : null,
       progress: {
         branchVersion: 1,
-        stateSchemaVersion: 2,
+        stateSchemaVersion: 3,
         value: progress,
       },
     },
@@ -1127,28 +1346,21 @@ function writeFailure(
   code: StorageFailureCode,
   stage: Exclude<StorageWriteResult, { ok: true }>["stage"],
   preservation: Exclude<StorageWriteResult, { ok: true }>["preservation"] = "unchanged",
-): StorageWriteResult {
+): Exclude<StorageWriteResult, { ok: true }> {
   return { ok: false, code, stage, preservation, retryable: !["future-version", "commit-uncertain", "recovery-required"].includes(code) };
 }
 
-function writeStoredGameUnlocked(
+function commitRawEnvelopeUnlocked(
   storage: Pick<Storage, "getItem" | "setItem">,
-  state: PersistedRunState,
-  progress: ProgressSnapshot,
-  nowMs = Date.now(),
-  options: { expectedSaveId?: string | null; saveId?: string } = {},
+  candidateRaw: string,
+  nowMs: number,
+  options: { expectedSaveId?: string | null } = {},
 ): StorageWriteResult {
-  const saveId = createSaveId(nowMs, options.saveId);
-  let candidateRaw: string;
-  try {
-    candidateRaw = serializeStoredGame(state, progress, nowMs, saveId);
-  } catch {
-    return writeFailure("candidate-invalid", "preflight");
-  }
   const bytes = utf8Bytes(candidateRaw);
   if (bytes > maxV3EnvelopeBytes) return writeFailure("candidate-too-large", "preflight");
   const candidate = decodeV3Envelope(candidateRaw, nowMs);
-  if (!candidate?.full || candidate.saveId !== saveId) return writeFailure("candidate-invalid", "preflight");
+  if (!candidate?.full) return writeFailure("candidate-invalid", "preflight");
+  const saveId = candidate.saveId;
 
   let markerRaw: string | null;
   let primaryRaw: string | null;
@@ -1232,6 +1444,23 @@ function writeStoredGameUnlocked(
     return writeFailure(classifyStorageError(error), "commit", base ? "previous-valid" : "unchanged");
   }
   return { ok: true, saveId, bytes };
+}
+
+function writeStoredGameUnlocked(
+  storage: Pick<Storage, "getItem" | "setItem">,
+  state: PersistedRunState,
+  progress: ProgressSnapshot,
+  nowMs = Date.now(),
+  options: { expectedSaveId?: string | null; saveId?: string } = {},
+): StorageWriteResult {
+  const saveId = createSaveId(nowMs, options.saveId);
+  let candidateRaw: string;
+  try {
+    candidateRaw = serializeStoredGame(state, progress, nowMs, saveId);
+  } catch {
+    return writeFailure("candidate-invalid", "preflight");
+  }
+  return commitRawEnvelopeUnlocked(storage, candidateRaw, nowMs, options);
 }
 
 const storageCoordinatorLockName = "astra-lexa:v3:commit";
@@ -1331,6 +1560,143 @@ export async function writeStoredGame(
   }
 }
 
+function readCommittedEnvelopeRaw(storage: Pick<Storage, "getItem">, committedSaveId: string, nowMs: number) {
+  for (const key of [storageV3PrimaryKey, storageV3PreviousKey]) {
+    const raw = storage.getItem(key);
+    const decoded = decodeV3Envelope(raw, nowMs);
+    if (decoded?.full && decoded.saveId === committedSaveId) return raw;
+  }
+  return null;
+}
+
+function portableSuccess(candidateRaw: string, result: Extract<StorageWriteResult, { ok: true }>, nowMs: number, undoAvailable: boolean): PortableStorageResult {
+  const decoded = decodeV3Envelope(candidateRaw, nowMs);
+  if (!decoded?.full || decoded.progress.status !== "valid"
+    || (decoded.attempt.status !== "valid" && decoded.attempt.status !== "null")) {
+    return writeFailure("verification-failed", "commit", "commit-uncertain");
+  }
+  return {
+    ...result,
+    currentAttempt: decoded.attempt.status === "valid" ? decoded.attempt.value : null,
+    progress: decoded.progress.value,
+    undoAvailable,
+  };
+}
+
+function coordinationFailure(error: unknown) {
+  const timedOut = error instanceof DOMException && error.name === "AbortError";
+  return writeFailure(timedOut ? "lock-timeout" : "coordination-unavailable", "preflight");
+}
+
+function restoreUndoRaw(storage: Storage, raw: string | null) {
+  try {
+    if (raw === null) storage.removeItem(storageV3ImportUndoKey);
+    else storage.setItem(storageV3ImportUndoKey, raw);
+  } catch {
+    // Canonical data remains authoritative even if an expired undo receipt cannot be restored.
+  }
+}
+
+export async function importPortableBackup(
+  storage: Storage,
+  candidate: PortableBackupCandidate,
+  options: { expectedSaveId: string | null },
+  nowMs = Date.now(),
+): Promise<PortableStorageResult> {
+  try {
+    return await runWithStorageCoordinator(() => {
+      const source = decodeV3Envelope(candidate.envelopeRaw, nowMs);
+      if (!source?.full || source.progress.status !== "valid"
+        || (source.attempt.status !== "valid" && source.attempt.status !== "null")) {
+        return writeFailure("candidate-invalid", "preflight");
+      }
+      const current = readStoredGame(storage, nowMs);
+      if (!current.writable) {
+        return writeFailure(current.issues.includes("future-version") ? "future-version" : "recovery-required", "preflight");
+      }
+      if (current.committedSaveId !== options.expectedSaveId) return writeFailure("concurrent-write", "preflight");
+
+      let previousEnvelopeRaw: string;
+      try {
+        previousEnvelopeRaw = current.committedSaveId
+          ? readCommittedEnvelopeRaw(storage, current.committedSaveId, nowMs) ?? ""
+          : serializeStoredGame(current.currentAttempt, current.progress, nowMs, `save-undo-base-${nowMs.toString(36)}-0000`);
+      } catch {
+        return writeFailure("candidate-invalid", "preflight");
+      }
+      if (!decodeV3Envelope(previousEnvelopeRaw, nowMs)?.full) return writeFailure("recovery-required", "preflight");
+
+      const saveId = createSaveId(nowMs, `save-import-${nowMs.toString(36)}-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`);
+      const candidateRaw = reEnvelopeRaw(candidate.envelopeRaw, saveId, nowMs);
+      if (!candidateRaw) return writeFailure("candidate-invalid", "preflight");
+      const undo: PortableImportUndo = {
+        format: "astra-lexa/import-undo",
+        undoVersion: 1,
+        importedSaveId: saveId,
+        capturedAt: new Date(nowMs).toISOString(),
+        previousEnvelopeRaw,
+      };
+      const undoRaw = JSON.stringify(undo);
+      if (utf8Bytes(undoRaw) > maxV3EnvelopeBytes + 2_048) return writeFailure("candidate-too-large", "preflight");
+      let oldUndoRaw: string | null;
+      try {
+        oldUndoRaw = storage.getItem(storageV3ImportUndoKey);
+        storage.setItem(storageV3ImportUndoKey, undoRaw);
+        if (storage.getItem(storageV3ImportUndoKey) !== undoRaw || !decodeImportUndo(undoRaw, nowMs)) {
+          restoreUndoRaw(storage, oldUndoRaw);
+          return writeFailure("readback-mismatch", "backup");
+        }
+      } catch (error) {
+        return writeFailure(classifyStorageError(error), "backup");
+      }
+
+      const result = commitRawEnvelopeUnlocked(storage, candidateRaw, nowMs, { expectedSaveId: options.expectedSaveId });
+      if (!result.ok) {
+        if (result.code !== "commit-uncertain") {
+          restoreUndoRaw(storage, oldUndoRaw);
+        }
+        return result;
+      }
+      return portableSuccess(candidateRaw, result, nowMs, true);
+    });
+  } catch (error) {
+    return coordinationFailure(error);
+  }
+}
+
+export async function undoPortableImport(
+  storage: Storage,
+  options: { expectedSaveId: string },
+  nowMs = Date.now(),
+): Promise<PortableStorageResult> {
+  try {
+    return await runWithStorageCoordinator(() => {
+      let undo: PortableImportUndo | null;
+      try {
+        undo = decodeImportUndo(storage.getItem(storageV3ImportUndoKey), nowMs);
+      } catch {
+        return writeFailure("read-denied", "preflight");
+      }
+      if (!undo || undo.importedSaveId !== options.expectedSaveId) return writeFailure("recovery-required", "preflight");
+      const current = readStoredGame(storage, nowMs);
+      if (!current.writable || current.committedSaveId !== options.expectedSaveId) return writeFailure("concurrent-write", "preflight");
+      const saveId = createSaveId(nowMs, `save-undo-${nowMs.toString(36)}-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`);
+      const candidateRaw = reEnvelopeRaw(undo.previousEnvelopeRaw, saveId, nowMs);
+      if (!candidateRaw) return writeFailure("candidate-invalid", "preflight");
+      const result = commitRawEnvelopeUnlocked(storage, candidateRaw, nowMs, { expectedSaveId: options.expectedSaveId });
+      if (!result.ok) return result;
+      try {
+        storage.removeItem(storageV3ImportUndoKey);
+      } catch {
+        // The receipt is invalid once the committed head changes, even if cleanup is denied.
+      }
+      return portableSuccess(candidateRaw, result, nowMs, false);
+    });
+  } catch (error) {
+    return coordinationFailure(error);
+  }
+}
+
 export async function reconcilePagehideSnapshots(storage: Storage, nowMs = Date.now()): Promise<StorageWriteResult | null> {
   const entries: Array<{ key: string; capturedAt: string; baseSaveId: string | null; candidate: DecodedEnvelope }> = [];
   const deferredKeys: string[] = [];
@@ -1377,6 +1743,7 @@ export async function reconcilePagehideSnapshots(storage: Storage, nowMs = Date.
       saveId: entry.candidate.saveId,
     });
     if (result.ok || result.code === "concurrent-write") {
+      if (result.ok) advanceImportUndo(storage, entry.baseSaveId, result.saveId, nowMs);
       try {
         storage.removeItem(entry.key);
       } catch {

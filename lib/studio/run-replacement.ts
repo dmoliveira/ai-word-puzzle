@@ -6,7 +6,7 @@ import type { StorageWriteResult } from "@/lib/session-storage";
 type RunReplacementInput = {
   current: CurrentRunState;
   progress: ProgressSnapshot;
-  buildRun: () => PuzzleRun;
+  buildRun: (nowMs: number) => PuzzleRun;
   persist: (state: PersistedRunState, progress: ProgressSnapshot, nowMs: number) => Promise<StorageWriteResult>;
   nowMs: number;
   attemptId?: string;
@@ -43,7 +43,7 @@ export async function replaceRunTransaction({
 }: RunReplacementInput): Promise<RunReplacementResult> {
   let run: PuzzleRun;
   try {
-    run = buildRun();
+    run = buildRun(nowMs);
   } catch (error) {
     return { ok: false, state: current, progress, reason: "generation-failed", error };
   }

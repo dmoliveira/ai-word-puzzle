@@ -5,7 +5,7 @@ import { buildPuzzleRun } from "@/lib/puzzle-generator";
 import { createAttemptFromRun, createPreparedRunState, finalizeAttempt, setAttemptPaused } from "@/lib/run-state";
 import { needsRunReplacementConfirmation, replaceRunTransaction } from "@/lib/studio/run-replacement";
 
-function buildRun(seed: string) {
+function buildRun(seed: string, nowMs = 0) {
   return buildPuzzleRun({
     mode: "custom",
     seed,
@@ -13,7 +13,7 @@ function buildRun(seed: string) {
     puzzleSize: 7,
     boardView: "crossword",
     timerEnabled: true,
-  });
+  }, nowMs);
 }
 
 test("only unfinished started attempts require replacement confirmation", () => {
@@ -36,7 +36,7 @@ test("successful replacement settles outgoing progress and persists one candidat
   const result = await replaceRunTransaction({
     current,
     progress,
-    buildRun: () => buildRun("candidate"),
+    buildRun: (transitionNowMs) => buildRun("candidate", transitionNowMs),
     persist: async (candidate, nextProgress, nowMs) => {
       writes.push({
         attemptId: candidate.attemptId,
@@ -58,6 +58,7 @@ test("successful replacement settles outgoing progress and persists one candidat
   }]);
   assert.equal(result.state.attemptId, "attempt-candidate");
   assert.equal(result.state.startedAt, new Date(5_000).toISOString());
+  assert.equal(result.state.run.createdAt, new Date(5_000).toISOString());
   assert.equal(result.outgoing?.elapsedMs, 4_000);
   assert.equal(result.outgoing?.lastTickAt, null);
   assert.equal(current.lastTickAt, 1_000, "the source attempt stays untouched");

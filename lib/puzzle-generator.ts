@@ -10,6 +10,7 @@ import type {
 import { buildConnectedCrossword, buildQuestBoard } from "@/lib/board-generator";
 import { isCrosswordContentPack, isCrosswordTopic } from "@/lib/clue-catalog";
 import { getPuzzleSizeRange, normalizePuzzleOptions } from "@/lib/puzzle-options";
+import { computePuzzleFingerprint, currentCorpusRevision, puzzleFingerprintVersion } from "@/lib/puzzle-provenance";
 import { getThemeStyle } from "@/lib/themes";
 import { contentCatalog, topicCatalog, wordBank } from "@/lib/word-bank";
 
@@ -42,13 +43,13 @@ function hashString(value: string) {
   return hash >>> 0;
 }
 
-function getDailySeedValue(seed: string) {
-  return seed || new Date().toISOString().slice(0, 10);
+function getDailySeedValue(seed: string, nowMs: number) {
+  return seed || new Date(nowMs).toISOString().slice(0, 10);
 }
 
-function resolveModeSeed(mode: PuzzleMode, seed: string) {
+function resolveModeSeed(mode: PuzzleMode, seed: string, nowMs: number) {
   if (mode === "daily") {
-    return `daily:${getDailySeedValue(seed)}`;
+    return `daily:${getDailySeedValue(seed, nowMs)}`;
   }
 
   return seed.trim() || "custom:starter";
@@ -217,7 +218,7 @@ export class PuzzleGenerationError extends Error {
   }
 }
 
-export function buildPuzzleRun(input: Partial<PuzzleOptions> = {}): PuzzleRun {
+export function buildPuzzleRun(input: Partial<PuzzleOptions> = {}, nowMs = Date.now()): PuzzleRun {
   const requestedBoardView = input.boardView ?? "crossword";
   const requestedFamily = input.puzzleFamily ?? "classic";
   const sizeRange = getPuzzleSizeRange(requestedFamily, requestedBoardView);
@@ -234,13 +235,13 @@ export function buildPuzzleRun(input: Partial<PuzzleOptions> = {}): PuzzleRun {
     mode: "custom",
     seed: "",
     ...input,
-  });
+  }, nowMs);
 
   if (options.mode === "daily") {
-    options.seed = getDailySeedValue(options.seed);
+    options.seed = getDailySeedValue(options.seed, nowMs);
   }
 
-  const resolvedSeed = resolveModeSeed(options.mode, options.seed);
+  const resolvedSeed = resolveModeSeed(options.mode, options.seed, nowMs);
   const resolvedContentPack = resolveContentPack(options, resolvedSeed);
   if (options.puzzleFamily === "themed" && !resolvedContentPack) {
     throw new PuzzleGenerationError("unsupported-content", "That themed pack cannot support the selected puzzle size.");
@@ -301,22 +302,29 @@ export function buildPuzzleRun(input: Partial<PuzzleOptions> = {}): PuzzleRun {
   ].join(":");
   const puzzleId = `${hashString(identity)}`;
 
-  return {
+  const run = {
     id: puzzleId,
     puzzleId,
     generatorVersion: 3,
-    createdAt: new Date().toISOString(),
+    corpusRevision: currentCorpusRevision,
+    fingerprintVersion: puzzleFingerprintVersion,
+    puzzleFingerprint: null,
+    createdAt: new Date(nowMs).toISOString(),
     seed: resolvedSeed,
     options,
     title: `${theme.label} / ${labelTopic}`,
     blurb: buildThemeBlurb(placedWords, options),
     words: placedWords,
     board,
+  } satisfies PuzzleRun;
+  return {
+    ...run,
+    puzzleFingerprint: computePuzzleFingerprint(run),
   };
 }
 
-export function getDefaultDailySeed() {
-  return new Date().toISOString().slice(0, 10);
+export function getDefaultDailySeed(nowMs = Date.now()) {
+  return new Date(nowMs).toISOString().slice(0, 10);
 }
 
 export function sanitizeGuess(value: string) {

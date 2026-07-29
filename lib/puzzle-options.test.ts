@@ -31,6 +31,7 @@ test("shared options parse supported values without unchecked casts", () => {
 
   assert.equal(result.kind, "valid");
   if (result.kind === "valid") {
+    assert.equal(result.expectedProvenance, null);
     assert.equal(result.options.seed, "shared-seed");
     assert.equal(result.options.puzzleSize, 6);
     assert.equal(result.options.boardView, "quest");
@@ -46,6 +47,22 @@ test("shared options reject duplicates and malformed values as one candidate", (
   assert.equal(parseSharedOptions("?mode=custom&seed=x&topics=myth,unknown", now).kind, "invalid");
   assert.equal(parseSharedOptions("?generatorVersion=2&mode=custom&seed=x", now).kind, "invalid");
   assert.equal(parseSharedOptions("?mode=custom&seed=x&topics=city&boardView=crossword", now).kind, "invalid");
+  assert.equal(parseSharedOptions(`?generatorVersion=3&corpusRevision=word-bank-r1&mode=custom&seed=x`, now).kind, "invalid");
+  assert.equal(parseSharedOptions(`?generatorVersion=3&corpusRevision=unknown&fingerprintVersion=1&puzzleFingerprint=p1-${"0".repeat(64)}&mode=custom&seed=x`, now).kind, "invalid");
+});
+
+test("new shared links parse complete puzzle provenance atomically", () => {
+  const fingerprint = `p1-${"a".repeat(64)}`;
+  const result = parseSharedOptions(`?generatorVersion=3&corpusRevision=word-bank-r1&fingerprintVersion=1&puzzleFingerprint=${fingerprint}&mode=custom&seed=exact`, now);
+
+  assert.equal(result.kind, "valid");
+  if (result.kind !== "valid") return;
+  assert.deepEqual(result.expectedProvenance, {
+    generatorVersion: 3,
+    corpusRevision: "word-bank-r1",
+    fingerprintVersion: 1,
+    puzzleFingerprint: fingerprint,
+  });
 });
 
 test("normalization removes invalid topics and clamps mini runs", () => {

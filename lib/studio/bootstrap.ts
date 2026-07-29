@@ -15,8 +15,8 @@ export type StudioBootstrap = {
   resolvedAtMs: number;
 };
 
-function prepare(options: PuzzleOptions) {
-  return createPreparedRunState(buildPuzzleRun(options));
+function prepare(options: PuzzleOptions, nowMs: number) {
+  return createPreparedRunState(buildPuzzleRun(options, nowMs));
 }
 
 export function resolveStudioBootstrap({
@@ -31,7 +31,7 @@ export function resolveStudioBootstrap({
   visible?: boolean;
 }): StudioBootstrap {
   const dailyOptions = getCanonicalDailyOptions(nowMs);
-  const daily = prepare(dailyOptions);
+  const daily = prepare(dailyOptions, nowMs);
   const progress = stored.progress;
 
   if (stored.currentAttempt && shouldRestoreAttempt(stored.currentAttempt, daily.run.puzzleId)) {
@@ -54,7 +54,20 @@ export function resolveStudioBootstrap({
 
   if (shared.kind === "valid") {
     try {
-      const current = prepare(shared.options);
+      const current = prepare(shared.options, nowMs);
+      if (shared.expectedProvenance && (current.run.generatorVersion !== shared.expectedProvenance.generatorVersion
+        || current.run.corpusRevision !== shared.expectedProvenance.corpusRevision
+        || current.run.fingerprintVersion !== shared.expectedProvenance.fingerprintVersion
+        || current.run.puzzleFingerprint !== shared.expectedProvenance.puzzleFingerprint)) {
+        return {
+          current: daily,
+          builderOptions: daily.run.options,
+          progress,
+          source: "current-daily",
+          warning: "That shared puzzle did not match its expected fingerprint, so nothing was replaced.",
+          resolvedAtMs: nowMs,
+        };
+      }
       return {
         current,
         builderOptions: current.run.options,
@@ -95,5 +108,5 @@ export function refreshPreparedDaily(current: CurrentRunState, source: Bootstrap
   }
 
   const nextOptions = getCanonicalDailyOptions(nowMs);
-  return current.run.seed === `daily:${nextOptions.seed}` ? current : prepare(nextOptions);
+  return current.run.seed === `daily:${nextOptions.seed}` ? current : prepare(nextOptions, nowMs);
 }

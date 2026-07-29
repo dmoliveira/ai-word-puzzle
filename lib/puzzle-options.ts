@@ -9,6 +9,7 @@ import type {
   TopicId,
 } from "@/lib/game-types";
 import { crosswordContentPackIds, crosswordTopicIds } from "@/lib/clue-catalog";
+import { currentCorpusRevision, puzzleFingerprintVersion } from "@/lib/puzzle-provenance";
 
 const modes = ["custom", "daily"] as const satisfies readonly PuzzleMode[];
 const challenges = ["breeze", "quest", "mythic"] as const satisfies readonly ChallengeLevel[];
@@ -29,6 +30,9 @@ const contentPackIds = [
 
 const sharedOptionKeys = [
   "generatorVersion",
+  "corpusRevision",
+  "fingerprintVersion",
+  "puzzleFingerprint",
   "mode",
   "seed",
   "topics",
@@ -42,10 +46,17 @@ const sharedOptionKeys = [
   "learningMode",
 ] as const;
 
+export type SharedPuzzleProvenance = {
+  generatorVersion: 3;
+  corpusRevision: string;
+  fingerprintVersion: 1;
+  puzzleFingerprint: string;
+};
+
 export type SharedOptionsResult =
   | { kind: "none" }
   | { kind: "invalid"; reason: string }
-  | { kind: "valid"; options: PuzzleOptions };
+  | { kind: "valid"; options: PuzzleOptions; expectedProvenance: SharedPuzzleProvenance | null };
 
 function includesValue<T extends string>(values: readonly T[], value: string | null): value is T {
   return value !== null && values.includes(value as T);
@@ -168,6 +179,19 @@ export function parseSharedOptions(search: string, nowMs = Date.now()): SharedOp
   if (generatorVersion !== null && generatorVersion !== "3") {
     return { kind: "invalid", reason: "That shared puzzle uses an unsupported generator version." };
   }
+  const corpusRevision = params.get("corpusRevision");
+  const fingerprintVersion = params.get("fingerprintVersion");
+  const puzzleFingerprint = params.get("puzzleFingerprint");
+  const provenanceValues = [generatorVersion, corpusRevision, fingerprintVersion, puzzleFingerprint];
+  const hasAnyExactProvenance = provenanceValues.slice(1).some((value) => value !== null);
+  if (hasAnyExactProvenance && provenanceValues.some((value) => value === null)) {
+    return { kind: "invalid", reason: "The shared puzzle provenance is incomplete." };
+  }
+  if (hasAnyExactProvenance && (corpusRevision !== currentCorpusRevision
+    || fingerprintVersion !== String(puzzleFingerprintVersion)
+    || !puzzleFingerprint || !/^p1-[a-f0-9]{64}$/.test(puzzleFingerprint))) {
+    return { kind: "invalid", reason: "That shared puzzle uses unsupported provenance." };
+  }
 
   const modeValue = params.get("mode");
   const challengeValue = params.get("challenge");
@@ -239,5 +263,11 @@ export function parseSharedOptions(search: string, nowMs = Date.now()): SharedOp
       learningMode,
       topics: topics as TopicId[] | undefined,
     }, nowMs),
+    expectedProvenance: hasAnyExactProvenance ? {
+      generatorVersion: 3,
+      corpusRevision: corpusRevision!,
+      fingerprintVersion: 1,
+      puzzleFingerprint: puzzleFingerprint!,
+    } : null,
   };
 }

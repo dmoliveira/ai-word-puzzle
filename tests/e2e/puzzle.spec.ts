@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { readFile } from "node:fs/promises";
 
 const sessionStorageKey = "astra-lexa:v3";
 const pagehideStoragePrefix = "astra-lexa:v3:pagehide:";
@@ -6,6 +7,7 @@ const localStorageKeys = [
   sessionStorageKey,
   "astra-lexa:v3:previous",
   "astra-lexa:v3:commit",
+  "astra-lexa:v3:import-undo",
   "astra-lexa:v2",
   "astra-lexa-session",
   "astra-lexa-progress",
@@ -707,7 +709,7 @@ test("shared daily options reopen the requested seeded run", async ({ page }) =>
   await expect(page.locator("span").filter({ hasText: /^seed 2026-04-24$/ }).first()).toBeVisible();
 });
 
-test("shared links declare generator v3 and omit retired options", async ({ page, context }) => {
+test("shared links declare exact provenance and omit retired options", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await openPuzzle(page);
   await page.evaluate(() => Object.defineProperty(navigator, "share", { value: undefined, configurable: true }));
@@ -716,7 +718,58 @@ test("shared links declare generator v3 and omit retired options", async ({ page
 
   const sharedUrl = new URL(await page.evaluate(() => navigator.clipboard.readText()));
   expect(sharedUrl.searchParams.get("generatorVersion")).toBe("3");
+  expect(sharedUrl.searchParams.get("corpusRevision")).toBe("word-bank-r1");
+  expect(sharedUrl.searchParams.get("fingerprintVersion")).toBe("1");
+  expect(sharedUrl.searchParams.get("puzzleFingerprint")).toMatch(/^p1-[a-f0-9]{64}$/);
   expect(sharedUrl.searchParams.has("clueDensity")).toBe(false);
+});
+
+test("clipboard rejection reports that the run link was not copied", async ({ page }) => {
+  await openPuzzle(page);
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "share", { value: undefined, configurable: true });
+    Object.defineProperty(navigator.clipboard, "writeText", {
+      value: async () => { throw new DOMException("denied", "NotAllowedError"); },
+      configurable: true,
+    });
+  });
+
+  await page.getByRole("button", { name: "Share link", exact: true }).click();
+
+  await expect(page.getByText(/clipboard unavailable.*run link was not copied/i)).toBeVisible();
+});
+
+test("a shared fingerprint mismatch fails visibly without opening a replacement", async ({ page, context, browser }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await openPuzzle(page);
+  await page.evaluate(() => Object.defineProperty(navigator, "share", { value: undefined, configurable: true }));
+  await page.getByRole("button", { name: "Share link", exact: true }).click();
+  const sharedUrl = new URL(await page.evaluate(() => navigator.clipboard.readText()));
+  sharedUrl.searchParams.set("puzzleFingerprint", `p1-${"0".repeat(64)}`);
+
+  const isolatedContext = await browser.newContext();
+  const sharedPage = await isolatedContext.newPage();
+  await sharedPage.goto(sharedUrl.toString());
+
+  await expect(sharedPage.locator('main[data-hydrated="true"][data-run-state="prepared"]')).toBeVisible();
+  await openSetup(sharedPage);
+  await expect(sharedPage.locator("p:visible").filter({ hasText: /did not match its expected fingerprint.*nothing was replaced/i })).toBeVisible();
+  expect(await sharedPage.evaluate((key) => window.localStorage.getItem(key), sessionStorageKey)).toBeNull();
+  await isolatedContext.close();
+});
+
+test("an untouched prepared daily rolls at the exact UTC boundary without persisting", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-29T23:59:30.000Z") });
+  await page.goto("/");
+  await page.clock.runFor(1);
+  await expect(page.locator('main[data-hydrated="true"][data-run-state="prepared"]')).toBeVisible();
+  await expect(page.getByTestId("run-seed")).toContainText("2026-07-29");
+
+  await page.clock.runFor(30_000);
+
+  await expect(page.getByTestId("run-seed")).toContainText("2026-07-30");
+  await expect(page.locator('main[data-run-state="prepared"]')).toBeVisible();
+  expect(await page.evaluate((key) => window.localStorage.getItem(key), sessionStorageKey)).toBeNull();
 });
 
 test("player sees completion and share actions after solving every word", async ({ page }) => {
@@ -918,6 +971,141 @@ test("a verified pending first adoption restores read-only instead of stale v2",
   await expect(input).toHaveValue("ab");
   await expect(page.getByTestId("storage-status")).toContainText(/this tab will not overwrite local data/i);
   expect(await page.evaluate((key) => window.localStorage.getItem(key), sessionStorageKey)).toBe(canonicalBeforeEdit);
+});
+
+test("legacy history uses settings under current rules instead of claiming exact replay", async ({ page }) => {
+  await openPuzzle(page);
+  await readStoredAttempt(page);
+  await page.evaluate(({ primaryKey, deferredPrefix }) => {
+    const raw = window.localStorage.getItem(primaryKey);
+    if (!raw) throw new Error("Expected a stored run before downgrading progress provenance.");
+    const envelope = JSON.parse(raw) as Record<string, any>;
+    const progress = envelope.branches.progress;
+    progress.stateSchemaVersion = 2;
+    progress.value.schemaVersion = 2;
+    delete progress.value.dailyLedger;
+    for (const summary of progress.value.history) {
+      delete summary.generatorVersion;
+      delete summary.corpusRevision;
+      delete summary.fingerprintVersion;
+      delete summary.puzzleFingerprint;
+      delete summary.exactReplay;
+      delete summary.dailyOutcome;
+    }
+    window.localStorage.setItem(primaryKey, JSON.stringify(envelope));
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function suppressDeferredWrite(key: string, value: string) {
+      if (key.startsWith(deferredPrefix)) return;
+      return original.call(this, key, value);
+    };
+  }, { primaryKey: sessionStorageKey, deferredPrefix: pagehideStoragePrefix });
+
+  await page.reload();
+
+  await expect(page.locator('main[data-hydrated="true"]')).toBeVisible();
+  await expect(page.getByTestId("recent-run-card").first()).toContainText(/use settings\/current rules/i);
+});
+
+test("portable backup previews safely, replaces atomically, survives reload, and undoes", async ({ page }) => {
+  await openPuzzle(page, { seed: "portable-source" });
+  await page.getByTestId("active-answer-input").fill("ab");
+  await expect.poll(async () => Object.keys((await readStoredAttempt(page)).cellEntries).length).toBeGreaterThan(0);
+  const source = await readStoredAttempt(page);
+  const sourceAnswer = source.run.words[0].answer;
+  const requests: string[] = [];
+  const recordRequest = (request: { url(): string }) => requests.push(request.url());
+  page.on("request", recordRequest);
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByTestId("export-backup").click();
+  const download = await downloadPromise;
+  page.off("request", recordRequest);
+  expect(requests).toEqual([]);
+  expect(download.suggestedFilename()).toMatch(/^astra-lexa-backup-\d{4}-\d{2}-\d{2}\.json$/);
+  const downloadPath = await download.path();
+  if (!downloadPath) throw new Error("Expected a downloaded backup path.");
+  const backupRaw = await readFile(downloadPath, "utf8");
+  const wrapper = JSON.parse(backupRaw) as { format: string; backupVersion: number; containsAnswers: boolean };
+  expect(wrapper).toMatchObject({ format: "astra-lexa/portable-backup", backupVersion: 1, containsAnswers: true });
+  await expect(page.getByTestId("portable-backup-status")).toContainText(/contains puzzle answers.*keep it private/i);
+
+  const freshTrigger = page.getByRole("button", { name: "Fresh run", exact: true });
+  await freshTrigger.click();
+  await page.getByTestId("run-replacement-dialog").getByRole("button", { name: "Save and replace" }).click();
+  await expect(page.getByTestId("run-replacement-dialog")).toBeHidden();
+  const beforeImport = await readStoredAttempt(page);
+  expect(beforeImport.attemptId).not.toBe(source.attemptId);
+  const beforePreviewStorage = await page.evaluate((keys) => Object.fromEntries(keys.map((key) => [key, window.localStorage.getItem(key)])), localStorageKeys);
+  const file = { name: "astra-backup.json", mimeType: "application/json", buffer: Buffer.from(backupRaw) };
+
+  const input = page.getByTestId("import-backup-input");
+  await input.setInputFiles(file);
+  const dialog = page.getByTestId("import-backup-dialog");
+  const cancel = dialog.getByRole("button", { name: "Cancel" });
+  await expect(dialog).toBeVisible();
+  await expect(cancel).toBeFocused();
+  expect((await dialog.textContent())?.toLowerCase()).not.toContain(sourceAnswer.toLowerCase());
+  await cancel.click();
+  await expect(dialog).toBeHidden();
+  await expect(input).toBeFocused();
+  expect(await page.evaluate((keys) => Object.fromEntries(keys.map((key) => [key, window.localStorage.getItem(key)])), localStorageKeys)).toEqual(beforePreviewStorage);
+
+  await page.getByTestId("active-answer-input").fill("xy");
+  await input.setInputFiles(file);
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Replace local data" }).click();
+  await expect(dialog).toBeHidden();
+  await expect.poll(async () => (await readStoredAttempt(page)).attemptId).toBe(source.attemptId);
+  await expect(page.getByTestId("portable-backup-status")).toContainText(/imported after verification.*undo is available/i);
+  await expect(page.getByTestId("storage-status")).toContainText(/self-asserted.*not server verified/i);
+  await expect(page.getByTestId("undo-import")).toBeVisible();
+
+  await page.reload();
+  await expect(page.locator('main[data-hydrated="true"]')).toBeVisible();
+  await expect(page.getByTestId("undo-import")).toBeVisible();
+  await page.getByTestId("undo-import").click();
+  await expect.poll(async () => (await readStoredAttempt(page)).attemptId).toBe(beforeImport.attemptId);
+  await expect(page.getByTestId("active-answer-input")).toHaveValue("xy");
+  await expect(page.getByTestId("portable-backup-status")).toContainText(/pre-import local save was restored/i);
+  await expect(page.getByTestId("undo-import")).toBeHidden();
+});
+
+test("malformed or denied backup import stays visible and preserves the current run", async ({ page }) => {
+  await openPuzzle(page, { seed: "portable-failure" });
+  await readStoredAttempt(page);
+  const original = await readStoredAttempt(page);
+  const input = page.getByTestId("import-backup-input");
+  await input.setInputFiles({ name: "broken.json", mimeType: "application/json", buffer: Buffer.from("not-json") });
+  await expect(page.getByTestId("import-backup-dialog")).toBeHidden();
+  await expect(page.getByTestId("portable-backup-status")).toContainText(/malformed.*nothing was replaced/i);
+  expect((await readStoredAttempt(page)).attemptId).toBe(original.attemptId);
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByTestId("export-backup").click();
+  const downloadPath = await (await downloadPromise).path();
+  if (!downloadPath) throw new Error("Expected a downloaded backup path.");
+  const validRaw = await readFile(downloadPath, "utf8");
+  await page.evaluate((undoKey) => {
+    const runtimeWindow = window as typeof window & { __astraOriginalSetItem?: Storage["setItem"] };
+    runtimeWindow.__astraOriginalSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function denyUndo(key: string, value: string) {
+      if (key === undoKey) throw new DOMException("Storage full", "QuotaExceededError");
+      return runtimeWindow.__astraOriginalSetItem!.call(this, key, value);
+    };
+  }, "astra-lexa:v3:import-undo");
+
+  await input.setInputFiles({ name: "valid.json", mimeType: "application/json", buffer: Buffer.from(validRaw) });
+  await page.getByTestId("import-backup-dialog").getByRole("button", { name: "Replace local data" }).click();
+
+  await expect(page.getByTestId("import-backup-dialog")).toBeHidden();
+  await expect(page.getByTestId("portable-backup-status")).toContainText(/local storage is full/i);
+  expect((await readStoredAttempt(page)).attemptId).toBe(original.attemptId);
+  await page.evaluate(() => {
+    const runtimeWindow = window as typeof window & { __astraOriginalSetItem?: Storage["setItem"] };
+    if (runtimeWindow.__astraOriginalSetItem) {
+      Storage.prototype.setItem = runtimeWindow.__astraOriginalSetItem;
+      delete runtimeWindow.__astraOriginalSetItem;
+    }
+  });
 });
 
 test("learning mode exposes vocabulary support after deliberate review", async ({ page }) => {

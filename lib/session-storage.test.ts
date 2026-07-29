@@ -5,19 +5,26 @@ import { createEmptyProgress, recordRunProgress } from "@/lib/progress";
 import { buildPuzzleRun } from "@/lib/puzzle-generator";
 import { createAttemptFromRun, finalizeAttempt, snapshotAttempt } from "@/lib/run-state";
 import {
+  createPortableBackup,
   decodePersistedGame,
   gameStorageKey,
+  hasPortableImportUndo,
+  importPortableBackup,
   legacySessionStorageKey,
+  maxPortableBackupBytes,
   maxV3EnvelopeBytes,
+  previewPortableBackup,
   readStoredGame,
   reconcilePagehideSnapshots,
   serializeStoredGame,
   shouldRestoreAttempt,
   stagePagehideSnapshot,
   storageV3CommitKey,
+  storageV3ImportUndoKey,
   storageV3PagehidePrefix,
   storageV3PreviousKey,
   storageV3PrimaryKey,
+  undoPortableImport,
   writeStoredGame,
 } from "@/lib/session-storage";
 
@@ -116,6 +123,16 @@ function mutateEnvelope(raw: string, mutate: (value: Record<string, any>) => voi
   return JSON.stringify(value);
 }
 
+function createBackupCandidate(state: ReturnType<typeof createState> | null, progress = createEmptyProgress(), nowMs = 2_000) {
+  const backup = createPortableBackup(state, progress, nowMs);
+  assert.equal(backup.ok, true);
+  if (!backup.ok) throw new Error("Could not create backup fixture.");
+  const preview = previewPortableBackup(backup.raw, nowMs + 1);
+  assert.equal(preview.ok, true);
+  if (!preview.ok) throw new Error("Could not preview backup fixture.");
+  return { backup, candidate: preview.candidate };
+}
+
 test("v3 writes a verified journal and restores a settled canonical attempt", async () => {
   const storage = new MemoryStorage();
   const state = createState(1_000);
@@ -163,6 +180,57 @@ test("a second save backs up the committed raw envelope before one candidate wri
   assert.equal(readStoredGame(storage, 5_000).currentAttempt?.attemptId, "attempt-second");
 });
 
+test("a pre-provenance v3 attempt migrates in memory and its raw envelope is preserved as backup", async () => {
+  const storage = new MemoryStorage();
+  const envelope = JSON.parse(serializeStoredGame(createState(), createEmptyProgress(), 2_000, "save-storage-oldv3")) as Record<string, any>;
+  const run = envelope.branches.attempt.value.run;
+  delete run.corpusRevision;
+  delete run.fingerprintVersion;
+  delete run.puzzleFingerprint;
+  envelope.branches.attempt.stateSchemaVersion = 2;
+  const oldRaw = JSON.stringify(envelope);
+  commitRaw(storage, oldRaw);
+
+  const loaded = readStoredGame(storage, 3_000);
+
+  assert.equal(loaded.source, "v3-primary");
+  assert.equal(loaded.currentAttempt?.run.corpusRevision, null);
+  assert.equal(loaded.currentAttempt?.run.puzzleFingerprint, null);
+  assert.ok(loaded.currentAttempt);
+  const result = await writeStoredGame(storage, loaded.currentAttempt, loaded.progress, 4_000, {
+    expectedSaveId: "save-storage-oldv3",
+    saveId: "save-storage-newv3",
+  });
+  assert.equal(result.ok, true);
+  assert.equal(storage.values.get(storageV3PreviousKey), oldRaw);
+  assert.equal((JSON.parse(storage.values.get(storageV3PrimaryKey)!) as Record<string, any>).branches.attempt.stateSchemaVersion, 3);
+});
+
+for (const [attemptSchema, progressSchema] of [[2, 2], [2, 3], [3, 2], [3, 3]] as const) {
+  test(`storage v3 accepts attempt schema ${attemptSchema} with progress schema ${progressSchema}`, () => {
+    const storage = new MemoryStorage();
+    const envelope = JSON.parse(serializeStoredGame(createState(), createEmptyProgress(), 2_000, `save-matrix-${attemptSchema}${progressSchema}0000`)) as Record<string, any>;
+    if (attemptSchema === 2) {
+      delete envelope.branches.attempt.value.run.corpusRevision;
+      delete envelope.branches.attempt.value.run.fingerprintVersion;
+      delete envelope.branches.attempt.value.run.puzzleFingerprint;
+      envelope.branches.attempt.stateSchemaVersion = 2;
+    }
+    if (progressSchema === 2) {
+      delete envelope.branches.progress.value.dailyLedger;
+      envelope.branches.progress.value.schemaVersion = 2;
+      envelope.branches.progress.stateSchemaVersion = 2;
+    }
+    commitRaw(storage, JSON.stringify(envelope));
+
+    const loaded = readStoredGame(storage, 3_000);
+
+    assert.equal(loaded.source, "v3-primary");
+    assert.equal(loaded.currentAttempt?.attemptId, "attempt-storage");
+    assert.equal(loaded.progress.schemaVersion, 3);
+  });
+}
+
 test("v2 migration is pure and leaves every source byte untouched", () => {
   const storage = new MemoryStorage();
   const raw = createV2Raw();
@@ -197,7 +265,9 @@ test("invalid v2 data falls back to legacy without mutating either key", () => {
 
 test("v2 attempt and progress migrate independently before legacy fallback", () => {
   const state = createState();
-  const validProgress = recordRunProgress(createEmptyProgress(), state, 2_000);
+  const validProgress = createEmptyProgress();
+  const { dailyLedger: _dailyLedger, ...legacyProgress } = validProgress;
+  const validV2Progress = { ...legacyProgress, schemaVersion: 2 };
   const attemptOnly = new MemoryStorage();
   attemptOnly.values.set(gameStorageKey, JSON.stringify({ schemaVersion: 2, currentAttempt: snapshotAttempt(state, 2_000), progress: { broken: true } }));
   attemptOnly.values.set(legacySessionStorageKey, createLegacyRaw());
@@ -208,7 +278,7 @@ test("v2 attempt and progress migrate independently before legacy fallback", () 
   assert.ok(attemptResult.issues.includes("progress-reset"));
 
   const progressOnly = new MemoryStorage();
-  progressOnly.values.set(gameStorageKey, JSON.stringify({ schemaVersion: 2, currentAttempt: { broken: true }, progress: validProgress }));
+  progressOnly.values.set(gameStorageKey, JSON.stringify({ schemaVersion: 2, currentAttempt: { broken: true }, progress: validV2Progress }));
   progressOnly.values.set(legacySessionStorageKey, createLegacyRaw());
   const progressResult = readStoredGame(progressOnly, 3_000);
   assert.equal(progressResult.source, "v2-migrated");
@@ -222,12 +292,13 @@ test("previous generator-v2 envelopes migrate without rewriting their source", a
   const state = createState();
   const previousWords = state.run.words.map(({ source: _source, qualityStatus: _qualityStatus, clue: _clue, ...word }) => word);
   const { timerEnabled: _timerEnabled, learningMode: _learningMode, ...previousOptions } = state.run.options;
+  const { corpusRevision: _corpusRevision, fingerprintVersion: _fingerprintVersion, puzzleFingerprint: _puzzleFingerprint, ...previousRun } = state.run;
   const raw = JSON.stringify({
     schemaVersion: 2,
     currentAttempt: {
       ...state,
       run: {
-        ...state.run,
+        ...previousRun,
         generatorVersion: 2,
         words: previousWords,
         options: { ...previousOptions, clueDensity: 3 },
@@ -420,6 +491,7 @@ for (const mutation of [
   { name: "solution mismatch", apply: (value: Record<string, any>) => { value.branches.attempt.value.run.board.cells[0].solution = "z"; } },
   { name: "clue mismatch", apply: (value: Record<string, any>) => { value.branches.attempt.value.run.board.placements[0].clueNumber = 99; } },
   { name: "puzzle identity mismatch", apply: (value: Record<string, any>) => { value.branches.attempt.value.run.puzzleId = "tampered"; } },
+  { name: "provenance fingerprint mismatch", apply: (value: Record<string, any>) => { value.branches.attempt.value.run.puzzleFingerprint = `p1-${"0".repeat(64)}`; } },
 ]) {
   test(`strict v3 rejects semantic board mutation: ${mutation.name}`, () => {
     const storage = new MemoryStorage();
@@ -549,6 +621,166 @@ test("pagehide reconciliation reports denied enumeration instead of rejecting bo
 
   assert.equal(result?.ok, false);
   if (result && !result.ok) assert.equal(result.code, "read-denied");
+});
+
+test("portable backup is bounded, answer-bearing, and previews only safe metadata", () => {
+  const state = createState(1_000, "portable", "attempt-portable");
+  const progress = recordRunProgress(createEmptyProgress(), state, 2_000);
+  const { backup, candidate } = createBackupCandidate(state, progress, 2_000);
+  const wrapper = JSON.parse(backup.raw) as Record<string, any>;
+
+  assert.ok(backup.bytes <= maxPortableBackupBytes);
+  assert.deepEqual(Object.keys(wrapper).sort(), ["backupVersion", "containsAnswers", "envelope", "exportedAt", "format"]);
+  assert.equal(wrapper.containsAnswers, true);
+  assert.equal(candidate.preview.attemptStatus, "unfinished");
+  assert.equal(candidate.preview.historyCount, 1);
+  assert.equal(JSON.stringify(candidate.preview).includes(state.run.words[0].answer), false);
+
+  const progressOnly = createBackupCandidate(null, createEmptyProgress(), 3_000);
+  assert.equal(progressOnly.candidate.preview.attemptStatus, "none");
+});
+
+test("portable preview rejects malformed, oversized, future, and semantically invalid backups", () => {
+  const { backup } = createBackupCandidate(createState(), createEmptyProgress(), 2_000);
+  const futureBackup = JSON.parse(backup.raw) as Record<string, any>;
+  futureBackup.backupVersion = 2;
+  const futureGenerator = JSON.parse(backup.raw) as Record<string, any>;
+  futureGenerator.envelope.branches.attempt.value.run.generatorVersion = 99;
+  const invalidBoard = JSON.parse(backup.raw) as Record<string, any>;
+  invalidBoard.envelope.branches.attempt.value.run.board.cells[0].solution = "z";
+  const extraKey = JSON.parse(backup.raw) as Record<string, any>;
+  extraKey.extra = true;
+
+  assert.deepEqual(previewPortableBackup("not-json"), { ok: false, code: "invalid-backup" });
+  assert.deepEqual(previewPortableBackup("x".repeat(maxPortableBackupBytes + 1)), { ok: false, code: "backup-too-large" });
+  assert.deepEqual(previewPortableBackup(JSON.stringify(futureBackup)), { ok: false, code: "future-version" });
+  assert.deepEqual(previewPortableBackup(JSON.stringify(futureGenerator)), { ok: false, code: "future-version" });
+  assert.deepEqual(previewPortableBackup(JSON.stringify(invalidBoard)), { ok: false, code: "invalid-backup" });
+  assert.deepEqual(previewPortableBackup(JSON.stringify(extraKey)), { ok: false, code: "invalid-backup" });
+});
+
+test("replace-only import commits both branches and durable undo restores the complete prior envelope", async () => {
+  const storage = new MemoryStorage();
+  const before = createState(1_000, "before-import", "attempt-before-import");
+  const beforeProgress = recordRunProgress(createEmptyProgress(), before, 2_000);
+  assert.equal((await writeStoredGame(storage, before, beforeProgress, 2_000, { expectedSaveId: null, saveId: "save-before-import" })).ok, true);
+  const beforeRaw = storage.values.get(storageV3PrimaryKey)!;
+  const untouchedV2 = createV2Raw(before, beforeProgress, 2_000);
+  storage.values.set(gameStorageKey, untouchedV2);
+
+  const imported = createState(3_000, "imported", "attempt-imported");
+  const importedProgress = recordRunProgress(createEmptyProgress(), imported, 4_000);
+  const { candidate } = createBackupCandidate(imported, importedProgress, 4_000);
+  storage.operations.length = 0;
+  const result = await importPortableBackup(storage, candidate, { expectedSaveId: "save-before-import" }, 5_000);
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.currentAttempt?.attemptId, "attempt-imported");
+  assert.deepEqual(result.progress.history.map((entry) => entry.attemptId), ["attempt-imported"]);
+  assert.equal(result.undoAvailable, true);
+  assert.equal(storage.values.get(storageV3PreviousKey), beforeRaw);
+  assert.equal(storage.values.get(gameStorageKey), untouchedV2);
+  assert.equal(storage.operations.filter((operation) => operation === `set:${storageV3PrimaryKey}`).length, 1);
+  assert.equal(hasPortableImportUndo(storage, result.saveId, 5_001), true);
+
+  const undone = await undoPortableImport(storage, { expectedSaveId: result.saveId }, 6_000);
+  assert.equal(undone.ok, true);
+  if (!undone.ok) return;
+  assert.equal(undone.currentAttempt?.attemptId, "attempt-before-import");
+  assert.deepEqual(undone.progress.history.map((entry) => entry.attemptId), ["attempt-before-import"]);
+  assert.equal(undone.undoAvailable, false);
+  assert.equal(storage.values.has(storageV3ImportUndoKey), false);
+  assert.equal(readStoredGame(storage, 6_001).currentAttempt?.attemptId, "attempt-before-import");
+});
+
+test("pagehide reconciliation advances the import receipt so undo survives reload", async () => {
+  const storage = new MemoryStorage();
+  const before = createState(1_000, "before", "attempt-before");
+  assert.equal((await writeStoredGame(storage, before, createEmptyProgress(), 2_000, { saveId: "save-before-0001" })).ok, true);
+  const imported = createState(3_000, "imported", "attempt-imported");
+  const { candidate } = createBackupCandidate(imported, createEmptyProgress(), 4_000);
+  const importedResult = await importPortableBackup(storage, candidate, { expectedSaveId: "save-before-0001" }, 5_000);
+  assert.equal(importedResult.ok, true);
+  if (!importedResult.ok || !importedResult.currentAttempt) return;
+  assert.equal(stagePagehideSnapshot(storage, importedResult.currentAttempt, importedResult.progress, 6_000, {
+    baseSaveId: importedResult.saveId,
+    writerId: "reload-writer",
+  }).ok, true);
+
+  const reconciled = await reconcilePagehideSnapshots(storage, 7_000);
+
+  assert.equal(reconciled?.ok, true);
+  if (!reconciled?.ok) return;
+  assert.equal(hasPortableImportUndo(storage, reconciled.saveId, 7_001), true);
+  const undone = await undoPortableImport(storage, { expectedSaveId: reconciled.saveId }, 8_000);
+  assert.equal(undone.ok, true);
+  if (undone.ok) assert.equal(undone.currentAttempt?.attemptId, "attempt-before");
+});
+
+test("import supports a progress-only backup and preserves supported old branch schemas", async () => {
+  const storage = new MemoryStorage();
+  const backup = createPortableBackup(null, createEmptyProgress(), 2_000);
+  assert.equal(backup.ok, true);
+  if (!backup.ok) return;
+  const wrapper = JSON.parse(backup.raw) as Record<string, any>;
+  wrapper.envelope.branches.progress.stateSchemaVersion = 2;
+  wrapper.envelope.branches.progress.value.schemaVersion = 2;
+  delete wrapper.envelope.branches.progress.value.dailyLedger;
+  const preview = previewPortableBackup(JSON.stringify(wrapper), 2_001);
+  assert.equal(preview.ok, true);
+  if (!preview.ok) return;
+
+  const result = await importPortableBackup(storage, preview.candidate, { expectedSaveId: null }, 3_000);
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.currentAttempt, null);
+  assert.equal(result.progress.schemaVersion, 3);
+  const stored = JSON.parse(storage.values.get(storageV3PrimaryKey)!) as Record<string, any>;
+  assert.equal(stored.branches.attempt, null);
+  assert.equal(stored.branches.progress.stateSchemaVersion, 2);
+});
+
+test("stale or failed imports leave the canonical head unchanged and no active undo", async () => {
+  const storage = new MemoryStorage();
+  const before = createState(1_000, "before", "attempt-before");
+  assert.equal((await writeStoredGame(storage, before, createEmptyProgress(), 2_000, { expectedSaveId: null, saveId: "save-before-0001" })).ok, true);
+  const beforeRaw = storage.values.get(storageV3PrimaryKey)!;
+  const { candidate } = createBackupCandidate(createState(3_000, "after", "attempt-after"), createEmptyProgress(), 4_000);
+
+  const stale = await importPortableBackup(storage, candidate, { expectedSaveId: "save-stale-0000" }, 5_000);
+  assert.equal(stale.ok, false);
+  if (!stale.ok) assert.equal(stale.code, "concurrent-write");
+  assert.equal(storage.values.get(storageV3PrimaryKey), beforeRaw);
+  assert.equal(storage.values.has(storageV3ImportUndoKey), false);
+
+  storage.onSet = (key) => {
+    if (key === storageV3PrimaryKey) throw new DOMException("full", "QuotaExceededError");
+  };
+  const failed = await importPortableBackup(storage, candidate, { expectedSaveId: "save-before-0001" }, 6_000);
+  storage.onSet = null;
+  assert.equal(failed.ok, false);
+  if (!failed.ok) assert.equal(failed.code, "quota-exceeded");
+  assert.equal(storage.values.get(storageV3PrimaryKey), beforeRaw);
+  assert.equal(storage.values.has(storageV3ImportUndoKey), false);
+});
+
+test("a later verified save expires import undo without risking the imported state", async () => {
+  const storage = new MemoryStorage();
+  const before = createState(1_000, "before", "attempt-before");
+  assert.equal((await writeStoredGame(storage, before, createEmptyProgress(), 2_000, { saveId: "save-before-0001" })).ok, true);
+  const imported = createState(3_000, "imported", "attempt-imported");
+  const { candidate } = createBackupCandidate(imported, createEmptyProgress(), 4_000);
+  const result = await importPortableBackup(storage, candidate, { expectedSaveId: "save-before-0001" }, 5_000);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal((await writeStoredGame(storage, imported, createEmptyProgress(), 6_000, { expectedSaveId: result.saveId, saveId: "save-after-import" })).ok, true);
+
+  assert.equal(hasPortableImportUndo(storage, "save-after-import", 7_000), false);
+  const undo = await undoPortableImport(storage, { expectedSaveId: "save-after-import" }, 7_000);
+  assert.equal(undo.ok, false);
+  assert.equal(readStoredGame(storage, 7_001).currentAttempt?.attemptId, "attempt-imported");
 });
 
 test("quota during primary write leaves the old committed save recoverable", async () => {

@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AssistSummary, CurrentRunState, PersistedRunState, ProgressSnapshot, PuzzleBoardCell, PuzzlePlacement, PuzzleOptions, PuzzleWord, RunSummary, TopicId } from "@/lib/game-types";
+import type { AssistSummary, CurrentRunState, PersistedRunState, ProgressSnapshot, PuzzleBoardCell, PuzzlePlacement, PuzzleOptions, PuzzleRun, PuzzleWord, RunSummary, TopicId } from "@/lib/game-types";
 import { buildPuzzleRun, createHintLadder, PuzzleGenerationError, sanitizeGuess } from "@/lib/puzzle-generator";
+import { getQuestV3FillLetter, hasVerifiedPuzzleProvenance } from "@/lib/puzzle-provenance";
 import { isCrosswordContentPack, isCrosswordTopic } from "@/lib/clue-catalog";
-import { getCanonicalDailyOptions, getPuzzleSizeRange, getUtcDay, isCanonicalDailyOptions, normalizePuzzleOptions, parseSharedOptions } from "@/lib/puzzle-options";
+import { getCanonicalDailyOptions, getPuzzleSizeRange, getUtcDay, isCanonicalDailyOptions, normalizePuzzleOptions, parseSharedOptions, type SharedPuzzleProvenance } from "@/lib/puzzle-options";
 import { buildDailyArchive, createEmptyProgress, recordRunProgress } from "@/lib/progress";
 import {
   canMutateAttempt,
@@ -23,7 +24,23 @@ import {
   startPreparedAttempt,
   summarizeAssists,
 } from "@/lib/run-state";
-import { readStoredGame, reconcilePagehideSnapshots, stagePagehideSnapshot, writeStoredGame, type StoredGameResult, type StorageWriteResult } from "@/lib/session-storage";
+import {
+  createPortableBackup,
+  hasPortableImportUndo,
+  importPortableBackup,
+  maxPortableBackupBytes,
+  prepareStoredAttempt,
+  previewPortableBackup,
+  readStoredGame,
+  reconcilePagehideSnapshots,
+  stagePagehideSnapshot,
+  undoPortableImport,
+  writeStoredGame,
+  type PortableBackupCandidate,
+  type PortableBackupPreview,
+  type StoredGameResult,
+  type StorageWriteResult,
+} from "@/lib/session-storage";
 import {
   applyCellEntry,
   applyWordEntry,
@@ -33,6 +50,7 @@ import {
 } from "@/lib/studio/attempt-entries";
 import { refreshPreparedDaily, resolveStudioBootstrap, type BootstrapSource } from "@/lib/studio/bootstrap";
 import { needsRunReplacementConfirmation, replaceRunTransaction } from "@/lib/studio/run-replacement";
+import { canReplaySummaryExactly, resolveSavedRunReplay } from "@/lib/studio/replay";
 import { getThemeStyle, themeStyles } from "@/lib/themes";
 import { contentCatalog, topicCatalog, wordBank } from "@/lib/word-bank";
 
@@ -57,6 +75,8 @@ type QuestPathState = {
 };
 type PendingRunReplacement = {
   options: PuzzleOptions;
+  expectedProvenance: SharedPuzzleProvenance | null;
+  intent: "options" | "today-daily" | "random-custom";
 };
 type StorageStatus = {
   tone: "warning" | "recovered";
@@ -133,20 +153,26 @@ function getStorageFailureMessage(result: Exclude<StorageWriteResult, { ok: true
   }
 }
 
-function createRuntimeSeed() {
-  return `custom-${Date.now()}`;
+function createRuntimeSeed(nowMs: number) {
+  return `custom-${nowMs}`;
 }
 
 function readNow() {
   return Date.now();
 }
 
-function buildShareUrl(options: PuzzleOptions) {
+function buildShareUrl(run: PuzzleRun) {
+  const { options } = run;
   const url = new URL(window.location.href);
   url.search = "";
   url.hash = "";
   const shareSeed = options.mode === "daily" ? options.seed.replace(/^daily:/, "") : options.seed;
-  url.searchParams.set("generatorVersion", "3");
+  url.searchParams.set("generatorVersion", String(run.generatorVersion));
+  if (run.corpusRevision && run.fingerprintVersion && run.puzzleFingerprint) {
+    url.searchParams.set("corpusRevision", run.corpusRevision);
+    url.searchParams.set("fingerprintVersion", String(run.fingerprintVersion));
+    url.searchParams.set("puzzleFingerprint", run.puzzleFingerprint);
+  }
   url.searchParams.set("mode", options.mode);
   url.searchParams.set("seed", shareSeed);
   url.searchParams.set("challenge", options.challenge);
@@ -159,6 +185,12 @@ function buildShareUrl(options: PuzzleOptions) {
   url.searchParams.set("learningMode", String(options.learningMode));
   url.searchParams.set("topics", options.topics.join(","));
   return url.toString();
+}
+
+function getExpectedRunProvenance(run: PuzzleRun): SharedPuzzleProvenance | null {
+  return hasVerifiedPuzzleProvenance(run) && run.generatorVersion === 3 && run.corpusRevision && run.fingerprintVersion === 1 && run.puzzleFingerprint
+    ? { generatorVersion: 3, corpusRevision: run.corpusRevision, fingerprintVersion: 1, puzzleFingerprint: run.puzzleFingerprint }
+    : null;
 }
 
 function formatElapsed(ms: number) {
@@ -345,20 +377,8 @@ function getClueArtLabel(index: number) {
   return ["topic", "starter", "length"][index] ?? "cue";
 }
 
-function getQuestFillLetter(seed: string, row: number, col: number) {
-  const letters = "ETAOINSHRDLUCMFWYPVBGKQJXZ";
-  const hashBase = `${seed}:${row}:${col}`;
-  let hash = 0;
-
-  for (let index = 0; index < hashBase.length; index += 1) {
-    hash = (hash * 31 + hashBase.charCodeAt(index)) % letters.length;
-  }
-
-  return letters[hash];
-}
-
 function getQuestDisplayLetter(cell: PuzzleBoardCell | undefined, seed: string, row: number, col: number) {
-  return cell ? cell.solution.toUpperCase() : getQuestFillLetter(seed, row, col);
+  return (cell ? cell.solution : getQuestV3FillLetter(seed, row, col)).toUpperCase();
 }
 
 function buildLinearQuestPath(start: { row: number; col: number }, end: { row: number; col: number }) {
@@ -455,6 +475,13 @@ export function WordPuzzleStudio() {
   const replacementRequestRef = useRef<PendingRunReplacement | null>(null);
   const replacementLockRef = useRef(false);
   const replacementCommitInFlightRef = useRef(false);
+  const importDialogRef = useRef<HTMLDialogElement | null>(null);
+  const importCancelRef = useRef<HTMLButtonElement | null>(null);
+  const importFileRef = useRef<HTMLInputElement | null>(null);
+  const importInvokerRef = useRef<HTMLElement | null>(null);
+  const importFocusRestoreRef = useRef<HTMLElement | null>(null);
+  const importCandidateRef = useRef<PortableBackupCandidate | null>(null);
+  const importCommitInFlightRef = useRef(false);
   const reviewOriginRef = useRef<{ element: HTMLElement | null; panel: MobilePanel }>({ element: null, panel: "board" });
   const reviewHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const runHeadingRef = useRef<HTMLHeadingElement | null>(null);
@@ -474,9 +501,13 @@ export function WordPuzzleStudio() {
   const [builderAdvancedOpen, setBuilderAdvancedOpen] = useState(false);
   const [revealConfirm, setRevealConfirm] = useState<ReviewTarget>({ kind: "none" });
   const [pendingReplacement, setPendingReplacement] = useState<PendingRunReplacement | null>(null);
+  const [pendingImportPreview, setPendingImportPreview] = useState<PortableBackupPreview | null>(null);
   const [shownAnagrams, setShownAnagrams] = useState<Record<string, string>>({});
   const [questPath, setQuestPath] = useState<QuestPathState>({ anchor: null, cells: [] });
   const [isStarting, setIsStarting] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [portableUndoAvailable, setPortableUndoAvailable] = useState(false);
+  const [portableMessage, setPortableMessage] = useState<{ tone: "success" | "warning"; message: string } | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [storageStatus, setStorageStatus] = useState<StorageStatus>(null);
   const [toast, setToast] = useState<ToastState>(null);
@@ -498,10 +529,17 @@ export function WordPuzzleStudio() {
   const storageWritableRef = useRef(true);
   const storageStatusRef = useRef<StorageStatus>(null);
   const storageWriterIdRef = useRef("");
+  const portableUndoAvailableRef = useRef(false);
   const storageSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const updatePortableUndoAvailability = useCallback((available: boolean) => {
+    portableUndoAvailableRef.current = available;
+    setPortableUndoAvailable(available);
+  }, []);
   const applyStorageWriteResult = useCallback((result: StorageWriteResult) => {
     if (result.ok) {
       storageRevisionRef.current = result.saveId;
+      portableUndoAvailableRef.current = false;
+      setPortableUndoAvailable(false);
       storageWritableRef.current = true;
       if (storageStatusRef.current?.tone === "warning") setAnnouncement("Progress is saved locally again.");
       storageStatusRef.current = null;
@@ -551,6 +589,7 @@ export function WordPuzzleStudio() {
       progressRef.current = resolved.progress;
       storageRevisionRef.current = stored.committedSaveId;
       storageWritableRef.current = stored.writable;
+      updatePortableUndoAvailability(hasPortableImportUndo(window.localStorage, stored.committedSaveId, nowMs));
       setOptions(resolved.builderOptions);
       setState(resolved.current);
       setProgress(resolved.progress);
@@ -571,7 +610,7 @@ export function WordPuzzleStudio() {
       cancelled = true;
       window.clearTimeout(handle);
     };
-  }, []);
+  }, [updatePortableUndoAvailability]);
 
   useEffect(() => {
     stateRef.current = state;
@@ -671,7 +710,10 @@ export function WordPuzzleStudio() {
       if (event.persisted) {
         syncAttemptVisibility(!document.hidden);
         void reconcilePagehideSnapshots(window.localStorage, readNow()).then((result) => {
-          if (result) applyStorageWriteResult(result);
+          if (result) {
+            applyStorageWriteResult(result);
+            if (result.ok) updatePortableUndoAvailability(hasPortableImportUndo(window.localStorage, result.saveId));
+          }
         });
       }
     };
@@ -684,7 +726,7 @@ export function WordPuzzleStudio() {
       window.removeEventListener("pagehide", handlePageHide);
       window.removeEventListener("pageshow", handlePageShow);
     };
-  }, [applyStorageWriteResult, hydrated]);
+  }, [applyStorageWriteResult, hydrated, updatePortableUndoAvailability]);
 
   useEffect(() => {
     if (!hydrated || !isStartedAttempt(state) || state.paused || state.completedAt || !state.run.options.timerEnabled) {
@@ -777,6 +819,27 @@ export function WordPuzzleStudio() {
     return () => window.cancelAnimationFrame(handle);
   }, [isStarting, pendingReplacement]);
 
+  useEffect(() => {
+    const dialog = importDialogRef.current;
+    if (!dialog) return;
+    if (pendingImportPreview && !dialog.open) {
+      dialog.showModal();
+      window.requestAnimationFrame(() => importCancelRef.current?.focus());
+    } else if (!pendingImportPreview && dialog.open) {
+      dialog.close();
+    }
+  }, [pendingImportPreview]);
+
+  useEffect(() => {
+    if (pendingImportPreview || isImporting || !importFocusRestoreRef.current) return;
+    const invoker = importFocusRestoreRef.current;
+    importFocusRestoreRef.current = null;
+    const handle = window.requestAnimationFrame(() => {
+      if (invoker.isConnected && !invoker.matches(":disabled")) invoker.focus();
+    });
+    return () => window.cancelAnimationFrame(handle);
+  }, [isImporting, pendingImportPreview]);
+
   const solvedCount = state.solvedIds.length;
   const started = isStartedAttempt(state);
   const activeWord = state.run.words.find((word) => word.id === state.activeWordId) ?? state.run.words[0] ?? null;
@@ -787,7 +850,7 @@ export function WordPuzzleStudio() {
   const progressLabel = `${solvedCount}/${state.run.words.length} solved`;
   const runStateLabel = finished ? "Done" : !started ? "Ready" : state.paused ? "Paused" : "Live";
   const cellMap = new Map(state.run.board.cells.map((cell) => [getCellKey(cell.row, cell.col), cell]));
-  const archive = buildDailyArchive(progress.history, 10, clockNow);
+  const archive = buildDailyArchive(progress, 10, clockNow);
   const activeFilledCount = countFilledLetters(activeGuess);
   const boardFocusKey = focusedCellKey ?? getFirstOpenCellKey(state, state.activeWordId);
   const assistSummary = started
@@ -799,7 +862,7 @@ export function WordPuzzleStudio() {
   const uncommonSolvedCount = state.run.words.filter((word) => word.frequencyBand === "uncommon").length;
   const commonSolvedCount = state.run.words.filter((word) => word.frequencyBand === "common").length;
   const finishedHistoryCount = progress.history.filter((entry) => entry.finished).length;
-  const dailyClearCount = progress.history.filter((entry) => entry.canonicalDaily && entry.finished).length;
+  const dailyClearCount = Object.values(progress.dailyLedger).filter((outcome) => outcome === "credited" || outcome === "late-clear").length;
   const historicalAssistCount = progress.history.reduce((total, entry) => total + entry.assists.total, 0);
   const availableTopics = topicCatalog.filter((topic) => options.boardView === "quest" || isCrosswordTopic(topic.id));
   const selectedTopicLabels = availableTopics.filter((topic) => options.topics.includes(topic.id)).map((topic) => topic.label);
@@ -1045,12 +1108,27 @@ export function WordPuzzleStudio() {
     if (replacementCommitInFlightRef.current) return;
     replacementCommitInFlightRef.current = true;
     const nowMs = readNow();
+    const normalized = request.intent === "today-daily"
+      ? getCanonicalDailyOptions(nowMs)
+      : normalizeOptions(request.options, nowMs);
+    const requestOptions = request.intent === "random-custom" || (normalized.mode === "custom" && !normalized.seed.trim())
+      ? { ...normalized, mode: "custom" as const, seed: createRuntimeSeed(nowMs) }
+      : normalized;
     setIsStarting(true);
     setRunError(null);
     const result = await replaceRunTransaction({
       current: stateRef.current,
       progress: progressRef.current,
-      buildRun: () => buildPuzzleRun(request.options),
+      buildRun: (transitionNowMs) => {
+        const run = buildPuzzleRun(requestOptions, transitionNowMs);
+        if (request.expectedProvenance && (run.generatorVersion !== request.expectedProvenance.generatorVersion
+          || run.corpusRevision !== request.expectedProvenance.corpusRevision
+          || run.fingerprintVersion !== request.expectedProvenance.fingerprintVersion
+          || run.puzzleFingerprint !== request.expectedProvenance.puzzleFingerprint)) {
+          throw new PuzzleGenerationError("unsupported-content", "That saved puzzle no longer matches its recorded fingerprint. Nothing was replaced.");
+        }
+        return run;
+      },
       persist: queueStorageWrite,
       nowMs,
     });
@@ -1101,7 +1179,11 @@ export function WordPuzzleStudio() {
     window.requestAnimationFrame(() => runHeadingRef.current?.focus());
   }
 
-  function startNewRun(nextOptions = options) {
+  function startNewRun(
+    nextOptions = options,
+    expectedProvenance: SharedPuzzleProvenance | null = null,
+    intent: PendingRunReplacement["intent"] = "options",
+  ) {
     if (replacementLockRef.current) {
       return;
     }
@@ -1113,11 +1195,7 @@ export function WordPuzzleStudio() {
       return;
     }
 
-    const normalized = normalizeOptions(nextOptions);
-    const requestOptions = normalized.mode === "custom" && !normalized.seed.trim()
-      ? { ...normalized, seed: createRuntimeSeed() }
-      : normalized;
-    const request = { options: requestOptions };
+    const request = { options: normalizeOptions(nextOptions), expectedProvenance, intent };
     replacementLockRef.current = true;
     replacementInvokerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setRunError(null);
@@ -1148,24 +1226,212 @@ export function WordPuzzleStudio() {
   }
 
   function replaySavedRun(summary: RunSummary) {
-    const nextOptions = normalizeOptions(summary.options);
-
-    void startNewRun({
-      ...nextOptions,
-      seed: summary.mode === "daily" ? summary.seed.replace(/^daily:/, "") : nextOptions.seed,
-    });
+    const replay = resolveSavedRunReplay(summary, readNow());
+    void startNewRun(replay.options, replay.kind === "exact" ? replay.expectedProvenance : null);
   }
 
   function startTodayDailyRun() {
-    void startNewRun(getCanonicalDailyOptions());
+    void startNewRun(options, null, "today-daily");
   }
 
   function startRandomCustomRun() {
     void startNewRun({
       ...options,
       mode: "custom",
-      seed: createRuntimeSeed(),
-    });
+      seed: "",
+    }, null, "random-custom");
+  }
+
+  function setPortableNotice(tone: "success" | "warning", message: string) {
+    setPortableMessage({ tone, message });
+    setAnnouncement(message);
+    showToast(message, tone === "success" ? "success" : "muted");
+  }
+
+  function finishImportRequest(restoreFocus: boolean) {
+    const invoker = importInvokerRef.current;
+    if (importDialogRef.current?.open) importDialogRef.current.close();
+    importCandidateRef.current = null;
+    importInvokerRef.current = null;
+    importFocusRestoreRef.current = restoreFocus ? invoker : null;
+    importCommitInFlightRef.current = false;
+    setPendingImportPreview(null);
+    setIsImporting(false);
+    if (importFileRef.current) importFileRef.current.value = "";
+  }
+
+  function adoptPortableState(
+    currentAttempt: PersistedRunState | null,
+    nextProgress: ProgressSnapshot,
+    nowMs: number,
+  ) {
+    const nextState = currentAttempt
+      ? prepareStoredAttempt(currentAttempt, nowMs)
+      : createPreparedRunState(buildPuzzleRun(getCanonicalDailyOptions(nowMs), nowMs));
+    skipBootstrapPersistenceRef.current = false;
+    skipNextPersistenceRef.current = true;
+    stateRef.current = nextState;
+    progressRef.current = nextProgress;
+    setOptions(nextState.run.options);
+    setState(nextState);
+    setProgress(nextProgress);
+    setBootstrapSource(currentAttempt ? "stored" : "current-daily");
+    setFocusedCellKey(getFirstOpenCellKey(nextState, nextState.activeWordId));
+    setMobilePanel(nextState.run.options.boardView === "crossword" ? "clues" : "board");
+    setRevealConfirm({ kind: "none" });
+    setShownAnagrams({});
+    setQuestPath({ anchor: null, cells: [] });
+    setReviewTarget({ kind: "none" });
+    setClockNow(nowMs);
+  }
+
+  function exportPortableData() {
+    const nowMs = readNow();
+    const current = stateRef.current;
+    const exportProgress = isStartedAttempt(current)
+      ? recordRunProgress(progressRef.current, current, nowMs)
+      : progressRef.current;
+    const backup = createPortableBackup(isStartedAttempt(current) ? current : null, exportProgress, nowMs);
+    if (!backup.ok) {
+      setPortableNotice("warning", backup.code === "candidate-too-large"
+        ? "This local backup is too large to export safely."
+        : "This local backup could not be verified for export.");
+      return;
+    }
+    let url: string | null = null;
+    try {
+      url = URL.createObjectURL(new Blob([backup.raw], { type: "application/json" }));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = backup.filename;
+      anchor.click();
+      setPortableNotice("success", "Local backup downloaded. It contains puzzle answers and local history; keep it private.");
+    } catch {
+      setPortableNotice("warning", "This browser could not download the local backup.");
+    } finally {
+      if (url) URL.revokeObjectURL(url);
+    }
+  }
+
+  async function previewPortableFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) return;
+    importInvokerRef.current = input;
+    if (file.size > maxPortableBackupBytes) {
+      setPortableNotice("warning", "That backup is too large and was not opened.");
+      input.value = "";
+      return;
+    }
+    try {
+      const preview = previewPortableBackup(await file.text(), readNow());
+      if (!preview.ok) {
+        const message = preview.code === "future-version"
+          ? "That backup was created by a newer Astra Lexa version. Nothing was replaced."
+          : preview.code === "backup-too-large"
+            ? "That backup is too large and was not opened."
+            : "That backup is malformed or failed semantic validation. Nothing was replaced.";
+        setPortableNotice("warning", message);
+        input.value = "";
+        return;
+      }
+      importCandidateRef.current = preview.candidate;
+      setPendingImportPreview(preview.candidate.preview);
+    } catch {
+      setPortableNotice("warning", "That backup could not be read. Nothing was replaced.");
+      input.value = "";
+    }
+  }
+
+  function cancelPortableImport() {
+    if (importCommitInFlightRef.current) return;
+    finishImportRequest(true);
+    setAnnouncement("Backup import cancelled. Local data was not changed.");
+  }
+
+  async function confirmPortableImport() {
+    const candidate = importCandidateRef.current;
+    if (!candidate || importCommitInFlightRef.current) return;
+    importCommitInFlightRef.current = true;
+    setIsImporting(true);
+    const nowMs = readNow();
+    if (pendingPersistenceTimerRef.current !== null) {
+      window.clearTimeout(pendingPersistenceTimerRef.current);
+      pendingPersistenceTimerRef.current = null;
+    }
+    await storageSaveQueueRef.current;
+    if (!storageWritableRef.current) {
+      setPortableNotice("warning", storageStatusRef.current?.message ?? "This local save is read-only. Nothing was replaced.");
+      finishImportRequest(true);
+      return;
+    }
+
+    const current = stateRef.current;
+    if (isStartedAttempt(current)) {
+      const latestProgress = recordRunProgress(progressRef.current, current, nowMs);
+      const flush = await queueStorageWrite(current, latestProgress, nowMs);
+      if (!applyStorageWriteResult(flush)) {
+        progressRef.current = latestProgress;
+        setProgress(latestProgress);
+        setPortableNotice("warning", "The latest visible run could not be saved, so the backup was not imported.");
+        finishImportRequest(true);
+        return;
+      }
+      progressRef.current = latestProgress;
+      setProgress(latestProgress);
+    }
+
+    const result = await importPortableBackup(window.localStorage, candidate, {
+      expectedSaveId: storageRevisionRef.current,
+    }, nowMs);
+    if (!result.ok) {
+      applyStorageWriteResult(result);
+      setPortableNotice("warning", getStorageFailureMessage(result));
+      finishImportRequest(true);
+      return;
+    }
+    applyStorageWriteResult(result);
+    adoptPortableState(result.currentAttempt, result.progress, nowMs);
+    updatePortableUndoAvailability(result.undoAvailable);
+    const recoveredStatus = {
+      tone: "recovered" as const,
+      message: "Backup restored locally. Its history and daily records are self-asserted from this file, not server verified.",
+    };
+    storageStatusRef.current = recoveredStatus;
+    setStorageStatus(recoveredStatus);
+    setPortableNotice("success", "Backup imported after verification. Undo is available until a newer change is saved.");
+    finishImportRequest(false);
+    window.requestAnimationFrame(() => runHeadingRef.current?.focus());
+  }
+
+  async function undoPortableDataImport() {
+    if (!portableUndoAvailable || isImporting) return;
+    await storageSaveQueueRef.current;
+    const expectedSaveId = storageRevisionRef.current;
+    if (!expectedSaveId || !hasPortableImportUndo(window.localStorage, expectedSaveId)) {
+      updatePortableUndoAvailability(false);
+      setPortableNotice("warning", "Import undo expired because a newer local change was saved.");
+      return;
+    }
+    setIsImporting(true);
+    const nowMs = readNow();
+    const result = await undoPortableImport(window.localStorage, { expectedSaveId }, nowMs);
+    setIsImporting(false);
+    if (!result.ok) {
+      if (result.code === "concurrent-write" || result.code === "recovery-required") {
+        updatePortableUndoAvailability(false);
+        setPortableNotice("warning", "Import undo expired because the local save changed.");
+      } else {
+        applyStorageWriteResult(result);
+        setPortableNotice("warning", getStorageFailureMessage(result));
+      }
+      return;
+    }
+    applyStorageWriteResult(result);
+    adoptPortableState(result.currentAttempt, result.progress, nowMs);
+    updatePortableUndoAvailability(false);
+    setPortableNotice("success", "The complete pre-import local save was restored.");
+    window.requestAnimationFrame(() => runHeadingRef.current?.focus());
   }
 
   async function copyCompletionSummary() {
@@ -1197,48 +1463,52 @@ export function WordPuzzleStudio() {
   }
 
   async function shareCurrentRunLink() {
-    const shareUrl = buildShareUrl(state.run.options);
+    const shareUrl = buildShareUrl(state.run);
     const sharePayload = {
       title: state.run.title,
       text: `${state.run.title} on Astra Lexa`,
       url: shareUrl,
     };
 
-    try {
-      if (navigator.share) {
+    if (navigator.share) {
+      try {
         await navigator.share(sharePayload);
         showToast("Run link shared.");
-      } else {
-        await navigator.clipboard.writeText(shareUrl);
-        showToast("Run link copied.");
+      } catch {
+        showToast("Share cancelled.", "muted");
       }
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      showToast("Run link copied.");
     } catch {
-      showToast("Share cancelled.", "muted");
+      showToast("Clipboard unavailable. The run link was not copied.", "muted");
     }
   }
 
   async function shareDailyResult() {
-    const shareUrl = buildShareUrl({
-      ...state.run.options,
-      mode: "daily",
-      seed: state.run.seed.replace(/^daily:/, ""),
-    });
+    const shareUrl = buildShareUrl(state.run);
     const text = buildDailyResultShareText();
 
-    try {
-      if (navigator.share) {
+    if (navigator.share) {
+      try {
         await navigator.share({
           title: `Astra Lexa Daily ${state.run.seed.replace(/^daily:/, "")}`,
           text,
           url: shareUrl,
         });
         showToast("Daily result shared.");
-      } else {
-        await navigator.clipboard.writeText(`${text} | ${shareUrl}`);
-        showToast("Daily result copied.");
+      } catch {
+        showToast("Share cancelled.", "muted");
       }
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(`${text} | ${shareUrl}`);
+      showToast("Daily result copied.");
     } catch {
-      showToast("Share cancelled.", "muted");
+      showToast("Clipboard unavailable. The daily result was not copied.", "muted");
     }
   }
 
@@ -1388,7 +1658,9 @@ export function WordPuzzleStudio() {
       return;
     }
 
-    const controls = [...event.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled)")];
+    const controls = [...event.currentTarget.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])',
+    )].filter((control) => !control.hasAttribute("hidden"));
     const first = controls[0];
     const last = controls.at(-1);
     if (!first || !last) {
@@ -2403,7 +2675,7 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
                             ? isQuestView
                               ? cell.solution.toUpperCase()
                               : (state.cellEntries[key] ?? "").toUpperCase()
-                            : getQuestFillLetter(state.run.seed, row, col);
+                            : getQuestV3FillLetter(state.run.seed, row, col).toUpperCase();
 
                           const buttonClass = cell
                             ? activeCell
@@ -2742,7 +3014,7 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
                 </div>
                 <div className="text-xs uppercase tracking-[0.28em] text-slate-400">Run complete</div>
                 <h3 ref={completionHeadingRef} tabIndex={-1} className="mt-2 text-3xl font-semibold text-white">Puzzle cleared.</h3>
-                <p className="mt-3 text-sm text-slate-300">{localSaveHealthy ? (isCanonicalDailyCompletion ? "This canonical clear is saved in your local archive and streak." : "This run is saved in your local history without changing the canonical daily streak.") : "This result is only in this tab until local saving recovers."} Replay this exact seed, review the board, or share the result.</p>
+                <p className="mt-3 text-sm text-slate-300">{localSaveHealthy ? (isCanonicalDailyCompletion ? "This canonical clear is saved in your local archive and streak." : "This run is saved in your local history without changing the canonical daily streak.") : "This result is only in this tab until local saving recovers."} Replay the exact puzzle when its recorded provenance matches, review the board, or share the result.</p>
 
                 <div className="mt-5">
                   <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Run recap</div>
@@ -2770,8 +3042,8 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
                 <div className="mt-5">
                   <div className="text-xs uppercase tracking-[0.22em] text-slate-400">What next</div>
                   <div className="mt-3 flex flex-wrap justify-center gap-2">
-                  <button type="button" onClick={() => startNewRun(state.run.options)} className="accent-chip rounded-full px-4 py-2 text-sm font-semibold">
-                    Replay run
+                  <button type="button" onClick={() => startNewRun(state.run.options, getExpectedRunProvenance(state.run))} className="accent-chip rounded-full px-4 py-2 text-sm font-semibold">
+                    {getExpectedRunProvenance(state.run) ? "Replay exact puzzle" : "Use settings/current rules"}
                   </button>
                   <button type="button" onClick={(event) => { reviewOriginRef.current = { element: event.currentTarget, panel: mobilePanel }; openAuthorizedReview({ kind: "puzzle", attemptId: state.attemptId }); }} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">
                     Review full puzzle
@@ -2854,8 +3126,13 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
                 {archive.slice(0, 7).map((entry) => (
                   <button key={entry.day} type="button" disabled={!entry.summary} onClick={() => entry.summary && replaySavedRun(entry.summary)} className="rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-left text-sm transition enabled:hover:border-white/20 disabled:cursor-default">
                     <div className="text-xs font-medium text-white">{entry.day === today ? "Today" : entry.day.slice(5)}</div>
-                    <div className="mt-2 text-[11px] text-slate-400">{entry.summary?.finished ? "Cleared" : entry.summary ? `${entry.summary.solvedCount}/${entry.summary.totalWords} solved` : "No attempt"}</div>
-                    {entry.summary ? <div className="mt-2 text-[10px] uppercase tracking-[0.16em] text-fuchsia-200">Replay</div> : null}
+                    <div className="mt-2 text-[11px] text-slate-400">{
+                      entry.outcome === "credited" ? "Credited"
+                        : entry.outcome === "late-clear" ? "Cleared late"
+                          : entry.summary ? `${entry.summary.solvedCount}/${entry.summary.totalWords} solved`
+                            : entry.outcome === "started" ? "Started" : "No attempt"
+                    }</div>
+                    {entry.summary ? <div className="mt-2 text-[10px] uppercase tracking-[0.16em] text-fuchsia-200">{canReplaySummaryExactly(entry.summary) ? "Replay exact puzzle" : "Use settings/current rules"}</div> : null}
                   </button>
                 ))}
               </div>
@@ -2978,9 +3255,36 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
                     <div className="mt-2 text-xl font-semibold text-white">{finishedHistoryCount}</div>
                   </div>
                 </div>
+                <div data-testid="portable-backup-panel" className="mt-6 rounded-3xl border border-amber-300/20 bg-amber-300/6 p-4">
+                  <div className="text-[11px] uppercase tracking-[0.22em] text-amber-100">Local backup</div>
+                  <h3 className="mt-1 text-base font-semibold text-white">Move or restore local data</h3>
+                  <p className="mt-2 text-xs leading-5 text-amber-50/85">
+                    Backup files contain puzzle answers and local history. They stay on this device unless you move the file; keep them private. Import replaces this browser’s attempt, history, and daily ledger after a safe preview—it never merges records.
+                  </p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button data-testid="export-backup" type="button" onClick={exportPortableData} disabled={isImporting} className="rounded-full border border-amber-200/25 bg-amber-200/10 px-3 py-2 text-xs font-medium text-amber-50 disabled:opacity-60">Export local backup</button>
+                    {portableUndoAvailable ? (
+                      <button data-testid="undo-import" type="button" onClick={() => void undoPortableDataImport()} disabled={isImporting} className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs text-slate-100 disabled:opacity-60">Undo last import</button>
+                    ) : null}
+                  </div>
+                  <label className="mt-4 block text-xs font-medium text-slate-200" htmlFor="portable-backup-file">Choose a backup to preview</label>
+                  <input
+                    ref={importFileRef}
+                    id="portable-backup-file"
+                    data-testid="import-backup-input"
+                    type="file"
+                    accept="application/json,.json"
+                    disabled={isImporting}
+                    onChange={(event) => void previewPortableFile(event)}
+                    className="mt-2 block w-full rounded-2xl border border-white/10 bg-slate-950/45 px-3 py-2 text-xs text-slate-300 file:mr-3 file:rounded-full file:border-0 file:bg-white/8 file:px-3 file:py-1.5 file:text-xs file:text-white"
+                  />
+                  {portableMessage ? (
+                    <p data-testid="portable-backup-status" role="status" className={`mt-3 text-xs leading-5 ${portableMessage.tone === "success" ? "text-emerald-200" : "text-amber-100"}`}>{portableMessage.message}</p>
+                  ) : null}
+                </div>
                 <div className="mt-6">
                   <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Local history</div>
-                  <p className="mt-2 text-xs leading-5 text-slate-400">History cards always start a fresh replay. {localSaveHealthy ? "Only the current saved attempt resumes when you return to the app." : "Recent changes will not resume after this tab closes unless local saving recovers."}</p>
+                  <p className="mt-2 text-xs leading-5 text-slate-400">History cards always start a fresh attempt. The action says whether the exact recorded puzzle or only its settings can be reused. {localSaveHealthy ? "Only the current saved attempt resumes when you return to the app." : "Recent changes will not resume after this tab closes unless local saving recovers."}</p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {(["all", "daily", "custom"] as const).map((mode) => (
                       <button key={mode} type="button" aria-pressed={historyModeFilter === mode} onClick={() => setHistoryModeFilter(mode)} className={`rounded-full border px-3 py-1.5 text-xs capitalize ${historyModeFilter === mode ? "border-fuchsia-400/30 bg-fuchsia-500/10 text-fuchsia-100" : "border-white/10 text-slate-300"}`}>
@@ -3001,7 +3305,7 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
                     <button key={entry.attemptId} data-testid="recent-run-card" type="button" onClick={() => replaySavedRun(entry)} className="w-full rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-left text-sm text-slate-200 transition hover:border-white/20">
                       <div className="flex items-center justify-between gap-3">
                         <span className="font-medium text-white">{entry.title}</span>
-                        <span className="rounded-full bg-white/6 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-300">Replay</span>
+                        <span className="rounded-full bg-white/6 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-300">{canReplaySummaryExactly(entry) ? "Replay exact puzzle" : "Use settings/current rules"}</span>
                       </div>
                       <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-400">
                         <span>{entry.mode}{entry.canonicalDaily ? " · canonical" : ""}</span>
@@ -3043,6 +3347,42 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
               <div className="mt-5 flex flex-wrap justify-end gap-2">
                 <button ref={replacementCancelRef} type="button" onClick={cancelRunReplacement} disabled={isStarting} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100 disabled:opacity-60">Cancel</button>
                 <button type="button" onClick={acceptRunReplacement} disabled={isStarting} className="accent-chip rounded-full px-4 py-2 text-sm font-semibold disabled:opacity-60">{isStarting ? "Saving..." : "Save and replace"}</button>
+              </div>
+            </div>
+          ) : null}
+        </dialog>
+
+        <dialog
+          ref={importDialogRef}
+          data-testid="import-backup-dialog"
+          aria-modal="true"
+          aria-busy={isImporting}
+          aria-labelledby="import-dialog-title"
+          aria-describedby="import-dialog-description"
+          onCancel={(event) => {
+            event.preventDefault();
+            cancelPortableImport();
+          }}
+          onKeyDown={trapDialogFocus}
+          className="glass-card fixed inset-0 m-auto w-[min(32rem,calc(100%-2rem))] rounded-[2rem] p-6 text-slate-100 backdrop:bg-slate-950/80"
+        >
+          {pendingImportPreview ? (
+            <div>
+              <div className="text-xs uppercase tracking-[0.24em] text-amber-200">Replace-only local import</div>
+              <h3 id="import-dialog-title" className="mt-2 text-2xl font-semibold text-white">Replace local data with this backup?</h3>
+              <p id="import-dialog-description" className="mt-3 text-sm leading-6 text-slate-300">
+                This answer-bearing file was validated in memory. Confirming replaces the current attempt, history, and daily ledger together. It does not merge records or upload anything.
+              </p>
+              <dl data-testid="backup-preview" className="mt-5 grid grid-cols-2 gap-3 rounded-3xl border border-white/10 bg-white/4 p-4 text-sm">
+                <div><dt className="text-xs text-slate-400">Exported</dt><dd className="mt-1 text-white">{new Date(pendingImportPreview.exportedAt).toLocaleString()}</dd></div>
+                <div><dt className="text-xs text-slate-400">Current attempt</dt><dd className="mt-1 capitalize text-white">{pendingImportPreview.attemptStatus}</dd></div>
+                <div><dt className="text-xs text-slate-400">Recent runs</dt><dd className="mt-1 text-white">{pendingImportPreview.historyCount}</dd></div>
+                <div><dt className="text-xs text-slate-400">Daily records</dt><dd className="mt-1 text-white">{pendingImportPreview.creditedDays} credited · {pendingImportPreview.lateClearDays} late</dd></div>
+              </dl>
+              <p className="mt-4 text-xs leading-5 text-amber-100">The preview intentionally hides puzzle answers. Imported daily records are local and self-asserted, not server verified.</p>
+              <div className="mt-5 flex flex-wrap justify-end gap-2">
+                <button ref={importCancelRef} type="button" onClick={cancelPortableImport} disabled={isImporting} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100 disabled:opacity-60">Cancel</button>
+                <button type="button" onClick={() => void confirmPortableImport()} disabled={isImporting} className="accent-chip rounded-full px-4 py-2 text-sm font-semibold disabled:opacity-60">{isImporting ? "Verifying..." : "Replace local data"}</button>
               </div>
             </div>
           ) : null}

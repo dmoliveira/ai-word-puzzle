@@ -45,6 +45,7 @@ test("a clean boot prepares the browser UTC daily without starting it", () => {
 
   assert.equal(result.source, "current-daily");
   assert.equal(result.current.run.seed, "daily:2026-07-29");
+  assert.equal(result.current.run.createdAt, new Date(nowMs).toISOString());
   assert.equal(result.current.attemptId, null);
   assert.equal(result.current.startedAt, null);
   assert.equal(result.progress.history.length, 0);
@@ -72,6 +73,16 @@ test("an unfinished saved attempt wins over valid or invalid shared intent", () 
   assert.match(restoredInvalid.warning ?? "", /invalid/i);
 });
 
+test("a provenance-bearing shared mismatch fails visibly before replacement", () => {
+  const shared = parseSharedOptions(`?generatorVersion=3&corpusRevision=word-bank-r1&fingerprintVersion=1&puzzleFingerprint=p1-${"0".repeat(64)}&mode=custom&seed=shared-bootstrap&topics=myth,cosmos,greek&challenge=quest&puzzleFamily=classic&contentPackId=auto&boardView=crossword&style=alpha&puzzleSize=4&timerEnabled=true&learningMode=false`, nowMs);
+  assert.equal(shared.kind, "valid");
+
+  const result = resolveStudioBootstrap({ stored: none, shared, nowMs });
+
+  assert.equal(result.source, "current-daily");
+  assert.match(result.warning ?? "", /fingerprint.*nothing was replaced/i);
+});
+
 test("a completed custom save yields to a prepared current daily without mutation", () => {
   const stored = storedAttempt(new Date(nowMs - 1_000).toISOString());
   const before = structuredClone(stored);
@@ -91,10 +102,11 @@ test("a hidden boot restores an attempt without starting its active clock", () =
 
 test("only an untouched current-daily preparation rolls to a new UTC day", () => {
   const prepared = resolveStudioBootstrap({ stored: none, shared: { kind: "none" }, nowMs });
-  const nextDay = Date.parse("2026-07-30T00:00:01.000Z");
+  const nextDay = Date.parse("2026-07-30T00:00:00.000Z");
   const refreshed = refreshPreparedDaily(prepared.current, prepared.source, nextDay);
   const shared = { ...prepared.current, run: buildPuzzleRun({ ...prepared.current.run.options, mode: "custom", seed: "fixed" }) };
 
   assert.equal(refreshed.run.seed, "daily:2026-07-30");
+  assert.equal(refreshed.run.createdAt, new Date(nextDay).toISOString());
   assert.equal(refreshPreparedDaily(shared, "shared", nextDay), shared);
 });

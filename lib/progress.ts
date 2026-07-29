@@ -1,4 +1,4 @@
-import type { AssistSummary, PersistedRunState, ProgressSnapshot, PuzzleOptions, RunSummary } from "@/lib/game-types";
+import type { AssistSummary, DailyLedgerOutcome, PersistedRunState, ProgressSnapshot, PuzzleOptions, RunSummary } from "@/lib/game-types";
 import { isCanonicalDailyOptions, normalizePuzzleOptions } from "@/lib/puzzle-options";
 import { summarizeAssists } from "@/lib/run-state";
 
@@ -6,11 +6,12 @@ export const legacyProgressStorageKey = "astra-lexa-progress";
 
 export function createEmptyProgress(): ProgressSnapshot {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     streak: 0,
     bestStreak: 0,
     lastDailySeed: null,
     lastCompletedAt: null,
+    dailyLedger: {},
     history: [],
   };
 }
@@ -21,6 +22,25 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function isIsoTimestamp(value: unknown): value is string {
   return typeof value === "string" && !Number.isNaN(Date.parse(value));
+}
+
+function isUtcDay(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = Date.parse(`${value}T00:00:00.000Z`);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString().slice(0, 10) === value;
+}
+
+function getDailyOutcome(options: PuzzleOptions, seed: string, startedAt: string, completedAt: string | null, finished: boolean): DailyLedgerOutcome | null {
+  if (!isCanonicalDailyOptions(options, seed)) return null;
+  if (!finished) return "started";
+  const day = seed.replace(/^daily:/, "");
+  return startedAt.slice(0, 10) === day && completedAt?.slice(0, 10) === day ? "credited" : "late-clear";
+}
+
+const outcomeRank: Record<DailyLedgerOutcome, number> = { started: 0, "late-clear": 1, credited: 2 };
+
+function mergeDailyOutcome(current: DailyLedgerOutcome | undefined, candidate: DailyLedgerOutcome) {
+  return !current || outcomeRank[candidate] > outcomeRank[current] ? candidate : current;
 }
 
 function createEmptyAssistSummary(): AssistSummary {
@@ -80,18 +100,25 @@ function decodeRunSummary(value: unknown): RunSummary | null {
   const finished = value.finished === true && solvedCount === totalWords;
   const attemptId = typeof value.attemptId === "string" && value.attemptId ? value.attemptId : `legacy-${runId}-${createdAt}`;
   const puzzleId = typeof value.puzzleId === "string" && value.puzzleId ? value.puzzleId : runId;
-  const dailySeed = seed.replace(/^daily:/, "");
-  const canonicalDaily = options.mode === "daily"
-    && isCanonicalDailyOptions(options, seed)
-    && createdAt.slice(0, 10) === dailySeed
-    && (!finished || completedAt?.slice(0, 10) === dailySeed);
+  const normalizedCompletedAt = finished ? completedAt : null;
+  const dailyOutcome = getDailyOutcome(options, seed, createdAt, normalizedCompletedAt, finished);
+  const canonicalDaily = dailyOutcome !== null;
   const elapsedMs = typeof value.elapsedMs === "number" && Number.isFinite(value.elapsedMs) && value.elapsedMs >= 0
     ? Math.floor(value.elapsedMs)
     : 0;
+  const generatorVersion = typeof value.generatorVersion === "number" && Number.isInteger(value.generatorVersion) && value.generatorVersion > 0
+    ? value.generatorVersion
+    : 3;
+  const hasProvenance = typeof value.corpusRevision === "string" && value.corpusRevision.length > 0
+    && value.fingerprintVersion === 1 && typeof value.puzzleFingerprint === "string" && /^p1-[a-f0-9]{64}$/.test(value.puzzleFingerprint);
 
-  return {
+  const summary: RunSummary = {
     attemptId,
     puzzleId,
+    generatorVersion,
+    corpusRevision: hasProvenance ? value.corpusRevision as string : null,
+    fingerprintVersion: hasProvenance ? 1 : null,
+    puzzleFingerprint: hasProvenance ? value.puzzleFingerprint as string : null,
     runId,
     title,
     seed,
@@ -103,15 +130,17 @@ function decodeRunSummary(value: unknown): RunSummary | null {
     totalWords,
     finished,
     canonicalDaily,
+    dailyOutcome,
     elapsedMs,
     assists: decodeAssistSummary(value.assists),
     createdAt,
-    completedAt: finished ? completedAt : null,
+    completedAt: normalizedCompletedAt,
   };
+  return summary;
 }
 
 export function decodeProgressSnapshot(value: unknown): ProgressSnapshot | null {
-  if (!isObject(value)) {
+  if (!isObject(value) || (typeof value.schemaVersion === "number" && value.schemaVersion > 3)) {
     return null;
   }
 
@@ -124,13 +153,28 @@ export function decodeProgressSnapshot(value: unknown): ProgressSnapshot | null 
     : streak;
   const lastDailySeed = value.lastDailySeed === null || typeof value.lastDailySeed === "string" ? value.lastDailySeed : null;
   const lastCompletedAt = value.lastCompletedAt === null || isIsoTimestamp(value.lastCompletedAt) ? value.lastCompletedAt : null;
-
+  if (lastDailySeed !== null && !isUtcDay(lastDailySeed)) return null;
+  const dailyLedger: Record<string, DailyLedgerOutcome> = {};
+  if (value.schemaVersion === 3) {
+    if (!isObject(value.dailyLedger)) return null;
+    for (const [day, outcome] of Object.entries(value.dailyLedger)) {
+      if (!isUtcDay(day) || !["started", "late-clear", "credited"].includes(outcome as string)) return null;
+      dailyLedger[day] = outcome as DailyLedgerOutcome;
+    }
+  }
+  for (const summary of history) {
+    if (!summary.dailyOutcome) continue;
+    const day = summary.seed.replace(/^daily:/, "");
+    if (!isUtcDay(day)) continue;
+    dailyLedger[day] = mergeDailyOutcome(dailyLedger[day], summary.dailyOutcome);
+  }
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     streak,
     bestStreak,
     lastDailySeed,
     lastCompletedAt,
+    dailyLedger,
     history,
   };
 }
@@ -146,14 +190,16 @@ export function readLegacyProgress(storage: Pick<Storage, "getItem">) {
 
 function buildRunSummary(state: PersistedRunState, existing?: RunSummary): RunSummary {
   const finished = state.completedAt !== null;
-  const dailySeed = state.run.seed.replace(/^daily:/, "");
-  const canonicalDaily = isCanonicalDailyOptions(state.run.options, state.run.seed)
-    && state.startedAt.slice(0, 10) === dailySeed
-    && (!finished || state.completedAt?.slice(0, 10) === dailySeed);
+  const completedAt = state.completedAt ?? existing?.completedAt ?? null;
+  const dailyOutcome = getDailyOutcome(state.run.options, state.run.seed, state.startedAt, completedAt, finished);
 
-  return {
+  const summary: RunSummary = {
     attemptId: state.attemptId,
     puzzleId: state.run.puzzleId,
+    generatorVersion: state.run.generatorVersion,
+    corpusRevision: state.run.corpusRevision,
+    fingerprintVersion: state.run.fingerprintVersion,
+    puzzleFingerprint: state.run.puzzleFingerprint,
     runId: state.run.id,
     title: state.run.title,
     seed: state.run.seed,
@@ -164,33 +210,25 @@ function buildRunSummary(state: PersistedRunState, existing?: RunSummary): RunSu
     solvedCount: state.solvedIds.length,
     totalWords: state.run.words.length,
     finished,
-    canonicalDaily,
+    canonicalDaily: dailyOutcome !== null,
+    dailyOutcome,
     elapsedMs: state.elapsedMs,
     assists: summarizeAssists(state),
     createdAt: state.startedAt,
-    completedAt: state.completedAt ?? existing?.completedAt ?? null,
+    completedAt,
   };
+  return summary;
 }
 
 function getDayDistance(left: string, right: string) {
   return (new Date(`${left}T00:00:00Z`).getTime() - new Date(`${right}T00:00:00Z`).getTime()) / 86400000;
 }
 
-function calculateStreaks(history: RunSummary[], nowMs: number) {
-  const summariesByDay = new Map<string, RunSummary>();
-  for (const summary of history) {
-    if (!summary.finished || !summary.canonicalDaily || !summary.completedAt) {
-      continue;
-    }
-
-    const day = summary.seed.replace(/^daily:/, "");
-    const current = summariesByDay.get(day);
-    if (!current || summary.completedAt > (current.completedAt ?? "")) {
-      summariesByDay.set(day, summary);
-    }
-  }
-
-  const days = [...summariesByDay.keys()].sort();
+function calculateStreaks(dailyLedger: Readonly<Record<string, DailyLedgerOutcome>>, nowMs: number) {
+  const days = Object.entries(dailyLedger)
+    .filter(([, outcome]) => outcome === "credited")
+    .map(([day]) => day)
+    .sort();
   let bestStreak = 0;
   let sequence = 0;
   for (let index = 0; index < days.length; index += 1) {
@@ -211,12 +249,10 @@ function calculateStreaks(history: RunSummary[], nowMs: number) {
     }
   }
 
-  const latestSummary = latestDay ? summariesByDay.get(latestDay) ?? null : null;
   return {
     streak,
     bestStreak,
     lastDailySeed: latestDay,
-    lastCompletedAt: latestSummary?.completedAt ?? null,
   };
 }
 
@@ -224,32 +260,45 @@ export function recordRunProgress(snapshot: ProgressSnapshot, state: PersistedRu
   const existing = snapshot.history.find((entry) => entry.attemptId === state.attemptId);
   const summary = buildRunSummary(state, existing);
   const history = [summary, ...snapshot.history.filter((entry) => entry.attemptId !== summary.attemptId)].slice(0, 30);
+  const dailyLedger = { ...snapshot.dailyLedger };
+  if (summary.dailyOutcome) {
+    const day = summary.seed.replace(/^daily:/, "");
+    dailyLedger[day] = mergeDailyOutcome(dailyLedger[day], summary.dailyOutcome);
+  }
   const nextSnapshot: ProgressSnapshot = {
     ...snapshot,
-    schemaVersion: 2,
+    schemaVersion: 3,
+    dailyLedger,
     history,
   };
-  const streaks = calculateStreaks(history, nowMs);
+  const streaks = calculateStreaks(dailyLedger, nowMs);
+  const latestCredited = streaks.lastDailySeed
+    ? history.find((entry) => entry.dailyOutcome === "credited" && entry.seed.replace(/^daily:/, "") === streaks.lastDailySeed && entry.completedAt)
+    : null;
+  const lastCompletedAt = latestCredited?.completedAt
+    ?? (snapshot.lastDailySeed === streaks.lastDailySeed ? snapshot.lastCompletedAt : null);
 
   return {
     ...nextSnapshot,
     ...streaks,
+    lastCompletedAt,
     bestStreak: Math.max(snapshot.bestStreak, streaks.bestStreak),
   };
 }
 
-export function buildDailyArchive(history: RunSummary[], days: number, nowMs = Date.now()) {
-  const archive = [] as { day: string; summary: RunSummary | null }[];
+export function buildDailyArchive(snapshot: ProgressSnapshot, days: number, nowMs = Date.now()) {
+  const archive = [] as { day: string; outcome: DailyLedgerOutcome | null; summary: RunSummary | null }[];
   const lookup = new Map<string, RunSummary>();
 
-  for (const entry of history) {
+  for (const entry of snapshot.history) {
     if (entry.mode !== "daily" || !entry.canonicalDaily) {
       continue;
     }
 
     const day = entry.seed.replace(/^daily:/, "");
     const current = lookup.get(day);
-    if (!current || (!current.finished && entry.finished)) {
+    if (!current || outcomeRank[entry.dailyOutcome ?? "started"] > outcomeRank[current.dailyOutcome ?? "started"]
+      || (entry.dailyOutcome === current.dailyOutcome && (entry.completedAt ?? "") > (current.completedAt ?? ""))) {
       lookup.set(day, entry);
     }
   }
@@ -258,7 +307,7 @@ export function buildDailyArchive(history: RunSummary[], days: number, nowMs = D
     const date = new Date(nowMs);
     date.setUTCDate(date.getUTCDate() - index);
     const day = date.toISOString().slice(0, 10);
-    archive.push({ day, summary: lookup.get(day) ?? null });
+    archive.push({ day, outcome: snapshot.dailyLedger[day] ?? null, summary: lookup.get(day) ?? null });
   }
 
   return archive;

@@ -125,6 +125,9 @@ export type PuzzleRun = {
   id: string;
   puzzleId: string;
   generatorVersion: number;
+  corpusRevision: string | null;
+  fingerprintVersion: 1 | null;
+  puzzleFingerprint: string | null;
   createdAt: string;
   seed: string;
   options: PuzzleOptions;
@@ -212,9 +215,15 @@ export type AssistSummary = {
   puzzleRevealed: boolean;
 };
 
+export type DailyLedgerOutcome = "started" | "late-clear" | "credited";
+
 export type RunSummary = {
   attemptId: string;
   puzzleId: string;
+  generatorVersion: number;
+  corpusRevision: string | null;
+  fingerprintVersion: 1 | null;
+  puzzleFingerprint: string | null;
   runId: string;
   title: string;
   seed: string;
@@ -226,6 +235,7 @@ export type RunSummary = {
   totalWords: number;
   finished: boolean;
   canonicalDaily: boolean;
+  dailyOutcome: DailyLedgerOutcome | null;
   elapsedMs: number;
   assists: AssistSummary;
   createdAt: string;
@@ -233,11 +243,12 @@ export type RunSummary = {
 };
 
 export type ProgressSnapshot = {
-  schemaVersion: 2;
+  schemaVersion: 3;
   streak: number;
   bestStreak: number;
   lastDailySeed: string | null;
   lastCompletedAt: string | null;
+  dailyLedger: Record<string, DailyLedgerOutcome>;
   history: RunSummary[];
 };
 
