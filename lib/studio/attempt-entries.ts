@@ -1,4 +1,5 @@
 import type { CurrentRunState, PersistedRunState, PuzzleBoardCell, PuzzlePlacement } from "@/lib/game-types";
+import { getRunPathCells, getRunTargetCells, getRunWordPath, isPuzzleBoardV3 } from "@/lib/puzzle-board";
 
 export type EntryTransaction =
   | { ok: true; state: PersistedRunState; changed: boolean }
@@ -12,24 +13,27 @@ function getWord(state: CurrentRunState, wordId: string) {
   return state.run.words.find((word) => word.id === wordId) ?? null;
 }
 
-function getPlacement(state: CurrentRunState, wordId: string) {
-  return state.run.board.placements.find((placement) => placement.wordId === wordId) ?? null;
-}
-
 export function getPlacementCells(state: CurrentRunState, placement: PuzzlePlacement) {
   const word = getWord(state, placement.wordId);
-  if (!word) return [] as PuzzleBoardCell[];
+  const board = state.run.board;
+  if (!word || !isPuzzleBoardV3(board)) return [] as PuzzleBoardCell[];
   return Array.from({ length: word.length }, (_, index) => {
     const row = placement.row + (placement.direction === "down" ? index : 0);
     const col = placement.col + (placement.direction === "across" ? index : 0);
-    return state.run.board.cells.find((cell) => cell.row === row && cell.col === col);
+    return board.cells.find((cell) => cell.row === row && cell.col === col);
   }).filter((cell): cell is PuzzleBoardCell => Boolean(cell));
 }
 
+export function getWordCells(state: CurrentRunState, wordId: string) {
+  const targetCells = new Map(getRunTargetCells(state.run).map((cell) => [cellKey(cell.row, cell.col), cell]));
+  return getRunPathCells(state.run, wordId)
+    .map(({ row, col }) => targetCells.get(cellKey(row, col)))
+    .filter((cell): cell is PuzzleBoardCell => Boolean(cell));
+}
+
 export function deriveGuessFromCells(state: CurrentRunState, wordId: string) {
-  const placement = getPlacement(state, wordId);
-  if (!placement) return "";
-  return getPlacementCells(state, placement)
+  if (!getRunWordPath(state.run, wordId)) return "";
+  return getWordCells(state, wordId)
     .map((cell) => state.cellEntries[cellKey(cell.row, cell.col)] ?? " ")
     .join("")
     .trimEnd();
@@ -67,10 +71,9 @@ function normalizePositionalInput(value: string, length: number) {
 
 export function applyWordEntry(state: PersistedRunState, wordId: string, value: string): EntryTransaction {
   const word = getWord(state, wordId);
-  const placement = getPlacement(state, wordId);
-  if (!word || !placement) return { ok: false, state, reason: "missing-word" };
+  if (!word || !getRunWordPath(state.run, wordId)) return { ok: false, state, reason: "missing-word" };
 
-  const cells = getPlacementCells(state, placement);
+  const cells = getWordCells(state, wordId);
   if (cells.length !== word.length) return { ok: false, state, reason: "missing-cell" };
   const requested = normalizePositionalInput(value, word.length);
   const entries = { ...state.cellEntries };
@@ -93,7 +96,7 @@ export function applyWordEntry(state: PersistedRunState, wordId: string, value: 
 }
 
 export function applyCellEntry(state: PersistedRunState, row: number, col: number, value: string, fallbackWordId: string): EntryTransaction {
-  const cell = state.run.board.cells.find((candidate) => candidate.row === row && candidate.col === col);
+  const cell = getRunTargetCells(state.run).find((candidate) => candidate.row === row && candidate.col === col);
   if (!cell) return { ok: false, state, reason: "missing-cell" };
   const key = cellKey(row, col);
   const next = value.toLowerCase().replace(/[^a-z]/g, "").slice(0, 1);
@@ -110,10 +113,9 @@ export function applyCellEntry(state: PersistedRunState, row: number, col: numbe
 }
 
 export function clearWordEntries(state: PersistedRunState, wordId: string): EntryTransaction {
-  const placement = getPlacement(state, wordId);
-  if (!placement) return { ok: false, state, reason: "missing-word" };
+  if (!getRunWordPath(state.run, wordId)) return { ok: false, state, reason: "missing-word" };
   const entries = { ...state.cellEntries };
-  for (const cell of getPlacementCells(state, placement)) {
+  for (const cell of getWordCells(state, wordId)) {
     if (!isProtectedCell(state, cell)) delete entries[cellKey(cell.row, cell.col)];
   }
   const nextState = rebuildState(state, entries, wordId);

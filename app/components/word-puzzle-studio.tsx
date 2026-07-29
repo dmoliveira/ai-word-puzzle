@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AssistSummary, CurrentRunState, PersistedRunState, ProgressSnapshot, PuzzleBoardCell, PuzzlePlacement, PuzzleOptions, PuzzleRun, PuzzleWord, RunSummary, TopicId } from "@/lib/game-types";
+import type { AssistSummary, CurrentRunState, PersistedRunState, ProgressSnapshot, PuzzleBoardCell, PuzzleOptions, PuzzleRun, PuzzleWord, RunSummary, TopicId } from "@/lib/game-types";
 import { buildPuzzleRun, createHintLadder, PuzzleGenerationError, sanitizeGuess } from "@/lib/puzzle-generator";
-import { getQuestV3FillLetter, hasVerifiedPuzzleProvenance } from "@/lib/puzzle-provenance";
+import { hasVerifiedPuzzleProvenance } from "@/lib/puzzle-provenance";
 import { isCrosswordContentPack, isCrosswordTopic } from "@/lib/clue-catalog";
 import { getCanonicalDailyOptions, getPuzzleSizeRange, getUtcDay, isCanonicalDailyOptions, normalizePuzzleOptions, parseSharedOptions, type SharedPuzzleProvenance } from "@/lib/puzzle-options";
 import { buildDailyArchive, createEmptyProgress, recordRunProgress } from "@/lib/progress";
@@ -53,6 +53,7 @@ import { needsRunReplacementConfirmation, replaceRunTransaction } from "@/lib/st
 import { canReplaySummaryExactly, resolveSavedRunReplay } from "@/lib/studio/replay";
 import { getThemeStyle, themeStyles } from "@/lib/themes";
 import { contentCatalog, topicCatalog, wordBank } from "@/lib/word-bank";
+import { canonicalEndpointKey, getRunGridLetter, getRunPathEndpointKey, getRunTargetCells, getRunWordPath, getRunWordPaths, type RunWordPath } from "@/lib/puzzle-board";
 
 type ToastState = {
   tone: "success" | "muted";
@@ -188,8 +189,8 @@ function buildShareUrl(run: PuzzleRun) {
 }
 
 function getExpectedRunProvenance(run: PuzzleRun): SharedPuzzleProvenance | null {
-  return hasVerifiedPuzzleProvenance(run) && run.generatorVersion === 3 && run.corpusRevision && run.fingerprintVersion === 1 && run.puzzleFingerprint
-    ? { generatorVersion: 3, corpusRevision: run.corpusRevision, fingerprintVersion: 1, puzzleFingerprint: run.puzzleFingerprint }
+  return hasVerifiedPuzzleProvenance(run) && (run.generatorVersion === 3 || run.generatorVersion === 4) && run.corpusRevision && run.fingerprintVersion === 1 && run.puzzleFingerprint
+    ? { generatorVersion: run.generatorVersion, corpusRevision: run.corpusRevision, fingerprintVersion: 1, puzzleFingerprint: run.puzzleFingerprint }
     : null;
 }
 
@@ -221,7 +222,7 @@ function getCellKey(row: number, col: number) {
 }
 
 function getWordPlacement(state: CurrentRunState, wordId: string) {
-  return state.run.board.placements.find((placement) => placement.wordId === wordId) ?? null;
+  return getRunWordPath(state.run, wordId);
 }
 
 function getWordById(state: CurrentRunState, wordId: string) {
@@ -229,26 +230,26 @@ function getWordById(state: CurrentRunState, wordId: string) {
 }
 
 function getPlacementByWordId(state: CurrentRunState, wordId: string) {
-  return state.run.board.placements.find((placement) => placement.wordId === wordId) ?? null;
+  return getRunWordPath(state.run, wordId);
 }
 
-function getWordCells(state: CurrentRunState, placement: PuzzlePlacement) {
+function getWordCells(state: CurrentRunState, placement: RunWordPath) {
   const word = getWordById(state, placement.wordId);
   if (!word) {
     return [] as PuzzleBoardCell[];
   }
 
   return Array.from({ length: word.answer.length }, (_, index) => {
-    const row = placement.row + (placement.direction === "down" ? index : 0);
-    const col = placement.col + (placement.direction === "across" ? index : 0);
-    return state.run.board.cells.find((cell) => cell.row === row && cell.col === col);
+    const row = placement.row + placement.deltaRow * index;
+    const col = placement.col + placement.deltaCol * index;
+    return getRunTargetCells(state.run).find((cell) => cell.row === row && cell.col === col);
   }).filter((cell): cell is PuzzleBoardCell => Boolean(cell));
 }
 
 function getCrosswordCellLabel(state: CurrentRunState, cell: PuzzleBoardCell, activeWordId: string | null) {
   const clueReferences = cell.wordIds
     .map((wordId) => getPlacementByWordId(state, wordId))
-    .filter((placement): placement is PuzzlePlacement => Boolean(placement))
+    .filter((placement): placement is RunWordPath => Boolean(placement))
     .map((placement) => `${placement.clueNumber} ${placement.direction}`);
   const entry = state.cellEntries[getCellKey(cell.row, cell.col)];
   const activePlacement = activeWordId ? getPlacementByWordId(state, activeWordId) : null;
@@ -278,9 +279,10 @@ function getHintLevel(wordId: string, hintLevels: Record<string, number>) {
 }
 
 function getNextWordId(state: CurrentRunState, currentWordId: string | null, step: 1 | -1, preferUnsolved = true) {
+  const allPaths = getRunWordPaths(state.run);
   const placements = preferUnsolved
-    ? state.run.board.placements.filter((placement) => !state.solvedIds.includes(placement.wordId))
-    : state.run.board.placements;
+    ? allPaths.filter((placement) => !state.solvedIds.includes(placement.wordId))
+    : allPaths;
 
   if (placements.length === 0) {
     return currentWordId;
@@ -317,7 +319,7 @@ function findNeighborCell(state: CurrentRunState, row: number, col: number, rowS
   let nextCol = col + colStep;
 
   while (nextRow >= 0 && nextCol >= 0 && nextRow < state.run.board.size && nextCol < state.run.board.size) {
-    const cell = state.run.board.cells.find((entry) => entry.row === nextRow && entry.col === nextCol);
+    const cell = getRunTargetCells(state.run).find((entry) => entry.row === nextRow && entry.col === nextCol);
     if (cell) {
       return cell;
     }
@@ -375,10 +377,6 @@ function getClueArtTone(topicId: TopicId, frequencyBand: PuzzleWord["frequencyBa
 
 function getClueArtLabel(index: number) {
   return ["topic", "starter", "length"][index] ?? "cue";
-}
-
-function getQuestDisplayLetter(cell: PuzzleBoardCell | undefined, seed: string, row: number, col: number) {
-  return (cell ? cell.solution : getQuestV3FillLetter(seed, row, col)).toUpperCase();
 }
 
 function buildLinearQuestPath(start: { row: number; col: number }, end: { row: number; col: number }) {
@@ -849,7 +847,7 @@ export function WordPuzzleStudio() {
   const activePlay = !finished;
   const progressLabel = `${solvedCount}/${state.run.words.length} solved`;
   const runStateLabel = finished ? "Done" : !started ? "Ready" : state.paused ? "Paused" : "Live";
-  const cellMap = new Map(state.run.board.cells.map((cell) => [getCellKey(cell.row, cell.col), cell]));
+  const cellMap = new Map(getRunTargetCells(state.run).map((cell) => [getCellKey(cell.row, cell.col), cell]));
   const archive = buildDailyArchive(progress, 10, clockNow);
   const activeFilledCount = countFilledLetters(activeGuess);
   const boardFocusKey = focusedCellKey ?? getFirstOpenCellKey(state, state.activeWordId);
@@ -1120,7 +1118,7 @@ export function WordPuzzleStudio() {
       current: stateRef.current,
       progress: progressRef.current,
       buildRun: (transitionNowMs) => {
-        const run = buildPuzzleRun(requestOptions, transitionNowMs);
+        const run = buildPuzzleRun(requestOptions, transitionNowMs, { generatorVersion: request.expectedProvenance?.generatorVersion });
         if (request.expectedProvenance && (run.generatorVersion !== request.expectedProvenance.generatorVersion
           || run.corpusRevision !== request.expectedProvenance.corpusRevision
           || run.fingerprintVersion !== request.expectedProvenance.fingerprintVersion
@@ -1708,15 +1706,15 @@ export function WordPuzzleStudio() {
   }
 
   function findQuestPathMatch(pathKeys: string[]) {
-    const forward = pathKeys
-      .map((pathKey) => {
-        const [pathRow, pathCol] = pathKey.split(":").map(Number);
-        return getQuestDisplayLetter(cellMap.get(pathKey), state.run.seed, pathRow, pathCol);
-      })
-      .join("")
-      .toLowerCase();
-    const backward = forward.split("").reverse().join("");
-    return state.run.words.find((word) => !state.solvedIds.includes(word.id) && (word.answer === forward || word.answer === backward)) ?? null;
+    const [startRow, startCol] = pathKeys[0].split(":").map(Number);
+    const [endRow, endCol] = pathKeys.at(-1)!.split(":").map(Number);
+    const endpointKey = canonicalEndpointKey({ row: startRow, col: startCol }, { row: endRow, col: endCol });
+    const path = getRunWordPaths(state.run).find((candidate) => (
+      !state.solvedIds.includes(candidate.wordId)
+      && candidate.length === pathKeys.length
+      && getRunPathEndpointKey(candidate) === endpointKey
+    ));
+    return path ? getWordById(state, path.wordId) : null;
   }
 
   function transitionQuestEndpoint(row: number, col: number, anchorOverride?: string | null) {
@@ -1729,7 +1727,7 @@ export function WordPuzzleStudio() {
 
     const key = getCellKey(row, col);
     const anchor = anchorOverride === undefined ? questPath.anchor : anchorOverride;
-    const letter = getQuestDisplayLetter(cellMap.get(key), state.run.seed, row, col).toUpperCase();
+    const letter = (getRunGridLetter(state.run, row, col) ?? "").toUpperCase();
     if (!anchor || anchor === key) {
       setQuestPath({ anchor: key, cells: [key] });
       setAnnouncement(`Quest start selected at row ${row + 1} column ${col + 1}, letter ${letter}. Choose a straight-line endpoint.`);
@@ -1969,7 +1967,7 @@ export function WordPuzzleStudio() {
 
     const nowMs = readNow();
     const result = commitEntryTransaction((attempt) => {
-      const currentCell = attempt.run.board.cells.find((entry) => entry.row === cell.row && entry.col === cell.col);
+      const currentCell = getRunTargetCells(attempt.run).find((entry) => entry.row === cell.row && entry.col === cell.col);
       const currentWordId = currentCell ? getPreferredWordIdForCell(attempt, currentCell, attempt.activeWordId) : null;
       return currentWordId
         ? applyCellEntry(attempt, cell.row, cell.col, nextLetter, currentWordId)
@@ -2671,11 +2669,9 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
                             return <div key={key} role="gridcell" aria-colindex={col + 1} aria-label={`Row ${row + 1} column ${col + 1}, blocked`} className={`${boardCellSizeClass} ${classicEmptyCellClass}`} />;
                           }
 
-                          const displayLetter = cell
-                            ? isQuestView
-                              ? cell.solution.toUpperCase()
-                              : (state.cellEntries[key] ?? "").toUpperCase()
-                            : getQuestV3FillLetter(state.run.seed, row, col).toUpperCase();
+                          const displayLetter = isQuestView
+                            ? (getRunGridLetter(state.run, row, col) ?? "").toUpperCase()
+                            : (state.cellEntries[key] ?? "").toUpperCase();
 
                           const buttonClass = cell
                             ? activeCell
@@ -2886,11 +2882,11 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
                       <div className="flex items-center justify-between gap-3">
                         <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{direction}</div>
                         <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                          {state.run.board.placements.filter((placement) => placement.direction === direction).length} clues
+                          {getRunWordPaths(state.run).filter((placement) => placement.direction === direction).length} clues
                         </div>
                       </div>
                       <div className="mt-3 space-y-2">
-                        {state.run.board.placements.filter((placement) => placement.direction === direction).map((placement) => {
+                        {getRunWordPaths(state.run).filter((placement) => placement.direction === direction).map((placement) => {
                           const word = getWordById(state, placement.wordId);
                           if (!word) {
                             return null;
@@ -2981,7 +2977,7 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
                   <div>
                     <p className="mb-4 text-sm text-slate-300">Every solved answer, clue reference, and direction in one quick scan.</p>
                     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                    {state.run.board.placements.map((placement) => {
+                    {getRunWordPaths(state.run).map((placement) => {
                       const word = getWordById(state, placement.wordId);
                       if (!word) {
                         return null;

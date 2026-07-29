@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { getRunTargetCells } from "@/lib/puzzle-board";
 import { buildPuzzleRun } from "@/lib/puzzle-generator";
 import {
   canAcceptPlayIntent,
@@ -103,7 +104,7 @@ test("serialized snapshots settle active time and resume without counting offlin
 test("assist ledger is bounded, deduplicated, and blocked while paused", () => {
   const initial = createState();
   const wordId = initial.run.words[0].id;
-  const cell = initial.run.board.cells[0];
+  const cell = getRunTargetCells(initial.run)[0];
   const cellKey = `${cell.row}:${cell.col}`;
   let assisted = initial;
 

@@ -15,12 +15,12 @@ function replayOptions(summary: ReplaySummary, nowMs: number) {
 }
 
 function expectedProvenance(summary: ReplaySummary): SharedPuzzleProvenance | null {
-  return summary.generatorVersion === 3
+  return (summary.generatorVersion === 3 || summary.generatorVersion === 4)
     && summary.corpusRevision === currentCorpusRevision
     && summary.fingerprintVersion === puzzleFingerprintVersion
     && typeof summary.puzzleFingerprint === "string"
     ? {
-        generatorVersion: 3,
+        generatorVersion: summary.generatorVersion,
         corpusRevision: summary.corpusRevision,
         fingerprintVersion: 1,
         puzzleFingerprint: summary.puzzleFingerprint,
@@ -43,7 +43,7 @@ export function resolveSavedRunReplay(summary: ReplaySummary, nowMs = Date.now()
   const expected = expectedProvenance(summary);
   if (!expected) return { kind: "current-rules", options };
   try {
-    const run = buildPuzzleRun(options, nowMs);
+    const run = buildPuzzleRun(options, nowMs, { generatorVersion: expected.generatorVersion });
     return matchesSummary(run, summary, expected)
       ? { kind: "exact", options, run, expectedProvenance: expected }
       : { kind: "current-rules", options };

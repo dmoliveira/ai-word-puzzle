@@ -5,6 +5,7 @@ import test from "node:test";
 import type { PuzzleOptions, PuzzlePlacement } from "@/lib/game-types";
 import { buildPuzzleRun } from "@/lib/puzzle-generator";
 import { parseSharedOptions } from "@/lib/puzzle-options";
+import { isPuzzleBoardV3 } from "@/lib/puzzle-board";
 
 type GeneratorV3Golden = {
   name: string;
@@ -47,12 +48,13 @@ function toSharedSearch(options: PuzzleOptions, includeVersion = true) {
 
 for (const golden of goldens) {
   test(`generator v3 golden remains exact: ${golden.name}`, () => {
-    const run = buildPuzzleRun(golden.input);
+    const run = buildPuzzleRun(golden.input, Date.now(), { generatorVersion: 3 });
 
     assert.equal(run.generatorVersion, golden.expected.generatorVersion);
     assert.equal(run.puzzleId, golden.expected.puzzleId);
     assert.equal(run.seed, golden.expected.seed);
     assert.deepEqual(run.words.map((word) => word.id), golden.expected.wordIds);
+    assert.ok(isPuzzleBoardV3(run.board));
     assert.deepEqual(run.board.placements, golden.expected.placements);
     assert.equal(digestBoard(run.board), golden.expected.boardDigest);
   });
@@ -62,7 +64,7 @@ for (const golden of goldens) {
     assert.equal(parsed.kind, "valid");
     if (parsed.kind !== "valid") return;
 
-    const run = buildPuzzleRun(parsed.options);
+    const run = buildPuzzleRun(parsed.options, Date.now(), { generatorVersion: parsed.generatorVersion });
     assert.equal(run.puzzleId, golden.expected.puzzleId);
     assert.equal(digestBoard(run.board), golden.expected.boardDigest);
   });
@@ -74,7 +76,7 @@ test("an unversioned legacy share remains generator v3", () => {
   assert.equal(parsed.kind, "valid");
   if (parsed.kind !== "valid") return;
 
-  const run = buildPuzzleRun(parsed.options);
+  const run = buildPuzzleRun(parsed.options, Date.now(), { generatorVersion: parsed.generatorVersion });
   assert.equal(run.generatorVersion, 3);
   assert.equal(run.puzzleId, golden.expected.puzzleId);
   assert.equal(digestBoard(run.board), golden.expected.boardDigest);

@@ -101,11 +101,13 @@ export type PuzzleBoardCell = {
   wordIds: string[];
 };
 
-export type PuzzleBoard = {
+export type PuzzleBoardV3 = {
   size: number;
   placements: PuzzlePlacement[];
   cells: PuzzleBoardCell[];
 };
+
+export type PuzzleBoard = PuzzleBoardV3 | import("@/lib/quest-v4-engine").QuestV4Board;
 
 export type PuzzleOptions = {
   mode: PuzzleMode;

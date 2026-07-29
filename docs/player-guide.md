@@ -20,7 +20,7 @@ Use Setup to choose topics, challenge, size, style, timer, and learning preferen
 
 ### Trace quest
 
-Quest displays a 14×14 word-search board. Select a target, then solve it in any of these ways:
+Quest displays a 14×14 word-search board. Fresh Quest puzzles use the certified v4 generator: each target has one exact path in any of eight horizontal, vertical, or diagonal directions. If an exact setup cannot be certified within its fixed limits, Astra Lexa reports the failure instead of substituting a v3 board. Select a target, then solve it in any of these ways:
 
 - tap its start and endpoint;
 - drag a straight path from start to endpoint; or
@@ -48,7 +48,7 @@ Hints, revealed letters, scrambles, word reveals, and a full-puzzle reveal are r
 - Returning to the app resumes only the current unfinished saved attempt.
 - A shared or malformed link never replaces an unfinished saved attempt during page load; the saved attempt resumes with a visible explanation.
 - History cards always start a fresh attempt; they do not resume old partial entries. **Replay exact puzzle** appears only when generator, corpus, puzzle ID, and fingerprint still reproduce. Otherwise the honest action is **Use settings/current rules**.
-- New shared links carry generator, corpus, seed/options, and an expected puzzle fingerprint. They do not carry your entries, score, streak, or history. Older generator-v3 links remain compatible, while a new-link fingerprint mismatch fails visibly.
+- New shared links carry generator, corpus, seed/options, and an expected puzzle fingerprint. They do not carry your entries, score, streak, or history. Explicit Quest-v4 links regenerate v4; older and unversioned generator-v3 links remain pinned to v3. A fingerprint mismatch fails visibly.
 - Completion text reports elapsed time and the persisted assist breakdown.
 
 ## Local data and privacy

@@ -1,4 +1,4 @@
-import type { PuzzleBoard, PuzzleOptions, PuzzleRun, PuzzleWord } from "@/lib/game-types";
+import type { PuzzleBoard, PuzzleBoardV3, PuzzleOptions, PuzzleRun, PuzzleWord } from "@/lib/game-types";
 import { sha256Hex } from "@/lib/sha256";
 
 export const currentCorpusRevision = "word-bank-r1" as const;
@@ -23,7 +23,7 @@ export function getQuestV3FillLetter(seed: string, row: number, col: number) {
   return letters[hash];
 }
 
-export function materializeQuestV3Grid(board: PuzzleBoard, seed: string) {
+export function materializeQuestV3Grid(board: PuzzleBoardV3, seed: string) {
   const cells = new Map(board.cells.map((cell) => [`${cell.row}:${cell.col}`, cell.solution]));
   return Array.from({ length: board.size }, (_, row) => Array.from({ length: board.size }, (_, col) => (
     cells.get(`${row}:${col}`) ?? getQuestV3FillLetter(seed, row, col)
@@ -48,7 +48,7 @@ function fingerprintPayload(input: FingerprintInput) {
     },
     input.words,
     input.board,
-    options.boardView === "quest" ? materializeQuestV3Grid(input.board, input.seed) : null,
+    options.boardView === "quest" && !("kind" in input.board) ? materializeQuestV3Grid(input.board, input.seed) : null,
   ]);
 }
 

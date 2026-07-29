@@ -4,6 +4,7 @@ import type {
   PersistedRunState,
   ProgressSnapshot,
   PuzzleBoard,
+  PuzzleBoardV3,
   PuzzleOptions,
   PuzzleRun,
   PuzzleWord,
@@ -18,6 +19,8 @@ import {
   snapshotAttempt,
 } from "@/lib/run-state";
 import { wordBank } from "@/lib/word-bank";
+import { getRunPathCells, getRunTargetCells, isPuzzleBoardV3, isQuestV4Board } from "@/lib/puzzle-board";
+import { certifyQuestV4Board, type QuestV4Board } from "@/lib/quest-v4-engine";
 
 export const gameStorageKey = "astra-lexa:v2";
 export const legacySessionStorageKey = "astra-lexa-session";
@@ -125,7 +128,7 @@ type StorageEnvelopeV3 = {
   branches: {
     attempt: null | {
       branchVersion: 1;
-      stateSchemaVersion: 3;
+      stateSchemaVersion: 3 | 4;
       value: PersistedRunState;
     };
     progress: {
@@ -301,7 +304,7 @@ function hydratePuzzleWord(value: unknown, allowDefaults: boolean): PuzzleWord |
   };
 }
 
-function decodeBoard(value: unknown, wordIds: Set<string>): PuzzleBoard | null {
+function decodeBoardV3(value: unknown, wordIds: Set<string>): PuzzleBoardV3 | null {
   if (!isObject(value) || !Number.isInteger(value.size) || (value.size as number) < 4 || (value.size as number) > 30 || !Array.isArray(value.placements) || !Array.isArray(value.cells)) {
     return null;
   }
@@ -337,7 +340,21 @@ function decodeBoard(value: unknown, wordIds: Set<string>): PuzzleBoard | null {
     return null;
   }
 
-  return value as unknown as PuzzleBoard;
+  return value as unknown as PuzzleBoardV3;
+}
+
+function decodeQuestV4Board(value: unknown, words: readonly PuzzleWord[]): QuestV4Board | null {
+  const wordIds = new Set(words.map((word) => word.id));
+  if (!isObject(value) || value.kind !== "quest-v4" || value.size !== 14 || value.generatorVersion !== 4 || typeof value.algorithmProfile !== "string"
+    || typeof value.seed !== "string" || typeof value.corpusRevision !== "string" || typeof value.contentIdentity !== "string"
+    || !Array.isArray(value.grid) || value.grid.length !== 14 || !value.grid.every((row) => typeof row === "string" && /^[a-z]{14}$/.test(row))
+    || !Array.isArray(value.paths) || value.paths.length !== words.length || typeof value.fingerprint !== "string" || !/^q4-[a-f0-9]{64}$/.test(value.fingerprint)) return null;
+  const pathsValid = value.paths.every((path) => isObject(path) && typeof path.wordId === "string" && wordIds.has(path.wordId)
+    && Number.isInteger(path.row) && Number.isInteger(path.col) && Number.isInteger(path.deltaRow) && Number.isInteger(path.deltaCol)
+    && [-1, 0, 1].includes(path.deltaRow as number) && [-1, 0, 1].includes(path.deltaCol as number)
+    && !(path.deltaRow === 0 && path.deltaCol === 0));
+  if (!pathsValid || new Set(value.paths.map((path) => (path as Record<string, unknown>).wordId)).size !== words.length) return null;
+  return value as unknown as QuestV4Board;
 }
 
 function decodeRun(value: unknown, nowMs: number, allowLegacyDefaults: boolean): PuzzleRun | null {
@@ -367,8 +384,14 @@ function decodeRun(value: unknown, nowMs: number, allowLegacyDefaults: boolean):
   const words = decodedWords as PuzzleWord[];
 
   const wordIds = new Set(words.map((word) => word.id));
-  const board = decodeBoard(value.board, wordIds);
-  if (!options || !board || board.placements.length !== words.length) {
+  const board = generatorVersion === 4 ? decodeQuestV4Board(value.board, words) : decodeBoardV3(value.board, wordIds);
+  if (!options || !board || (isPuzzleBoardV3(board) && board.placements.length !== words.length)) {
+    return null;
+  }
+
+  if (isQuestV4Board(board) && (options.boardView !== "quest" || board.seed !== value.seed || board.corpusRevision !== value.corpusRevision
+    || value.id !== board.fingerprint || value.puzzleId !== board.fingerprint
+    || !certifyQuestV4Board(board, words.map((word) => ({ id: word.id, answer: word.normalized }))).ok)) {
     return null;
   }
 
@@ -394,7 +417,7 @@ function decodeAssists(value: unknown, run: PuzzleRun, legacyHintLevels?: unknow
   const revealedWordIds = isStringArray(source.revealedWordIds) ? [...new Set(source.revealedWordIds)] : [];
   const puzzleRevealed = source.puzzleRevealed === true;
   const wordIds = new Set(run.words.map((word) => word.id));
-  const cellKeys = new Set(run.board.cells.map((cell) => `${cell.row}:${cell.col}`));
+  const cellKeys = new Set(getRunTargetCells(run).map((cell) => `${cell.row}:${cell.col}`));
 
   if (!hintStepsByWord
     || Object.keys(hintStepsByWord).some((wordId) => !wordIds.has(wordId))
@@ -415,14 +438,12 @@ function decodeAssists(value: unknown, run: PuzzleRun, legacyHintLevels?: unknow
 
 function deriveSolvedIds(run: PuzzleRun, cellEntries: Record<string, string>) {
   return run.words.filter((word) => {
-    const placement = run.board.placements.find((entry) => entry.wordId === word.id);
-    if (!placement) {
+    const pathCells = getRunPathCells(run, word.id);
+    if (pathCells.length !== word.length) {
       return false;
     }
 
-    const answer = Array.from({ length: word.answer.length }, (_, index) => {
-      const row = placement.row + (placement.direction === "down" ? index : 0);
-      const col = placement.col + (placement.direction === "across" ? index : 0);
+    const answer = pathCells.map(({ row, col }) => {
       return cellEntries[`${row}:${col}`] ?? "";
     }).join("").toLowerCase();
     return answer === word.normalized;
@@ -441,7 +462,7 @@ function decodeAttempt(value: unknown, nowMs: number, allowLegacyDefaults: boole
     return null;
   }
 
-  const validCellKeys = new Set(run.board.cells.map((cell) => `${cell.row}:${cell.col}`));
+  const validCellKeys = new Set(getRunTargetCells(run).map((cell) => `${cell.row}:${cell.col}`));
   if (Object.entries(cellEntries).some(([key, letter]) => !validCellKeys.has(key) || !/^[a-z]?$/i.test(letter))) {
     return null;
   }
@@ -508,6 +529,8 @@ const wordKeys = [
 const boardKeys = ["size", "placements", "cells"] as const;
 const placementKeys = ["wordId", "row", "col", "direction", "clueNumber"] as const;
 const cellKeys = ["row", "col", "solution", "clueNumbers", "wordIds"] as const;
+const questV4BoardKeys = ["kind", "generatorVersion", "algorithmProfile", "size", "seed", "corpusRevision", "contentIdentity", "grid", "paths", "fingerprint"] as const;
+const questV4PathKeys = ["wordId", "row", "col", "deltaRow", "deltaCol"] as const;
 
 function hashString(value: string) {
   let hash = 2166136261;
@@ -519,6 +542,7 @@ function hashString(value: string) {
 }
 
 function recomputeV3PuzzleId(run: PuzzleRun) {
+  if (!isPuzzleBoardV3(run.board)) return null;
   const identity = [
     "v3",
     run.seed,
@@ -573,6 +597,13 @@ function sameNumberSet(left: readonly number[], right: readonly number[]) {
 
 function validateBoardSemantics(run: PuzzleRun) {
   const { board, words, options } = run;
+  if (isQuestV4Board(board)) {
+    return run.generatorVersion === 4 && options.boardView === "quest" && board.generatorVersion === 4
+      && board.seed === run.seed && board.corpusRevision === run.corpusRevision
+      && run.id === board.fingerprint && run.puzzleId === board.fingerprint
+      && words.length === options.puzzleSize
+      && certifyQuestV4Board(board, words.map((word) => ({ id: word.id, answer: word.normalized }))).ok;
+  }
   if (!isObject(board) || !hasExactKeys(board as unknown as Record<string, unknown>, boardKeys)
     || words.length !== options.puzzleSize || board.placements.length !== words.length
     || board.cells.length > 289 || new Set(words.map((word) => word.id)).size !== words.length
@@ -673,29 +704,30 @@ function inRange(value: number, size: number) {
   return Number.isInteger(value) && value >= 0 && value < size;
 }
 
-function validateStrictRunValue(value: unknown, run: PuzzleRun, shape: "legacy" | "provenance") {
+function validateStrictRunValue(value: unknown, run: PuzzleRun, shape: "legacy" | "provenance" | "v4") {
   const expectedKeys = shape === "legacy" ? legacyRunKeys : provenanceRunKeys;
   if (!isObject(value) || !hasExactKeys(value, expectedKeys) || !isObject(value.options) || !hasExactKeys(value.options, optionKeys)
-    || !isObject(value.board) || !hasExactKeys(value.board, boardKeys)
-    || !Array.isArray(value.words) || !value.words.every(validateStrictWord)
+    || !isObject(value.board) || !Array.isArray(value.words) || !value.words.every(validateStrictWord)) return false;
+  if (shape === "v4") {
+    if (!hasExactKeys(value.board, questV4BoardKeys) || !Array.isArray(value.board.paths)
+      || !value.board.paths.every((entry) => isObject(entry) && hasExactKeys(entry, questV4PathKeys))) return false;
+  } else if (!hasExactKeys(value.board, boardKeys)
     || !Array.isArray(value.board.placements) || !value.board.placements.every((entry) => isObject(entry) && hasExactKeys(entry, placementKeys))
     || !Array.isArray(value.board.cells) || !value.board.cells.every((entry) => isObject(entry) && hasExactKeys(entry, cellKeys))) return false;
   if (!isCanonicalIsoTimestamp(run.createdAt) || !validBoundedString(run.seed, 256) || !validBoundedString(run.title) || !validBoundedString(run.blurb)
-    || ![1, 2, 3].includes(run.generatorVersion) || run.id !== run.puzzleId || !validateBoardSemantics(run)) return false;
+    || (shape === "v4" ? run.generatorVersion !== 4 : ![1, 2, 3].includes(run.generatorVersion))
+    || run.id !== run.puzzleId || !validateBoardSemantics(run)) return false;
   if (run.generatorVersion === 3 && run.puzzleId !== recomputeV3PuzzleId(run)) return false;
   if (shape === "legacy") {
     return run.corpusRevision === null && run.fingerprintVersion === null && run.puzzleFingerprint === null;
   }
   const provenanceAbsent = run.corpusRevision === null && run.fingerprintVersion === null && run.puzzleFingerprint === null;
-  return provenanceAbsent || hasVerifiedPuzzleProvenance(run);
+  return shape === "v4" ? hasVerifiedPuzzleProvenance(run) : provenanceAbsent || hasVerifiedPuzzleProvenance(run);
 }
 
 function deriveGuesses(run: PuzzleRun, cellEntries: Record<string, string>) {
   return Object.fromEntries(run.words.map((word) => {
-    const placement = run.board.placements.find((entry) => entry.wordId === word.id)!;
-    const value = Array.from({ length: word.length }, (_, index) => {
-      const row = placement.row + (placement.direction === "down" ? index : 0);
-      const col = placement.col + (placement.direction === "across" ? index : 0);
+    const value = getRunPathCells(run, word.id).map(({ row, col }) => {
       return cellEntries[`${row}:${col}`] ?? " ";
     }).join("").trimEnd();
     return [word.id, value];
@@ -713,7 +745,7 @@ function canonicalizeAttempt(state: PersistedRunState, nowMs: number) {
   }, nowMs);
 }
 
-function decodeStrictAttempt(value: unknown, nowMs: number, runShape: "legacy" | "provenance") {
+function decodeStrictAttempt(value: unknown, nowMs: number, runShape: "legacy" | "provenance" | "v4") {
   if (!isObject(value) || !hasExactKeys(value, ["schemaVersion", "attemptId", "startedAt", "completedAt", "run", "guesses", "cellEntries", "solvedIds", "activeWordId", "assists", "paused", "elapsedMs", "lastTickAt"])
     || value.schemaVersion !== 2 || value.lastTickAt !== null || !isCanonicalIsoTimestamp(value.startedAt)
     || (value.completedAt !== null && !isCanonicalIsoTimestamp(value.completedAt))
@@ -733,7 +765,7 @@ function decodeStrictAttempt(value: unknown, nowMs: number, runShape: "legacy" |
     || new Set(assists.anagramWordIds).size !== assists.anagramWordIds.length
     || new Set(assists.revealedWordIds).size !== assists.revealedWordIds.length
     || Object.values(assists.hintStepsByWord).some((level) => level < 1 || level > 3)) return null;
-  const cells = new Map(decoded.run.board.cells.map((cell) => [`${cell.row}:${cell.col}`, cell.solution]));
+  const cells = new Map(getRunTargetCells(decoded.run).map((cell) => [`${cell.row}:${cell.col}`, cell.solution]));
   if (assists.revealedCellKeys.some((key) => decoded.cellEntries[key] !== cells.get(key))) return null;
   if (runShape === "legacy") {
     const { corpusRevision: _corpusRevision, fingerprintVersion: _fingerprintVersion, puzzleFingerprint: _puzzleFingerprint, ...legacyRun } = decoded.run;
@@ -805,15 +837,15 @@ type DecodedEnvelope = {
 
 function decodeAttemptBranch(value: unknown, nowMs: number): DecodedBranch<PersistedRunState> {
   if (value === null) return { status: "null", value: null };
-  if (isObject(value) && ((typeof value.branchVersion === "number" && value.branchVersion > 1) || (typeof value.stateSchemaVersion === "number" && value.stateSchemaVersion > 3))) {
+  if (isObject(value) && ((typeof value.branchVersion === "number" && value.branchVersion > 1) || (typeof value.stateSchemaVersion === "number" && value.stateSchemaVersion > 4))) {
     return { status: "future", value: null };
   }
   if (!isObject(value) || !hasExactKeys(value, ["branchVersion", "stateSchemaVersion", "value"]) || value.branchVersion !== 1
-    || (value.stateSchemaVersion !== 2 && value.stateSchemaVersion !== 3)) {
+    || (value.stateSchemaVersion !== 2 && value.stateSchemaVersion !== 3 && value.stateSchemaVersion !== 4)) {
     return { status: "invalid", value: null };
   }
   if (utf8Bytes(JSON.stringify(value.value)) > maxV3AttemptBranchBytes) return { status: "invalid", value: null };
-  const decoded = decodeStrictAttempt(value.value, nowMs, value.stateSchemaVersion === 2 ? "legacy" : "provenance");
+  const decoded = decodeStrictAttempt(value.value, nowMs, value.stateSchemaVersion === 2 ? "legacy" : value.stateSchemaVersion === 4 ? "v4" : "provenance");
   return decoded ? { status: "valid", value: decoded } : { status: "invalid", value: null };
 }
 
@@ -887,7 +919,7 @@ function envelopeHasFuturePuzzleVersion(value: unknown) {
   if (!isObject(value) || !isObject(value.branches) || !isObject(value.branches.attempt)
     || !isObject(value.branches.attempt.value) || !isObject(value.branches.attempt.value.run)) return false;
   const run = value.branches.attempt.value.run;
-  return (typeof run.generatorVersion === "number" && run.generatorVersion > 3)
+  return (typeof run.generatorVersion === "number" && run.generatorVersion > 4)
     || (typeof run.fingerprintVersion === "number" && run.fingerprintVersion > 1);
 }
 
@@ -1276,7 +1308,7 @@ export function serializeStoredGame(
     branches: {
       attempt: state ? {
         branchVersion: 1,
-        stateSchemaVersion: 3,
+        stateSchemaVersion: state.run.generatorVersion === 4 ? 4 : 3,
         value: canonicalizeAttempt(state, nowMs),
       } : null,
       progress: {

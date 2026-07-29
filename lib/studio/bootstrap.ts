@@ -15,8 +15,8 @@ export type StudioBootstrap = {
   resolvedAtMs: number;
 };
 
-function prepare(options: PuzzleOptions, nowMs: number) {
-  return createPreparedRunState(buildPuzzleRun(options, nowMs));
+function prepare(options: PuzzleOptions, nowMs: number, generatorVersion?: 3 | 4) {
+  return createPreparedRunState(buildPuzzleRun(options, nowMs, { generatorVersion }));
 }
 
 export function resolveStudioBootstrap({
@@ -54,7 +54,7 @@ export function resolveStudioBootstrap({
 
   if (shared.kind === "valid") {
     try {
-      const current = prepare(shared.options, nowMs);
+      const current = prepare(shared.options, nowMs, shared.generatorVersion);
       if (shared.expectedProvenance && (current.run.generatorVersion !== shared.expectedProvenance.generatorVersion
         || current.run.corpusRevision !== shared.expectedProvenance.corpusRevision
         || current.run.fingerprintVersion !== shared.expectedProvenance.fingerprintVersion

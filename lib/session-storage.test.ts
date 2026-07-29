@@ -74,6 +74,43 @@ function createState(nowMs = 1_000, seed = "storage-tests", attemptId = "attempt
   return createAttemptFromRun(run, nowMs, attemptId);
 }
 
+function createQuestV4State(nowMs = 1_000, seed = "trace-myth", attemptId = "attempt-quest-v4") {
+  const run = buildPuzzleRun({ mode: "custom", seed, topics: ["myth"], puzzleSize: 6, boardView: "quest" }, nowMs);
+  return createAttemptFromRun(run, nowMs, attemptId);
+}
+
+test("Quest v4 writes attempt schema 4 and restores only a certified native board", () => {
+  const state = createQuestV4State();
+  const raw = serializeStoredGame(state, createEmptyProgress(), 2_000, "save-quest-v4");
+  const envelope = JSON.parse(raw) as Record<string, any>;
+  assert.equal(envelope.branches.attempt.stateSchemaVersion, 4);
+  const storage = new MemoryStorage();
+  commitRaw(storage, raw);
+  const decoded = readStoredGame(storage, 2_000);
+  assert.ok(decoded.currentAttempt, JSON.stringify({ source: decoded.source, issues: decoded.issues }));
+  assert.equal(decoded.currentAttempt.run.generatorVersion, 4);
+  assert.equal(decoded.currentAttempt.run.puzzleId.startsWith("q4-"), true);
+  const backup = createPortableBackup(state, createEmptyProgress(), 2_000);
+  assert.equal(backup.ok, true);
+  if (backup.ok) assert.equal(previewPortableBackup(backup.raw, 2_000).ok, true);
+
+  const corruptions = [
+    (value: Record<string, any>) => { value.branches.attempt.value.run.board.grid[0] = `z${value.branches.attempt.value.run.board.grid[0].slice(1)}`; },
+    (value: Record<string, any>) => { value.branches.attempt.value.run.board.paths[0].deltaRow = 0; value.branches.attempt.value.run.board.paths[0].deltaCol = 0; },
+    (value: Record<string, any>) => { value.branches.attempt.value.run.board.fingerprint = `q4-${"0".repeat(64)}`; },
+    (value: Record<string, any>) => { value.branches.attempt.value.run.puzzleFingerprint = `p1-${"0".repeat(64)}`; },
+  ];
+  for (const corrupt of corruptions) {
+    const changed = structuredClone(envelope);
+    corrupt(changed);
+    const corruptStorage = new MemoryStorage();
+    commitRaw(corruptStorage, JSON.stringify(changed));
+    const corruptRead = readStoredGame(corruptStorage, 2_000);
+    assert.equal(corruptRead.currentAttempt, null);
+    assert.ok(corruptRead.issues.includes("attempt-unavailable"));
+  }
+});
+
 function createV2Raw(state = createState(), progress = createEmptyProgress(), nowMs = 2_000) {
   return JSON.stringify({ schemaVersion: 2, currentAttempt: snapshotAttempt(state, nowMs), progress });
 }

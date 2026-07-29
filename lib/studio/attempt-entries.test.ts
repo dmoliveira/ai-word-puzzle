@@ -3,6 +3,7 @@ import test from "node:test";
 import { buildPuzzleRun } from "@/lib/puzzle-generator";
 import { createAttemptFromRun, recordRevealedCell } from "@/lib/run-state";
 import { applyCellEntry, applyWordEntry, clearWordEntries, deriveGuessFromCells, getPlacementCells } from "@/lib/studio/attempt-entries";
+import { isPuzzleBoardV3 } from "@/lib/puzzle-board";
 
 function crossingFixture() {
   const state = createAttemptFromRun(buildPuzzleRun({
@@ -12,11 +13,13 @@ function crossingFixture() {
     puzzleSize: 7,
     boardView: "crossword",
   }), 1_000, "attempt-crossings");
-  const crossing = state.run.board.cells.find((cell) => cell.wordIds.length === 2)!;
+  assert.ok(isPuzzleBoardV3(state.run.board));
+  const board = state.run.board;
+  const crossing = board.cells.find((cell) => cell.wordIds.length === 2)!;
   const [firstId, secondId] = crossing.wordIds;
   const first = state.run.words.find((word) => word.id === firstId)!;
   const second = state.run.words.find((word) => word.id === secondId)!;
-  const secondPlacement = state.run.board.placements.find((placement) => placement.wordId === secondId)!;
+  const secondPlacement = board.placements.find((placement) => placement.wordId === secondId)!;
   const crossingIndex = getPlacementCells(state, secondPlacement).findIndex((cell) => cell.row === crossing.row && cell.col === crossing.col);
   return { state, crossing, first, second, crossingIndex };
 }
@@ -78,6 +81,7 @@ test("direct edits cannot clear or overwrite a solved crossing", () => {
 
 test("a whole-word conflict cannot overwrite a deliberately revealed cell", () => {
   const { state, first } = crossingFixture();
+  assert.ok(isPuzzleBoardV3(state.run.board));
   const placement = state.run.board.placements.find((entry) => entry.wordId === first.id)!;
   const [revealedCell] = getPlacementCells(state, placement);
   const revealedKey = `${revealedCell.row}:${revealedCell.col}`;
@@ -93,4 +97,20 @@ test("a whole-word conflict cannot overwrite a deliberately revealed cell", () =
 
   assert.deepEqual(rejected, { ok: false, state: before, reason: "locked-cell-conflict" });
   assert.deepEqual(assisted, before);
+});
+
+test("Quest v4 solves through its certified signed path without synthetic placements", () => {
+  const state = createAttemptFromRun(buildPuzzleRun({
+    mode: "custom",
+    seed: "trace-myth",
+    topics: ["myth"],
+    puzzleSize: 6,
+    boardView: "quest",
+  }), 1_000, "attempt-quest-v4");
+  const word = state.run.words[0];
+  const result = applyWordEntry(state, word.id, word.answer);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.ok(result.state.solvedIds.includes(word.id));
+  assert.equal(deriveGuessFromCells(result.state, word.id), word.answer);
 });

@@ -1,4 +1,5 @@
 import type { AssistLedger, AssistSummary, CurrentRunState, PersistedRunState, PreparedRunState, PuzzleRun } from "@/lib/game-types";
+import { getRunTargetCells } from "@/lib/puzzle-board";
 
 export const runStateSchemaVersion = 2 as const;
 
@@ -205,7 +206,7 @@ export function recordHintStep(state: PersistedRunState, wordId: string) {
 }
 
 export function recordRevealedCell(state: PersistedRunState, cellKey: string) {
-  if (!canMutateAttempt(state) || !state.run.board.cells.some((cell) => `${cell.row}:${cell.col}` === cellKey)) {
+  if (!canMutateAttempt(state) || !getRunTargetCells(state.run).some((cell) => `${cell.row}:${cell.col}` === cellKey)) {
     return state;
   }
 

@@ -4,11 +4,14 @@ import type { PuzzleOptions, PuzzleRun } from "@/lib/game-types";
 import { crosswordContentPackIds, crosswordTopicIds, getEditorialClueCount } from "@/lib/clue-catalog";
 import { buildPuzzleRun, createHintLadder, PuzzleGenerationError, sanitizeGuess, scoreDifficultyMatch } from "@/lib/puzzle-generator";
 import { contentCatalog, topicCatalog, wordBank } from "@/lib/word-bank";
+import { isPuzzleBoardV3, isQuestV4Board } from "@/lib/puzzle-board";
+import { certifyQuestV4Board } from "@/lib/quest-v4-engine";
 
 const challenges = ["breeze", "quest", "mythic"] as const;
 const matrixSeedCount = Number(process.env.GENERATOR_MATRIX_SEEDS ?? 4);
 
 function getPlacementCells(run: PuzzleRun, wordId: string) {
+  assert.ok(isPuzzleBoardV3(run.board));
   const word = run.words.find((candidate) => candidate.id === wordId)!;
   const placement = run.board.placements.find((candidate) => candidate.wordId === wordId)!;
   return Array.from({ length: word.length }, (_, index) => ({
@@ -19,9 +22,11 @@ function getPlacementCells(run: PuzzleRun, wordId: string) {
 }
 
 function assertCrosswordInvariants(run: PuzzleRun) {
+  assert.ok(isPuzzleBoardV3(run.board));
+  const board = run.board;
   assert.equal(run.generatorVersion, 3);
   assert.equal(run.words.length, run.options.puzzleSize);
-  assert.equal(run.board.placements.length, run.options.puzzleSize);
+  assert.equal(board.placements.length, run.options.puzzleSize);
   assert.equal(new Set(run.words.map((word) => word.normalized)).size, run.words.length);
   assert.ok(run.words.every((word) => run.options.topics.includes(word.topicId)));
   assert.ok(run.words.every((word) => word.qualityStatus === "approved" && word.clue));
@@ -29,13 +34,13 @@ function assertCrosswordInvariants(run: PuzzleRun) {
     const clueTokens = clueWord.clue!.toLowerCase().split(/[^a-z]+/);
     assert.ok(run.words.every((targetWord) => !clueTokens.includes(targetWord.normalized)), "a clue must not name another answer in the run");
   }
-  assert.ok(run.board.size <= 17);
-  assert.deepEqual(new Set(run.board.placements.map((placement) => placement.direction)), new Set(["across", "down"]));
+  assert.ok(board.size <= 17);
+  assert.deepEqual(new Set(board.placements.map((placement) => placement.direction)), new Set(["across", "down"]));
 
   const graph = new Map(run.words.map((word) => [word.id, new Set<string>()]));
-  for (const cell of run.board.cells) {
+  for (const cell of board.cells) {
     if (cell.wordIds.length > 1) {
-      const directions = cell.wordIds.map((wordId) => run.board.placements.find((placement) => placement.wordId === wordId)!.direction);
+      const directions = cell.wordIds.map((wordId) => board.placements.find((placement) => placement.wordId === wordId)!.direction);
       assert.equal(new Set(directions).size, directions.length, "crossing words must be perpendicular");
       for (const left of cell.wordIds) {
         for (const right of cell.wordIds) {
@@ -61,7 +66,7 @@ function assertCrosswordInvariants(run: PuzzleRun) {
 
   for (const word of run.words) {
     const cells = getPlacementCells(run, word.id);
-    assert.equal(cells.map((cell) => run.board.cells.find((boardCell) => boardCell.row === cell.row && boardCell.col === cell.col)?.solution).join(""), word.answer);
+    assert.equal(cells.map((cell) => board.cells.find((boardCell) => boardCell.row === cell.row && boardCell.col === cell.col)?.solution).join(""), word.answer);
   }
 }
 
@@ -138,29 +143,42 @@ test("trace-path mode preserves the broad topic catalog with exact 14×14 boards
     });
 
     assert.equal(run.words.length, 6);
-    assert.equal(run.board.placements.length, 6);
+    assert.ok(isQuestV4Board(run.board));
+    assert.equal(run.generatorVersion, 4);
+    assert.equal(run.board.paths.length, 6);
     assert.equal(run.board.size, 14);
+    assert.equal(run.puzzleId, run.board.fingerprint);
+    assert.equal(certifyQuestV4Board(run.board, run.words.map((word) => ({ id: word.id, answer: word.normalized }))).ok, true);
     assert.equal(new Set(run.words.map((word) => word.normalized)).size, 6);
     assert.ok(run.words.every((word) => word.topicId === topic.id));
   }
 });
 
-test("every content pack can produce an exact themed trace run", () => {
+test("every content pack is certified or fails explicitly without a v3 fallback", () => {
+  const explicitFailures: string[] = [];
   for (const pack of contentCatalog) {
     const puzzleSize = Math.min(12, pack.answers.length);
-    const run = buildPuzzleRun({
-      mode: "custom",
-      seed: `trace-pack-${pack.id}`,
-      topics: [pack.topicId],
-      puzzleFamily: "themed",
-      contentPackId: pack.id,
-      puzzleSize,
-      boardView: "quest",
-    });
-
-    assert.equal(run.words.length, puzzleSize);
-    assert.ok(run.words.every((word) => word.topicId === pack.topicId && word.contentPackIds.includes(pack.id)));
+    try {
+      const run = buildPuzzleRun({
+        mode: "custom",
+        seed: `trace-pack-${pack.id}`,
+        topics: [pack.topicId],
+        puzzleFamily: "themed",
+        contentPackId: pack.id,
+        puzzleSize,
+        boardView: "quest",
+      });
+      assert.ok(isQuestV4Board(run.board));
+      assert.equal(run.words.length, puzzleSize);
+      assert.ok(run.words.every((word) => word.topicId === pack.topicId && word.contentPackIds.includes(pack.id)));
+    } catch (error) {
+      assert.ok(error instanceof PuzzleGenerationError);
+      assert.equal(error.code, "certification-failed");
+      assert.equal(error.questFailureCode, "unavoidable-duplicate");
+      explicitFailures.push(pack.id);
+    }
   }
+  assert.deepEqual(explicitFailures, ["winter-weather", "greek-symbols"]);
 });
 
 test("unsupported crossword options fail explicitly instead of mutating the request", () => {

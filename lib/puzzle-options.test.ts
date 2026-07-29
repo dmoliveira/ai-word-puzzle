@@ -65,6 +65,18 @@ test("new shared links parse complete puzzle provenance atomically", () => {
   });
 });
 
+test("Quest links route explicit v4 while missing versions remain pinned to v3", () => {
+  const legacy = parseSharedOptions("?mode=custom&seed=legacy&boardView=quest&topics=myth&puzzleSize=6", now);
+  const current = parseSharedOptions(`?generatorVersion=4&corpusRevision=word-bank-r1&fingerprintVersion=1&puzzleFingerprint=p1-${"b".repeat(64)}&mode=custom&seed=current&boardView=quest&topics=myth&puzzleSize=6`, now);
+  assert.equal(legacy.kind, "valid");
+  assert.equal(current.kind, "valid");
+  if (legacy.kind !== "valid" || current.kind !== "valid") return;
+  assert.equal(legacy.generatorVersion, 3);
+  assert.equal(current.generatorVersion, 4);
+  assert.equal(current.expectedProvenance?.generatorVersion, 4);
+  assert.equal(parseSharedOptions("?generatorVersion=4&mode=custom&seed=x&boardView=crossword", now).kind, "invalid");
+});
+
 test("normalization removes invalid topics and clamps mini runs", () => {
   const options = normalizePuzzleOptions({
     mode: "custom",

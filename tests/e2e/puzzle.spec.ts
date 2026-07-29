@@ -107,14 +107,17 @@ async function readStoredAttempt(page: Page) {
         elapsedMs: number;
         cellEntries: Record<string, string>;
         solvedIds: string[];
-        run: {
-          seed: string;
-          puzzleId: string;
-          words: Array<{ id: string; answer: string; prompt: string; length: number }>;
-          board: {
-            cells: Array<{ row: number; col: number; solution: string; wordIds: string[] }>;
-            placements: Array<{ wordId: string; clueNumber: number; direction: "across" | "down"; row: number; col: number }>;
-          };
+         run: {
+           seed: string;
+           puzzleId: string;
+           generatorVersion: number;
+           words: Array<{ id: string; answer: string; prompt: string; length: number }>;
+           board: {
+             kind?: "quest-v4";
+             cells: Array<{ row: number; col: number; solution: string; wordIds: string[] }>;
+             placements: Array<{ wordId: string; clueNumber: number; direction: "across" | "down"; row: number; col: number }>;
+             paths?: Array<{ wordId: string; row: number; col: number; deltaRow: -1 | 0 | 1; deltaCol: -1 | 0 | 1 }>;
+           };
         };
       } } };
     }).branches.attempt.value;
@@ -123,19 +126,23 @@ async function readStoredAttempt(page: Page) {
 
 function getQuestEndpoints(attempt: Awaited<ReturnType<typeof readStoredAttempt>>, wordId: string) {
   const word = attempt.run.words.find((entry) => entry.id === wordId);
-  const placement = attempt.run.board.placements.find((entry) => entry.wordId === wordId);
-  if (!word || !placement) {
+  const placement = attempt.run.board.placements?.find((entry) => entry.wordId === wordId);
+  const path = attempt.run.board.paths?.find((entry) => entry.wordId === wordId);
+  if (!word || (!placement && !path)) {
     throw new Error(`Missing quest placement for ${wordId}`);
   }
+  const start = path ?? placement!;
+  const deltaRow = path?.deltaRow ?? (placement!.direction === "down" ? 1 : 0);
+  const deltaCol = path?.deltaCol ?? (placement!.direction === "across" ? 1 : 0);
 
   return {
-    start: { row: placement.row, col: placement.col },
+    start: { row: start.row, col: start.col },
     end: {
-      row: placement.row + (placement.direction === "down" ? word.length - 1 : 0),
-      col: placement.col + (placement.direction === "across" ? word.length - 1 : 0),
+      row: start.row + deltaRow * (word.length - 1),
+      col: start.col + deltaCol * (word.length - 1),
     },
     word,
-    placement,
+    placement: placement ?? { ...path!, clueNumber: 0, direction: deltaRow === 0 ? "across" as const : "down" as const },
   };
 }
 
@@ -1122,6 +1129,8 @@ test("learning mode exposes vocabulary support after deliberate review", async (
 test("quest grid is semantic and solves a target with keyboard endpoints", async ({ page }) => {
   await openPuzzle(page, { boardView: "quest", seed: "quest-keyboard" });
   const attempt = await readStoredAttempt(page);
+  expect(attempt.run.generatorVersion).toBe(3);
+  expect(attempt.run.board.kind).toBeUndefined();
   const activeWord = attempt.run.words.find((word) => word.id === attempt.activeWordId)!;
   const { start, end, placement } = getQuestEndpoints(attempt, activeWord.id);
   const grid = page.getByRole("grid", { name: "Quest word search board" });
@@ -1148,6 +1157,49 @@ test("quest grid is semantic and solves a target with keyboard endpoints", async
   await expect(page.getByTestId("quest-status")).toContainText(/found/i);
   await expect(grid.locator('[role="gridcell"][aria-selected="true"]')).toHaveCount(0);
   await expect(grid.locator('[role="gridcell"][tabindex="0"]')).toHaveCount(1);
+});
+
+test("Quest v4 survives solve, reload, and exact shared-link regeneration", async ({ page, context, browser }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await openPuzzle(page, { generatorVersion: "4", boardView: "quest", seed: "trace-myth", topics: "myth", puzzleSize: "6" });
+  const initial = await readStoredAttempt(page);
+  expect(initial.run.generatorVersion).toBe(4);
+  expect(initial.run.puzzleId).toMatch(/^q4-[a-f0-9]{64}$/);
+  expect(initial.run.board.kind).toBe("quest-v4");
+  expect(initial.run.board.paths).toHaveLength(6);
+  const schema = await page.evaluate((key) => JSON.parse(window.localStorage.getItem(key)!).branches.attempt.stateSchemaVersion, sessionStorageKey);
+  expect(schema).toBe(4);
+
+  const word = initial.run.words[0];
+  const { start, end } = getQuestEndpoints(initial, word.id);
+  await page.getByTestId(`board-cell-${end.row}-${end.col}`).click();
+  await page.getByTestId(`board-cell-${start.row}-${start.col}`).click();
+  await expect.poll(async () => (await readStoredAttempt(page)).solvedIds).toContain(word.id);
+
+  await page.reload();
+  await expect(page.locator('main#puzzle-studio[data-bootstrap-state="ready"]')).toBeVisible();
+  const restored = await readStoredAttempt(page);
+  expect(restored.run.puzzleId).toBe(initial.run.puzzleId);
+  expect(restored.solvedIds).toContain(word.id);
+
+  await page.evaluate(() => Object.defineProperty(navigator, "share", { value: undefined, configurable: true }));
+  await page.getByRole("button", { name: "Share link", exact: true }).click();
+  const sharedUrl = new URL(await page.evaluate(() => navigator.clipboard.readText()));
+  expect(sharedUrl.searchParams.get("generatorVersion")).toBe("4");
+  expect(sharedUrl.searchParams.get("puzzleFingerprint")).toMatch(/^p1-[a-f0-9]{64}$/);
+
+  const sharedContext = await browser.newContext();
+  const sharedPage = await sharedContext.newPage();
+  try {
+    await sharedPage.goto(sharedUrl.toString());
+    await expect(sharedPage.locator('main#puzzle-studio[data-bootstrap-state="ready"]')).toBeVisible();
+    await sharedPage.getByTestId("start-puzzle").evaluate((button: HTMLButtonElement) => button.click());
+    const sharedAttempt = await readStoredAttempt(sharedPage);
+    expect(sharedAttempt.run.generatorVersion).toBe(4);
+    expect(sharedAttempt.run.puzzleId).toBe(initial.run.puzzleId);
+  } finally {
+    await sharedContext.close();
+  }
 });
 
 test("quest selection reports invalid paths and Escape clearing", async ({ page }) => {

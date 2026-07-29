@@ -13,6 +13,12 @@ function createSummary() {
   return recordRunProgress(createEmptyProgress(), state, nowMs).history[0];
 }
 
+function createQuestV4Summary() {
+  const run = buildPuzzleRun({ mode: "custom", seed: "trace-myth", topics: ["myth"], puzzleSize: 6, boardView: "quest" }, nowMs);
+  const state = createAttemptFromRun(run, nowMs, "attempt-replay-v4");
+  return recordRunProgress(createEmptyProgress(), state, nowMs).history[0];
+}
+
 test("a matching provenance summary resolves to the exact recorded puzzle", () => {
   const summary = createSummary();
   const replay = resolveSavedRunReplay(summary, nowMs + 1_000);
@@ -43,4 +49,14 @@ test("presentation preferences remain neutral to exact replay", () => {
   }, nowMs);
 
   assert.equal(replay.kind, "exact");
+});
+
+test("Quest v4 provenance replays the exact q4 board", () => {
+  const summary = createQuestV4Summary();
+  const replay = resolveSavedRunReplay(summary, nowMs + 1_000);
+  assert.equal(summary.generatorVersion, 4);
+  assert.equal(replay.kind, "exact");
+  if (replay.kind !== "exact") return;
+  assert.equal(replay.run.puzzleId, summary.puzzleId);
+  assert.equal(replay.run.generatorVersion, 4);
 });

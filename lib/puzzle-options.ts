@@ -47,7 +47,7 @@ const sharedOptionKeys = [
 ] as const;
 
 export type SharedPuzzleProvenance = {
-  generatorVersion: 3;
+  generatorVersion: 3 | 4;
   corpusRevision: string;
   fingerprintVersion: 1;
   puzzleFingerprint: string;
@@ -56,7 +56,7 @@ export type SharedPuzzleProvenance = {
 export type SharedOptionsResult =
   | { kind: "none" }
   | { kind: "invalid"; reason: string }
-  | { kind: "valid"; options: PuzzleOptions; expectedProvenance: SharedPuzzleProvenance | null };
+  | { kind: "valid"; options: PuzzleOptions; generatorVersion: 3 | 4; expectedProvenance: SharedPuzzleProvenance | null };
 
 function includesValue<T extends string>(values: readonly T[], value: string | null): value is T {
   return value !== null && values.includes(value as T);
@@ -176,7 +176,7 @@ export function parseSharedOptions(search: string, nowMs = Date.now()): SharedOp
   }
 
   const generatorVersion = params.get("generatorVersion");
-  if (generatorVersion !== null && generatorVersion !== "3") {
+  if (generatorVersion !== null && generatorVersion !== "3" && generatorVersion !== "4") {
     return { kind: "invalid", reason: "That shared puzzle uses an unsupported generator version." };
   }
   const corpusRevision = params.get("corpusRevision");
@@ -221,6 +221,10 @@ export function parseSharedOptions(search: string, nowMs = Date.now()): SharedOp
   }
 
   const resolvedBoardView = boardView ?? "crossword";
+  const resolvedGeneratorVersion = generatorVersion === "4" ? 4 : 3;
+  if (resolvedGeneratorVersion === 4 && resolvedBoardView !== "quest") {
+    return { kind: "invalid", reason: "Generator v4 is available only for Quest boards." };
+  }
   if (resolvedBoardView === "crossword"
     && ((topics && topics.some((topic) => !crosswordTopicIds.includes(topic as (typeof crosswordTopicIds)[number])))
       || (contentPackId && contentPackId !== "auto" && !crosswordContentPackIds.includes(contentPackId as (typeof crosswordContentPackIds)[number])))) {
@@ -250,6 +254,7 @@ export function parseSharedOptions(search: string, nowMs = Date.now()): SharedOp
 
   return {
     kind: "valid",
+    generatorVersion: resolvedGeneratorVersion,
     options: normalizePuzzleOptions({
       mode,
       seed,
@@ -264,7 +269,7 @@ export function parseSharedOptions(search: string, nowMs = Date.now()): SharedOp
       topics: topics as TopicId[] | undefined,
     }, nowMs),
     expectedProvenance: hasAnyExactProvenance ? {
-      generatorVersion: 3,
+      generatorVersion: resolvedGeneratorVersion,
       corpusRevision: corpusRevision!,
       fingerprintVersion: 1,
       puzzleFingerprint: puzzleFingerprint!,

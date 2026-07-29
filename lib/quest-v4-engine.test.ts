@@ -228,7 +228,11 @@ test("the hidden Quest v4 matrix certifies every return and freezes explicit imp
       for (const puzzleSize of [4, 8, 12]) {
         for (let seedIndex = 0; seedIndex < matrixSeedCount; seedIndex += 1) {
           const seed = `quest-v4-${topic.id}-${challenge}-${puzzleSize}-${seedIndex}`;
-          const run = buildPuzzleRun({ mode: "custom", seed, topics: [topic.id], challenge, puzzleSize, boardView: "quest" });
+          const run = buildPuzzleRun(
+            { mode: "custom", seed, topics: [topic.id], challenge, puzzleSize, boardView: "quest" },
+            Date.now(),
+            { generatorVersion: 3 },
+          );
           const targets = run.words.map((word) => ({ id: word.id, answer: word.normalized }));
           const input = {
             seed: run.seed,
@@ -277,7 +281,7 @@ test("every themed content pack is certified or fails explicitly when exact occu
       contentPackId: pack.id,
       puzzleSize,
       boardView: "quest",
-    });
+    }, Date.now(), { generatorVersion: 3 });
     const targets = run.words.map((word) => ({ id: word.id, answer: word.normalized }));
     const input = { seed: run.seed, corpusRevision, contentIdentity: `themed:${pack.id}:${puzzleSize}`, targets };
     const result = generateQuestV4(input);

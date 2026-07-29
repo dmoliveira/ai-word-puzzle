@@ -13,6 +13,8 @@ import { getPuzzleSizeRange, normalizePuzzleOptions } from "@/lib/puzzle-options
 import { computePuzzleFingerprint, currentCorpusRevision, puzzleFingerprintVersion } from "@/lib/puzzle-provenance";
 import { getThemeStyle } from "@/lib/themes";
 import { contentCatalog, topicCatalog, wordBank } from "@/lib/word-bank";
+import { generateQuestV4, type QuestV4FailureCode } from "@/lib/quest-v4-engine";
+import { isPuzzleBoardV3 } from "@/lib/puzzle-board";
 
 const targetLengthRanges: Record<ChallengeLevel, [number, number]> = {
   breeze: [4, 8],
@@ -210,15 +212,18 @@ export function createHintLadder(word: PuzzleWord) {
 
 export class PuzzleGenerationError extends Error {
   constructor(
-    readonly code: "unsupported-content" | "insufficient-words" | "layout-failed",
+    readonly code: "unsupported-content" | "insufficient-words" | "layout-failed" | "certification-failed",
     message: string,
+    readonly questFailureCode: QuestV4FailureCode | null = null,
   ) {
     super(message);
     this.name = "PuzzleGenerationError";
   }
 }
 
-export function buildPuzzleRun(input: Partial<PuzzleOptions> = {}, nowMs = Date.now()): PuzzleRun {
+export type PuzzleGenerationRequest = { generatorVersion?: 3 | 4 };
+
+export function buildPuzzleRun(input: Partial<PuzzleOptions> = {}, nowMs = Date.now(), request: PuzzleGenerationRequest = {}): PuzzleRun {
   const requestedBoardView = input.boardView ?? "crossword";
   const requestedFamily = input.puzzleFamily ?? "classic";
   const sizeRange = getPuzzleSizeRange(requestedFamily, requestedBoardView);
@@ -242,6 +247,10 @@ export function buildPuzzleRun(input: Partial<PuzzleOptions> = {}, nowMs = Date.
   }
 
   const resolvedSeed = resolveModeSeed(options.mode, options.seed, nowMs);
+  const generatorVersion = request.generatorVersion ?? (options.boardView === "quest" ? 4 : 3);
+  if (generatorVersion === 4 && options.boardView !== "quest") {
+    throw new PuzzleGenerationError("unsupported-content", "Generator v4 is available only for Quest boards.");
+  }
   const resolvedContentPack = resolveContentPack(options, resolvedSeed);
   if (options.puzzleFamily === "themed" && !resolvedContentPack) {
     throw new PuzzleGenerationError("unsupported-content", "That themed pack cannot support the selected puzzle size.");
@@ -274,13 +283,36 @@ export function buildPuzzleRun(input: Partial<PuzzleOptions> = {}, nowMs = Date.
     throw new PuzzleGenerationError("insufficient-words", "Not enough approved words exist for that puzzle setup.");
   }
 
+  const questWords = candidates.slice(0, options.puzzleSize);
+  const questV4 = generatorVersion === 4
+    ? generateQuestV4({
+        seed: resolvedSeed,
+        corpusRevision: currentCorpusRevision,
+        contentIdentity: JSON.stringify([
+          "astra-lexa/quest-v4-content-1",
+          options.mode,
+          options.challenge,
+          options.puzzleFamily,
+          options.topics,
+          options.contentPackId,
+          resolvedContentPack?.id ?? null,
+          options.puzzleSize,
+          options.boardView,
+        ]),
+        targets: questWords.map((word) => ({ id: word.id, answer: word.normalized })),
+      })
+    : null;
+  if (questV4 && !questV4.ok) {
+    throw new PuzzleGenerationError(
+      "certification-failed",
+      `Quest v4 could not certify this exact setup (${questV4.code}). Try another seed or topic mix.`,
+      questV4.code,
+    );
+  }
   const generated = options.boardView === "quest"
-    ? {
-        words: candidates.slice(0, options.puzzleSize),
-        board: buildQuestBoard(candidates.slice(0, options.puzzleSize), resolvedSeed),
-      }
+    ? { words: questWords, board: questV4?.board ?? buildQuestBoard(questWords, resolvedSeed) }
     : buildConnectedCrossword(candidates, options.puzzleSize, resolvedSeed);
-  if (!generated || generated.words.length !== options.puzzleSize || generated.board.placements.length !== options.puzzleSize) {
+  if (!generated || generated.words.length !== options.puzzleSize || (isPuzzleBoardV3(generated.board) && generated.board.placements.length !== options.puzzleSize)) {
     throw new PuzzleGenerationError("layout-failed", "Could not build a connected puzzle for that setup. Try another seed or topic mix.");
   }
 
@@ -298,14 +330,14 @@ export function buildPuzzleRun(input: Partial<PuzzleOptions> = {}, nowMs = Date.
     options.puzzleSize,
     options.boardView,
     placedWords.map((word) => word.id).join(","),
-    board.placements.map((placement) => `${placement.wordId}:${placement.row}:${placement.col}:${placement.direction}`).join("|"),
+    isPuzzleBoardV3(board) ? board.placements.map((placement) => `${placement.wordId}:${placement.row}:${placement.col}:${placement.direction}`).join("|") : board.fingerprint,
   ].join(":");
-  const puzzleId = `${hashString(identity)}`;
+  const puzzleId = isPuzzleBoardV3(board) ? `${hashString(identity)}` : board.fingerprint;
 
   const run = {
     id: puzzleId,
     puzzleId,
-    generatorVersion: 3,
+    generatorVersion,
     corpusRevision: currentCorpusRevision,
     fingerprintVersion: puzzleFingerprintVersion,
     puzzleFingerprint: null,

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { getRunTargetCells } from "@/lib/puzzle-board";
 import { buildDailyArchive, createEmptyProgress, decodeProgressSnapshot, recordRunProgress } from "@/lib/progress";
 import { buildPuzzleRun } from "@/lib/puzzle-generator";
 import { getCanonicalDailyOptions } from "@/lib/puzzle-options";
@@ -158,7 +159,7 @@ test("history stores a finite assist breakdown and elapsed time", () => {
   const run = buildPuzzleRun({ mode: "custom", seed: "assist-history", puzzleSize: 4 });
   let state = createAttemptFromRun(run, 1_000, "assisted-attempt");
   state = recordHintStep(state, run.words[0].id);
-  const cell = run.board.cells[0];
+  const cell = getRunTargetCells(run)[0];
   state = recordRevealedCell(state, `${cell.row}:${cell.col}`);
   const snapshot = recordRunProgress(createEmptyProgress(), { ...state, elapsedMs: 4_200 }, 5_200);
 
