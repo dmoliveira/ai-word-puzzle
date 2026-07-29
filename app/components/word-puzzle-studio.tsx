@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AssistSummary, CurrentRunState, PersistedRunState, ProgressSnapshot, PuzzleBoardCell, PuzzlePlacement, PuzzleOptions, PuzzleWord, RunSummary, TopicId } from "@/lib/game-types";
 import { buildPuzzleRun, createHintLadder, PuzzleGenerationError, sanitizeGuess } from "@/lib/puzzle-generator";
 import { isCrosswordContentPack, isCrosswordTopic } from "@/lib/clue-catalog";
@@ -9,7 +9,6 @@ import { buildDailyArchive, createEmptyProgress, recordRunProgress } from "@/lib
 import {
   canMutateAttempt,
   canAcceptPlayIntent,
-  createAttemptFromRun,
   createPreparedRunState,
   finalizeAttempt,
   getDisplayedElapsedMs,
@@ -25,7 +24,15 @@ import {
   summarizeAssists,
 } from "@/lib/run-state";
 import { readStoredGame, writeStoredGame } from "@/lib/session-storage";
+import {
+  applyCellEntry,
+  applyWordEntry,
+  clearWordEntries,
+  deriveGuessFromCells,
+  type EntryTransaction,
+} from "@/lib/studio/attempt-entries";
 import { refreshPreparedDaily, resolveStudioBootstrap, type BootstrapSource } from "@/lib/studio/bootstrap";
+import { needsRunReplacementConfirmation, replaceRunTransaction } from "@/lib/studio/run-replacement";
 import { getThemeStyle, themeStyles } from "@/lib/themes";
 import { contentCatalog, topicCatalog, wordBank } from "@/lib/word-bank";
 
@@ -47,6 +54,9 @@ type WordSelectionIntent = "answer" | "cell";
 type QuestPathState = {
   anchor: string | null;
   cells: string[];
+};
+type PendingRunReplacement = {
+  options: PuzzleOptions;
 };
 
 const bootstrapOptions: PuzzleOptions = {
@@ -90,10 +100,6 @@ function buildShareUrl(options: PuzzleOptions) {
   url.searchParams.set("learningMode", String(options.learningMode));
   url.searchParams.set("topics", options.topics.join(","));
   return url.toString();
-}
-
-function createFreshState(options: PuzzleOptions, nowMs = Date.now()): PersistedRunState {
-  return createAttemptFromRun(buildPuzzleRun(options), nowMs);
 }
 
 function formatElapsed(ms: number) {
@@ -176,29 +182,8 @@ function getQuestCellLabel(row: number, col: number, letter: string, selected: b
   ].filter((part): part is string => Boolean(part)).join(", ");
 }
 
-function deriveGuessFromCells(state: CurrentRunState, wordId: string) {
-  const placement = getWordPlacement(state, wordId);
-  if (!placement) {
-    return "";
-  }
-
-  return getWordCells(state, placement)
-    .map((cell) => state.cellEntries[getCellKey(cell.row, cell.col)] ?? "")
-    .join("");
-}
-
-function computeSolvedIds(state: CurrentRunState) {
-  return state.run.words
-    .filter((word) => sanitizeGuess(deriveGuessFromCells(state, word.id)) === word.normalized)
-    .map((word) => word.id);
-}
-
 function getHintLevel(wordId: string, hintLevels: Record<string, number>) {
   return hintLevels[wordId] ?? 0;
-}
-
-function buildWordGuessMap(state: CurrentRunState) {
-  return Object.fromEntries(state.run.words.map((word) => [word.id, deriveGuessFromCells(state, word.id)]));
 }
 
 function getNextWordId(state: CurrentRunState, currentWordId: string | null, step: 1 | -1, preferUnsolved = true) {
@@ -214,24 +199,6 @@ function getNextWordId(state: CurrentRunState, currentWordId: string | null, ste
   const baseIndex = currentIndex === -1 ? 0 : currentIndex;
   const nextIndex = (baseIndex + step + placements.length) % placements.length;
   return placements[nextIndex]?.wordId ?? currentWordId;
-}
-
-function buildStateWithEntries(current: PersistedRunState, nextCellEntries: Record<string, string>, fallbackWordId: string) {
-  const provisional = {
-    ...current,
-    cellEntries: nextCellEntries,
-  };
-  const solvedIds = computeSolvedIds(provisional);
-  const nextActive = solvedIds.includes(fallbackWordId)
-    ? current.run.words.find((entry) => !solvedIds.includes(entry.id))?.id ?? fallbackWordId
-    : fallbackWordId;
-
-  return {
-    ...provisional,
-    guesses: buildWordGuessMap(provisional),
-    solvedIds,
-    activeWordId: nextActive,
-  };
 }
 
 function countFilledLetters(value: string) {
@@ -422,8 +389,14 @@ export function WordPuzzleStudio() {
   const revealDialogRef = useRef<HTMLDialogElement | null>(null);
   const revealCancelRef = useRef<HTMLButtonElement | null>(null);
   const revealInvokerRef = useRef<HTMLElement | null>(null);
+  const replacementDialogRef = useRef<HTMLDialogElement | null>(null);
+  const replacementCancelRef = useRef<HTMLButtonElement | null>(null);
+  const replacementInvokerRef = useRef<HTMLElement | null>(null);
+  const replacementRequestRef = useRef<PendingRunReplacement | null>(null);
+  const replacementLockRef = useRef(false);
   const reviewOriginRef = useRef<{ element: HTMLElement | null; panel: MobilePanel }>({ element: null, panel: "board" });
   const reviewHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const runHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const completionHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const completionTransitionRef = useRef({ hydrated: false, finished: false });
   const workspaceTabRefs = useRef<Record<MobilePanel, HTMLButtonElement | null>>({ board: null, clues: null, review: null, archive: null });
@@ -439,6 +412,7 @@ export function WordPuzzleStudio() {
   const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
   const [builderAdvancedOpen, setBuilderAdvancedOpen] = useState(false);
   const [revealConfirm, setRevealConfirm] = useState<ReviewTarget>({ kind: "none" });
+  const [pendingReplacement, setPendingReplacement] = useState<PendingRunReplacement | null>(null);
   const [shownAnagrams, setShownAnagrams] = useState<Record<string, string>>({});
   const [questPath, setQuestPath] = useState<QuestPathState>({ anchor: null, cells: [] });
   const [isStarting, setIsStarting] = useState(false);
@@ -640,6 +614,20 @@ export function WordPuzzleStudio() {
     }
   }, [revealConfirm]);
 
+  useEffect(() => {
+    const dialog = replacementDialogRef.current;
+    if (!dialog) {
+      return;
+    }
+
+    if (pendingReplacement && !dialog.open) {
+      dialog.showModal();
+      window.requestAnimationFrame(() => replacementCancelRef.current?.focus());
+    } else if (!pendingReplacement && dialog.open) {
+      dialog.close();
+    }
+  }, [pendingReplacement]);
+
   const solvedCount = state.solvedIds.length;
   const started = isStartedAttempt(state);
   const activeWord = state.run.words.find((word) => word.id === state.activeWordId) ?? state.run.words[0] ?? null;
@@ -788,13 +776,32 @@ export function WordPuzzleStudio() {
   }
 
   function updateStartedAttempt(update: (current: PersistedRunState) => PersistedRunState, nowMs = readNow()) {
-    setState((current) => {
-      const startedState = startPreparedAttempt(current, nowMs);
-      const nextState = update(startedState);
-      stateRef.current = nextState;
-      return nextState;
-    });
+    const startedState = startPreparedAttempt(stateRef.current, nowMs);
+    commitState(update(startedState));
     setClockNow(nowMs);
+  }
+
+  function commitEntryTransaction(
+    update: (current: PersistedRunState) => EntryTransaction,
+    nowMs = readNow(),
+  ) {
+    const attempt = startPreparedAttempt(stateRef.current, nowMs);
+    if (!canMutateAttempt(attempt)) {
+      return null;
+    }
+
+    const transaction = update(attempt);
+    if (!transaction.ok) {
+      setAnnouncement(transaction.reason === "locked-cell-conflict"
+        ? "That crossing is locked by a solved or revealed answer. No letters changed."
+        : "That entry could not be applied. No letters changed.");
+      return null;
+    }
+
+    const nextState = finalizeAttempt(transaction.state, nowMs);
+    commitState(nextState);
+    setClockNow(nowMs);
+    return { state: nextState, changed: transaction.changed };
   }
 
   function speakWord(word: string) {
@@ -869,38 +876,115 @@ export function WordPuzzleStudio() {
     });
   }
 
-  async function startNewRun(nextOptions = options) {
+  function finishReplacementRequest(restoreFocus: boolean) {
+    const invoker = replacementInvokerRef.current;
+    if (replacementDialogRef.current?.open) {
+      replacementDialogRef.current.close();
+    }
+    replacementRequestRef.current = null;
+    replacementInvokerRef.current = null;
+    replacementLockRef.current = false;
+    setPendingReplacement(null);
+    setIsStarting(false);
+
+    if (restoreFocus) {
+      window.requestAnimationFrame(() => invoker?.focus());
+    }
+  }
+
+  function commitRunReplacement(request: PendingRunReplacement) {
+    const nowMs = readNow();
+    setIsStarting(true);
+    setRunError(null);
+    const result = replaceRunTransaction({
+      current: stateRef.current,
+      progress: progressRef.current,
+      buildRun: () => buildPuzzleRun(request.options),
+      persist: (candidate, nextProgress, persistedAt) => writeStoredGame(window.localStorage, candidate, nextProgress, persistedAt),
+      nowMs,
+    });
+
+    if (!result.ok) {
+      const message = result.reason === "generation-failed"
+        ? result.error instanceof PuzzleGenerationError
+          ? result.error.message
+          : "Could not generate the requested local run. Nothing was replaced."
+        : "Could not save your current run, so nothing was replaced.";
+      setRunError(message);
+      setAnnouncement(message);
+      showToast(message, "muted");
+      finishReplacementRequest(true);
+      return;
+    }
+
+    if (pendingPersistenceTimerRef.current !== null) {
+      window.clearTimeout(pendingPersistenceTimerRef.current);
+      pendingPersistenceTimerRef.current = null;
+    }
+    stateRef.current = result.state;
+    progressRef.current = result.progress;
+    setOptions(result.state.run.options);
+    setState(result.state);
+    setProgress(result.progress);
+    setBootstrapSource("explicit");
+    setFocusedCellKey(getFirstOpenCellKey(result.state, result.state.activeWordId));
+    setMobilePanel(result.state.run.options.boardView === "crossword" ? "clues" : "board");
+    setRevealConfirm({ kind: "none" });
+    setShownAnagrams({});
+    setQuestPath({ anchor: null, cells: [] });
+    questPointerStartRef.current = null;
+    questPointerMovedRef.current = false;
+    suppressQuestClickRef.current = false;
+    setReviewTarget({ kind: "none" });
+    setClockNow(nowMs);
+    setAnnouncement(result.outgoing
+      ? "New puzzle started. Previous progress is saved locally."
+      : "New puzzle started and saved locally.");
+    finishReplacementRequest(false);
+    window.requestAnimationFrame(() => runHeadingRef.current?.focus());
+  }
+
+  function startNewRun(nextOptions = options) {
+    if (replacementLockRef.current) {
+      return;
+    }
+
     const normalized = normalizeOptions(nextOptions);
     const requestOptions = normalized.mode === "custom" && !normalized.seed.trim()
       ? { ...normalized, seed: createRuntimeSeed() }
       : normalized;
-    setIsStarting(true);
+    const request = { options: requestOptions };
+    replacementLockRef.current = true;
+    replacementInvokerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setRunError(null);
 
-    try {
-      const run = buildPuzzleRun(requestOptions);
-      startTransition(() => {
-        const nextState = createAttemptFromRun(run);
-        stateRef.current = nextState;
-        setOptions(run.options);
-        setState(nextState);
-        setBootstrapSource("explicit");
-        setFocusedCellKey(getFirstOpenCellKey(nextState, nextState.activeWordId));
-        setMobilePanel(run.options.boardView === "crossword" ? "clues" : "board");
-        setRevealConfirm({ kind: "none" });
-        setShownAnagrams({});
-        setQuestPath({ anchor: null, cells: [] });
-        questPointerStartRef.current = null;
-        questPointerMovedRef.current = false;
-        suppressQuestClickRef.current = false;
-        setReviewTarget({ kind: "none" });
-        setAnnouncement("New puzzle ready.");
-      });
-    } catch (error) {
-      setRunError(error instanceof PuzzleGenerationError ? error.message : "Could not start a new local run.");
-    } finally {
-      setIsStarting(false);
+    if (needsRunReplacementConfirmation(stateRef.current)) {
+      replacementRequestRef.current = request;
+      setPendingReplacement(request);
+      return;
     }
+
+    commitRunReplacement(request);
+  }
+
+  function cancelRunReplacement() {
+    finishReplacementRequest(true);
+    setAnnouncement("Current run kept. Nothing was replaced.");
+  }
+
+  function acceptRunReplacement() {
+    const request = replacementRequestRef.current;
+    if (!request) {
+      finishReplacementRequest(true);
+      return;
+    }
+
+    replacementRequestRef.current = null;
+    setPendingReplacement(null);
+    if (replacementDialogRef.current?.open) {
+      replacementDialogRef.current.close();
+    }
+    commitRunReplacement(request);
   }
 
   function replaySavedRun(summary: RunSummary) {
@@ -1003,17 +1087,18 @@ export function WordPuzzleStudio() {
       return;
     }
 
-    if (!isStartedAttempt(state)) {
+    const current = stateRef.current;
+    if (!isStartedAttempt(current)) {
       startCurrentAttempt();
       return;
     }
 
     const nowMs = readNow();
-    const willPause = !state.paused;
+    const willPause = !current.paused;
     if (willPause && isQuestView) {
       clearQuestPathSelection();
     }
-    setState((current) => isStartedAttempt(current) ? setAttemptPaused(current, willPause, nowMs) : current);
+    commitState(setAttemptPaused(current, willPause, nowMs));
     setAnnouncement(willPause ? "Puzzle paused. Entries and new assists are locked." : `${activeClueName} selected. Puzzle resumed.`);
     setClockNow(nowMs);
   }
@@ -1108,36 +1193,37 @@ export function WordPuzzleStudio() {
 
   function acceptReveal() {
     const target = revealConfirm;
-    if (target.kind === "none" || target.attemptId !== state.attemptId) {
+    const current = stateRef.current;
+    if (target.kind === "none" || target.attemptId !== current.attemptId || !isStartedAttempt(current)) {
       closeRevealDialog();
       return;
     }
 
     if (target.kind === "word") {
-      if (!state.run.words.some((word) => word.id === target.wordId)) {
+      if (!current.run.words.some((word) => word.id === target.wordId)) {
         closeRevealDialog();
         return;
       }
 
-      if (!isWordReviewAuthorized(state, target)) {
-        if (!canMutateAttempt(state)) {
+      if (!isWordReviewAuthorized(current, target)) {
+        if (!canMutateAttempt(current)) {
           closeRevealDialog();
           return;
         }
-        setState((current) => current.attemptId === target.attemptId ? recordWordReveal(current, target.wordId) : current);
+        commitState(recordWordReveal(current, target.wordId));
       }
-    } else if (!isPuzzleReviewAuthorized(state, target)) {
-      if (!canMutateAttempt(state)) {
+    } else if (!isPuzzleReviewAuthorized(current, target)) {
+      if (!canMutateAttempt(current)) {
         closeRevealDialog();
         return;
       }
-      setState((current) => current.attemptId === target.attemptId ? recordPuzzleReveal(current) : current);
+      commitState(recordPuzzleReveal(current));
     }
 
     openAuthorizedReview(target);
   }
 
-  function trapRevealDialogFocus(event: React.KeyboardEvent<HTMLDialogElement>) {
+  function trapDialogFocus(event: React.KeyboardEvent<HTMLDialogElement>) {
     if (event.key !== "Tab") {
       return;
     }
@@ -1173,31 +1259,14 @@ export function WordPuzzleStudio() {
     }
 
     const nowMs = readNow();
-    setState((current) => {
-      const attempt = startPreparedAttempt(current, nowMs);
-      if (!canMutateAttempt(attempt)) {
-        return attempt;
-      }
-
+    const result = commitEntryTransaction((attempt) => {
       const word = getWordById(attempt, wordId);
-      const placement = getPlacementByWordId(attempt, wordId);
-      if (!word || !placement) {
-        return current;
-      }
+      return word
+        ? applyWordEntry(attempt, wordId, word.answer)
+        : { ok: false, state: attempt, reason: "missing-word" };
+    }, nowMs);
 
-      const nextCellEntries = { ...attempt.cellEntries };
-      const cells = getWordCells(attempt, placement);
-
-      cells.forEach((cell, index) => {
-        nextCellEntries[getCellKey(cell.row, cell.col)] = word.answer[index];
-      });
-
-      const nextState = finalizeAttempt(buildStateWithEntries(attempt, nextCellEntries, wordId), nowMs);
-      stateRef.current = nextState;
-      return nextState;
-    });
-
-    return true;
+    return result !== null;
   }
 
   function getQuestPathKeys(anchorKey: string, row: number, col: number) {
@@ -1376,27 +1445,22 @@ export function WordPuzzleStudio() {
   }
 
   function selectWord(wordId: string, intent: WordSelectionIntent = "answer", selectedCellKey?: string) {
-    if (!state.run.words.some((word) => word.id === wordId)) {
+    const current = stateRef.current;
+    if (!current.run.words.some((word) => word.id === wordId)) {
       return;
     }
 
-    setState((current) => {
-      if (!current.run.words.some((word) => word.id === wordId)) {
-        return current;
-      }
-
-      return {
-        ...current,
-        activeWordId: wordId,
-      };
+    commitState({
+      ...current,
+      activeWordId: wordId,
     });
-    const questMode = state.run.options.boardView === "quest";
+    const questMode = current.run.options.boardView === "quest";
     const resolvedIntent = questMode ? "cell" : intent;
-    const targetCellKey = selectedCellKey ?? getFirstOpenCellKey(state, wordId);
+    const targetCellKey = selectedCellKey ?? getFirstOpenCellKey(current, wordId);
     setFocusedCellKey(targetCellKey);
     setMobilePanel("board");
-    const placement = getPlacementByWordId(state, wordId);
-    const word = getWordById(state, wordId);
+    const placement = getPlacementByWordId(current, wordId);
+    const word = getWordById(current, wordId);
     if (placement && word) {
       if (questMode) {
         setQuestPath({ anchor: null, cells: [] });
@@ -1407,7 +1471,7 @@ export function WordPuzzleStudio() {
     }
 
     window.requestAnimationFrame(() => {
-      if (resolvedIntent === "answer" && canAcceptPlayIntent(state) && !state.solvedIds.includes(wordId)) {
+      if (resolvedIntent === "answer" && canAcceptPlayIntent(current) && !current.solvedIds.includes(wordId)) {
         activeAnswerInputRef.current?.focus();
       } else if (targetCellKey) {
         boardCellRefs.current[targetCellKey]?.focus();
@@ -1472,65 +1536,37 @@ export function WordPuzzleStudio() {
     }
 
     const nowMs = readNow();
-    const previewPlacement = getPlacementByWordId(state, preferredWordId);
-    const previewWord = getWordById(state, preferredWordId);
-    if (previewPlacement && previewWord) {
-      const previewEntries = { ...state.cellEntries, [getCellKey(cell.row, cell.col)]: nextLetter };
-      if (!nextLetter) {
-        delete previewEntries[getCellKey(cell.row, cell.col)];
-      }
-      const previewGuess = getWordCells(state, previewPlacement).map((entry) => previewEntries[getCellKey(entry.row, entry.col)] ?? "").join("");
-      const clueLabel = `${previewPlacement.clueNumber} ${previewPlacement.direction}`;
-      if (previewGuess.length === previewWord.length && sanitizeGuess(previewGuess) === previewWord.normalized) {
-        setAnnouncement(`${clueLabel} solved. ${Math.min(state.run.words.length, solvedCount + 1)} of ${state.run.words.length} complete.`);
-      } else if (previewGuess.length === previewWord.length) {
+    const result = commitEntryTransaction((attempt) => {
+      const currentCell = attempt.run.board.cells.find((entry) => entry.row === cell.row && entry.col === cell.col);
+      const currentWordId = currentCell ? getPreferredWordIdForCell(attempt, currentCell, attempt.activeWordId) : null;
+      return currentWordId
+        ? applyCellEntry(attempt, cell.row, cell.col, nextLetter, currentWordId)
+        : { ok: false, state: attempt, reason: "missing-word" };
+    }, nowMs);
+    if (!result) {
+      return;
+    }
+
+    const nextWord = getWordById(result.state, preferredWordId);
+    const nextPlacement = getPlacementByWordId(result.state, preferredWordId);
+    if (nextWord && nextPlacement) {
+      const nextGuess = deriveGuessFromCells(result.state, preferredWordId);
+      const clueLabel = `${nextPlacement.clueNumber} ${nextPlacement.direction}`;
+      if (result.state.solvedIds.includes(preferredWordId)) {
+        setAnnouncement(`${clueLabel} solved. ${result.state.solvedIds.length} of ${result.state.run.words.length} complete.`);
+      } else if (countFilledLetters(nextGuess) === nextWord.length) {
         setAnnouncement(`${clueLabel} is not correct yet.`);
       } else {
-        setAnnouncement(`${clueLabel} selected, ${previewWord.length} letters.`);
+        setAnnouncement(`${clueLabel} selected, ${nextWord.length} letters.`);
       }
     }
 
-    setState((current) => {
-      const attempt = startPreparedAttempt(current, nowMs);
-      if (!canMutateAttempt(attempt)) {
-        return attempt;
-      }
-
-      const currentCell = attempt.run.board.cells.find((entry) => entry.row === cell.row && entry.col === cell.col);
-      const currentWordId = currentCell ? getPreferredWordIdForCell(attempt, currentCell, attempt.activeWordId) : null;
-      if (!currentWordId) {
-        return current;
-      }
-
-      const nextCellEntries = { ...attempt.cellEntries };
-      const cellKey = getCellKey(cell.row, cell.col);
-
-      if (nextLetter) {
-        nextCellEntries[cellKey] = nextLetter;
-      } else {
-        delete nextCellEntries[cellKey];
-      }
-
-      const nextState = buildStateWithEntries(
-        {
-          ...attempt,
-          activeWordId: currentWordId,
-        },
-        nextCellEntries,
-        currentWordId,
-      );
-
-      const finalized = finalizeAttempt(nextState, nowMs);
-      stateRef.current = finalized;
-      return finalized;
-    });
-
-    const placement = getPlacementByWordId(state, preferredWordId);
+    const placement = getPlacementByWordId(result.state, preferredWordId);
     if (!placement) {
       return;
     }
 
-    const cells = getWordCells(state, placement);
+    const cells = getWordCells(result.state, placement);
     const currentIndex = cells.findIndex((entry) => entry.row === cell.row && entry.col === cell.col);
     const nextIndex = options?.moveBackward ? currentIndex - 1 : currentIndex + 1;
     const nextCell = cells[nextIndex];
@@ -1617,30 +1653,11 @@ export function WordPuzzleStudio() {
       return;
     }
 
-    setState((current) => {
-      if (!isStartedAttempt(current) || !canMutateAttempt(current) || !current.activeWordId) {
-        return current;
-      }
-
-      const placement = getPlacementByWordId(current, current.activeWordId);
-      if (!placement) {
-        return current;
-      }
-
-      const nextCellEntries = { ...current.cellEntries };
-      const cells = getWordCells(current, placement);
-
-      for (const cell of cells) {
-        const key = getCellKey(cell.row, cell.col);
-        const hasSolvedNeighbor = cell.wordIds.some((wordId) => wordId !== current.activeWordId && current.solvedIds.includes(wordId));
-
-        if (!hasSolvedNeighbor) {
-          delete nextCellEntries[key];
-        }
-      }
-
-      return buildStateWithEntries(current, nextCellEntries, current.activeWordId);
-    });
+    const wordId = activeWord.id;
+    const result = commitEntryTransaction((attempt) => clearWordEntries(attempt, wordId));
+    if (result?.changed) {
+      setAnnouncement(`${activeClueName} cleared. Solved and revealed crossings were kept.`);
+    }
   }
 
   function revealActiveLetter() {
@@ -1649,34 +1666,33 @@ export function WordPuzzleStudio() {
     }
 
     const nowMs = readNow();
-    setState((current) => {
-      const attempt = startPreparedAttempt(current, nowMs);
-      if (!canMutateAttempt(attempt) || !attempt.activeWordId) {
-        return attempt;
+    const result = commitEntryTransaction((attempt) => {
+      if (!attempt.activeWordId) {
+        return { ok: false, state: attempt, reason: "missing-word" };
       }
 
       const currentWord = getWordById(attempt, attempt.activeWordId);
       const placement = getPlacementByWordId(attempt, attempt.activeWordId);
       if (!currentWord || !placement) {
-        return current;
+        return { ok: false, state: attempt, reason: "missing-word" };
       }
 
-      const nextCellEntries = { ...attempt.cellEntries };
       const cells = getWordCells(attempt, placement);
-      const revealIndex = cells.findIndex((cell, index) => (nextCellEntries[getCellKey(cell.row, cell.col)] ?? "") !== currentWord.answer[index]);
-
+      const revealIndex = cells.findIndex((cell, index) => (attempt.cellEntries[getCellKey(cell.row, cell.col)] ?? "") !== currentWord.answer[index]);
       if (revealIndex === -1) {
-        return attempt;
+        return { ok: true, state: attempt, changed: false };
       }
 
       const revealCell = cells[revealIndex];
       const revealedCellKey = getCellKey(revealCell.row, revealCell.col);
-      nextCellEntries[revealedCellKey] = currentWord.answer[revealIndex];
-      const assistedState = recordRevealedCell(attempt, revealedCellKey);
-      const nextState = finalizeAttempt(buildStateWithEntries(assistedState, nextCellEntries, currentWord.id), nowMs);
-      stateRef.current = nextState;
-      return nextState;
-    });
+      const transaction = applyCellEntry(attempt, revealCell.row, revealCell.col, currentWord.answer[revealIndex], currentWord.id);
+      return transaction.ok
+        ? { ...transaction, state: recordRevealedCell(transaction.state, revealedCellKey) }
+        : transaction;
+    }, nowMs);
+    if (result?.changed) {
+      setAnnouncement("One letter revealed. That crossing is now locked.");
+    }
   }
 
   function updateWordGuess(word: PuzzleWord, value: string) {
@@ -1684,50 +1700,26 @@ export function WordPuzzleStudio() {
     if ((!cleaned && !isStartedAttempt(state)) || !canAcceptPlayIntent(state)) {
       return;
     }
-    const placement = getPlacementByWordId(state, word.id);
-    if (placement) {
-      const clueLabel = `${placement.clueNumber} ${placement.direction}`;
-      if (cleaned.length === word.length && cleaned === word.normalized) {
-        setAnnouncement(`${clueLabel} solved. ${Math.min(state.run.words.length, solvedCount + 1)} of ${state.run.words.length} complete.`);
-      } else if (cleaned.length === word.length) {
-        setAnnouncement(`${clueLabel} is not correct yet.`);
-      } else {
-        setAnnouncement(`${clueLabel} selected, ${word.length} letters.`);
-      }
-    }
 
     const nowMs = readNow();
-    setState((current) => {
-      const attempt = startPreparedAttempt(current, nowMs);
-      if (!canMutateAttempt(attempt)) {
-        return attempt;
-      }
+    const result = commitEntryTransaction((attempt) => applyWordEntry(attempt, word.id, value), nowMs);
+    if (!result) {
+      return;
+    }
 
-      const currentWord = getWordById(attempt, word.id);
-      const placement = currentWord ? getWordPlacement(current, currentWord.id) : null;
-      if (!currentWord || !placement) {
-        return current;
-      }
-
-      const nextCellEntries = { ...attempt.cellEntries };
-
-      for (let index = 0; index < currentWord.answer.length; index += 1) {
-        const row = placement.row + (placement.direction === "down" ? index : 0);
-        const col = placement.col + (placement.direction === "across" ? index : 0);
-        const key = getCellKey(row, col);
-        const letter = cleaned[index] ?? "";
-
-        if (letter) {
-          nextCellEntries[key] = letter;
-        } else if (nextCellEntries[key] && attempt.run.board.cells.find((cell) => cell.row === row && cell.col === col)?.wordIds.length === 1) {
-          delete nextCellEntries[key];
-        }
-      }
-
-      const nextState = finalizeAttempt(buildStateWithEntries(attempt, nextCellEntries, currentWord.id), nowMs);
-      stateRef.current = nextState;
-      return nextState;
-    });
+    const placement = getPlacementByWordId(result.state, word.id);
+    if (!placement) {
+      return;
+    }
+    const clueLabel = `${placement.clueNumber} ${placement.direction}`;
+    const nextGuess = deriveGuessFromCells(result.state, word.id);
+    if (result.state.solvedIds.includes(word.id)) {
+      setAnnouncement(`${clueLabel} solved. ${result.state.solvedIds.length} of ${result.state.run.words.length} complete.`);
+    } else if (countFilledLetters(nextGuess) === word.length) {
+      setAnnouncement(`${clueLabel} is not correct yet.`);
+    } else {
+      setAnnouncement(`${clueLabel} selected, ${word.length} letters.`);
+    }
   }
 
   function selectWordFromCell(cell: PuzzleBoardCell) {
@@ -1831,7 +1823,7 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
               <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_8.5rem] lg:items-center">
                 <div className="space-y-3">
                   <div className="text-sm font-semibold text-fuchsia-300">{runContextLabel}</div>
-                  <h2 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">{state.run.title}</h2>
+                  <h2 ref={runHeadingRef} tabIndex={-1} data-testid="run-title" className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">{state.run.title}</h2>
                   <p className="max-w-3xl text-sm leading-6 text-slate-300">{state.run.blurb}</p>
                   <div className="flex flex-wrap gap-2 text-xs text-slate-200">
                     <span data-testid="progress-label" className="accent-chip rounded-full px-3 py-1 font-semibold uppercase tracking-[0.22em]">{progressLabel}</span>
@@ -2179,6 +2171,7 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
                       aria-label={`Answer for ${activeClueName}, ${activeWord.length} letters`}
                       aria-describedby={[activeCluePromptId, activeClueFeedbackId].filter(Boolean).join(" ")}
                       aria-invalid={activeGuessIncorrect || undefined}
+                      maxLength={activeWord.length}
                       value={activeGuess}
                       onChange={(event) => updateWordGuess(activeWord, event.target.value)}
                       onKeyDown={(event) => {
@@ -2857,6 +2850,34 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
         <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">{liveMessage}</div>
 
         <dialog
+          ref={replacementDialogRef}
+          data-testid="run-replacement-dialog"
+          aria-modal="true"
+          aria-labelledby="replacement-dialog-title"
+          aria-describedby="replacement-dialog-description"
+          onCancel={(event) => {
+            event.preventDefault();
+            cancelRunReplacement();
+          }}
+          onKeyDown={trapDialogFocus}
+          className="glass-card fixed inset-0 m-auto w-[min(30rem,calc(100%-2rem))] rounded-[2rem] p-6 text-slate-100 backdrop:bg-slate-950/80"
+        >
+          {pendingReplacement ? (
+            <div>
+              <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Run replacement</div>
+              <h3 id="replacement-dialog-title" className="mt-2 text-2xl font-semibold text-white">Replace this unfinished run?</h3>
+              <p id="replacement-dialog-description" className="mt-3 text-sm leading-6 text-slate-300">
+                Your latest progress will be saved in local history before the new puzzle opens. If saving or generation fails, this run will stay unchanged.
+              </p>
+              <div className="mt-5 flex flex-wrap justify-end gap-2">
+                <button ref={replacementCancelRef} type="button" onClick={cancelRunReplacement} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">Cancel</button>
+                <button type="button" onClick={acceptRunReplacement} disabled={isStarting} className="accent-chip rounded-full px-4 py-2 text-sm font-semibold disabled:opacity-60">Save and replace</button>
+              </div>
+            </div>
+          ) : null}
+        </dialog>
+
+        <dialog
           ref={revealDialogRef}
           aria-modal="true"
           aria-labelledby="reveal-dialog-title"
@@ -2865,7 +2886,7 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
             event.preventDefault();
             closeRevealDialog();
           }}
-          onKeyDown={trapRevealDialogFocus}
+          onKeyDown={trapDialogFocus}
           className="glass-card fixed inset-0 m-auto w-[min(28rem,calc(100%-2rem))] rounded-[2rem] p-6 text-slate-100 backdrop:bg-slate-950/80"
         >
           {revealConfirm.kind !== "none" ? (

@@ -97,7 +97,7 @@ async function readStoredAttempt(page: Page) {
           puzzleId: string;
           words: Array<{ id: string; answer: string; prompt: string; length: number }>;
           board: {
-            cells: Array<{ row: number; col: number; wordIds: string[] }>;
+            cells: Array<{ row: number; col: number; solution: string; wordIds: string[] }>;
             placements: Array<{ wordId: string; clueNumber: number; direction: "across" | "down"; row: number; col: number }>;
           };
         };
@@ -199,11 +199,13 @@ test("player can use clue assistance and clue navigation", async ({ page }) => {
 
   const startingBadge = ((await page.getByTestId("active-clue-badge").textContent()) ?? "").trim();
   await page.getByRole("button", { name: "Reveal letter" }).click();
-  await expect(page.getByTestId("active-answer-input")).not.toHaveValue("");
+  const input = page.getByTestId("active-answer-input");
+  await expect(input).not.toHaveValue("");
+  const revealedValue = await input.inputValue();
   await page.getByRole("button", { name: "Show scramble" }).click();
   await expect(page.getByText(/^Scramble:/)).toBeVisible();
   await page.getByRole("button", { name: "Clear word" }).click();
-  await expect(page.getByTestId("active-answer-input")).toHaveValue("");
+  await expect(input).toHaveValue(revealedValue);
 
   await page.getByRole("button", { name: "Next clue" }).click();
   await expect(page.getByTestId("active-clue-badge")).not.toHaveText(startingBadge);
@@ -251,6 +253,39 @@ test("crossword grid exposes answer-safe names and preserves focus while switchi
   await expect(intersectionCell).toHaveAttribute("tabindex", "0");
   const outlineStyle = await intersectionCell.evaluate((cell) => getComputedStyle(cell).outlineStyle);
   expect(outlineStyle).not.toBe("none");
+});
+
+test("a solved crossing rejects a conflicting lane edit without partial changes", async ({ page }) => {
+  await openPuzzle(page);
+  const initial = await readStoredAttempt(page);
+  const crossing = initial.run.board.cells.find((cell) => cell.wordIds.length === 2)!;
+  const [solvedWordId, neighboringWordId] = crossing.wordIds;
+  const solvedWord = initial.run.words.find((word) => word.id === solvedWordId)!;
+  const neighboringWord = initial.run.words.find((word) => word.id === neighboringWordId)!;
+  const neighboringPlacement = initial.run.board.placements.find((placement) => placement.wordId === neighboringWordId)!;
+  const crossingIndex = neighboringPlacement.direction === "across"
+    ? crossing.col - neighboringPlacement.col
+    : crossing.row - neighboringPlacement.row;
+
+  await page.getByRole("button").filter({ hasText: solvedWord.prompt }).first().click();
+  await page.getByTestId("active-answer-input").fill(solvedWord.answer);
+  await expect.poll(async () => (await readStoredAttempt(page)).solvedIds).toContain(solvedWordId);
+
+  await page.getByRole("button").filter({ hasText: neighboringWord.prompt }).first().click();
+  const input = page.getByTestId("active-answer-input");
+  await expect(input).toBeFocused();
+  await page.waitForTimeout(150);
+  const beforeValue = await input.inputValue();
+  const beforeEntries = (await readStoredAttempt(page)).cellEntries;
+  const conflicting = Array.from({ length: neighboringWord.length }, (_, index) => (
+    index === crossingIndex ? (crossing.solution === "z" ? "y" : "z") : "x"
+  )).join("");
+
+  await input.fill(conflicting);
+
+  await expect(page.getByRole("status")).toContainText(/crossing is locked/i);
+  await expect(input).toHaveValue(beforeValue);
+  expect((await readStoredAttempt(page)).cellEntries).toEqual(beforeEntries);
 });
 
 test("clue selection retains partial input and Escape returns to the grid without clearing", async ({ page }) => {
@@ -365,6 +400,7 @@ test("setup exposes advanced learning and board controls", async ({ page }) => {
   await expect(page.getByLabel("Learning mode")).toBeChecked();
   await page.getByLabel("Board mode").selectOption("quest");
   await page.getByRole("button", { name: "Start Fresh Run" }).click();
+  await page.getByTestId("run-replacement-dialog").getByRole("button", { name: "Save and replace" }).click();
   await expect(page.getByRole("heading", { name: "Quest board" })).toBeVisible();
 });
 
@@ -649,16 +685,86 @@ test("daily completion exposes the daily share action", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Share daily result" })).toBeVisible();
 });
 
-test("starting another run records local history", async ({ page }) => {
+test("unfinished replacement is cancel-first, focus-safe, and idempotent", async ({ page }) => {
   await openPuzzle(page);
-  await page.getByRole("button", { name: "Fresh run", exact: true }).click();
+  const initial = await readStoredAttempt(page);
+  const activeWord = initial.run.words.find((word) => word.id === initial.activeWordId)!;
+  await page.getByTestId("active-answer-input").fill(activeWord.answer);
+  await expect.poll(async () => (await readStoredAttempt(page)).solvedIds).toContain(activeWord.id);
+  const source = await readStoredAttempt(page);
+  const trigger = page.getByRole("button", { name: "Fresh run", exact: true });
+
+  await trigger.click();
+  const dialog = page.getByTestId("run-replacement-dialog");
+  const cancel = dialog.getByRole("button", { name: "Cancel" });
+  const confirm = dialog.getByRole("button", { name: "Save and replace" });
+  await expect(dialog).toBeVisible();
+  await expect(cancel).toBeFocused();
+  await cancel.press("Tab");
+  await expect(confirm).toBeFocused();
+  await confirm.press("Tab");
+  await expect(cancel).toBeFocused();
+  await cancel.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+  expect((await readStoredAttempt(page)).attemptId).toBe(source.attemptId);
+  expect((await readStoredAttempt(page)).cellEntries).toEqual(source.cellEntries);
+
+  await trigger.click();
+  await expect(cancel).toBeFocused();
+  await confirm.evaluate((button: HTMLButtonElement) => {
+    button.click();
+    button.click();
+  });
+
+  await expect(dialog).toBeHidden();
+  await expect(page.getByTestId("run-title")).toBeFocused();
+  const stored = await page.evaluate((key) => JSON.parse(window.localStorage.getItem(key)!) as {
+    currentAttempt: { attemptId: string };
+    progress: { history: Array<{ attemptId: string; solvedCount: number }> };
+  }, sessionStorageKey);
+  expect(stored.currentAttempt.attemptId).not.toBe(source.attemptId);
+  expect(stored.progress.history.filter((entry) => entry.attemptId === stored.currentAttempt.attemptId)).toHaveLength(1);
+  expect(stored.progress.history.find((entry) => entry.attemptId === source.attemptId)?.solvedCount).toBe(1);
 
   const historyCard = page.getByTestId("recent-run-card").first();
   await expect(historyCard).toBeVisible();
   await expect(historyCard).toContainText(/replay/i);
-  const beforeReplay = await readStoredAttempt(page);
-  await historyCard.click();
-  await expect.poll(async () => (await readStoredAttempt(page)).attemptId).not.toBe(beforeReplay.attemptId);
+});
+
+test("replacement write failure leaves the source run and storage unchanged", async ({ page }) => {
+  await openPuzzle(page);
+  await page.getByTestId("active-answer-input").fill("ab");
+  await expect.poll(async () => Object.keys((await readStoredAttempt(page)).cellEntries).length).toBeGreaterThan(0);
+  await page.waitForTimeout(150);
+  const source = await readStoredAttempt(page);
+  const rawSource = await page.evaluate((key) => window.localStorage.getItem(key), sessionStorageKey);
+  await page.evaluate(() => {
+    const runtimeWindow = window as typeof window & { __astraOriginalSetItem?: Storage["setItem"] };
+    runtimeWindow.__astraOriginalSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = () => {
+      throw new DOMException("Storage denied", "QuotaExceededError");
+    };
+  });
+
+  const trigger = page.getByRole("button", { name: "Fresh run", exact: true });
+  await trigger.click();
+  await page.getByTestId("run-replacement-dialog").getByRole("button", { name: "Save and replace" }).click();
+
+  await expect(page.getByTestId("run-replacement-dialog")).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await expect(page.getByRole("status")).toContainText(/nothing was replaced/i);
+  expect((await readStoredAttempt(page)).attemptId).toBe(source.attemptId);
+  expect((await readStoredAttempt(page)).cellEntries).toEqual(source.cellEntries);
+  expect(await page.evaluate((key) => window.localStorage.getItem(key), sessionStorageKey)).toBe(rawSource);
+
+  await page.evaluate(() => {
+    const runtimeWindow = window as typeof window & { __astraOriginalSetItem?: Storage["setItem"] };
+    if (runtimeWindow.__astraOriginalSetItem) {
+      Storage.prototype.setItem = runtimeWindow.__astraOriginalSetItem;
+      delete runtimeWindow.__astraOriginalSetItem;
+    }
+  });
 });
 
 test("learning mode exposes vocabulary support after deliberate review", async ({ page }) => {
