@@ -8,7 +8,15 @@ import { refreshPreparedDaily, resolveStudioBootstrap } from "@/lib/studio/boots
 import type { StoredGameResult } from "@/lib/session-storage";
 
 const nowMs = Date.parse("2026-07-29T12:00:00.000Z");
-const none: StoredGameResult = { game: null, source: "none" };
+const none: StoredGameResult = {
+  currentAttempt: null,
+  progress: createEmptyProgress(),
+  source: "none",
+  committedSaveId: null,
+  adopted: false,
+  writable: true,
+  issues: [],
+};
 
 function storedAttempt(completedAt: string | null = null): StoredGameResult {
   const currentAttempt = {
@@ -22,8 +30,13 @@ function storedAttempt(completedAt: string | null = null): StoredGameResult {
     completedAt,
   };
   return {
-    source: "v2",
-    game: { schemaVersion: 2, currentAttempt, progress: createEmptyProgress() },
+    source: "v3-primary",
+    currentAttempt,
+    progress: createEmptyProgress(),
+    committedSaveId: "save-bootstrap-0001",
+    adopted: true,
+    writable: true,
+    issues: [],
   };
 }
 
@@ -61,12 +74,12 @@ test("an unfinished saved attempt wins over valid or invalid shared intent", () 
 
 test("a completed custom save yields to a prepared current daily without mutation", () => {
   const stored = storedAttempt(new Date(nowMs - 1_000).toISOString());
-  const before = structuredClone(stored.game);
+  const before = structuredClone(stored);
   const result = resolveStudioBootstrap({ stored, shared: { kind: "none" }, nowMs });
 
   assert.equal(result.source, "current-daily");
   assert.equal(result.current.attemptId, null);
-  assert.deepEqual(stored.game, before);
+  assert.deepEqual(stored, before);
 });
 
 test("a hidden boot restores an attempt without starting its active clock", () => {

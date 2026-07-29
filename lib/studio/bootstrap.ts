@@ -1,7 +1,6 @@
 import type { CurrentRunState, ProgressSnapshot, PuzzleOptions } from "@/lib/game-types";
 import { buildPuzzleRun, PuzzleGenerationError } from "@/lib/puzzle-generator";
 import { getCanonicalDailyOptions, type SharedOptionsResult } from "@/lib/puzzle-options";
-import { createEmptyProgress } from "@/lib/progress";
 import { createPreparedRunState, setAttemptVisibility } from "@/lib/run-state";
 import { prepareStoredAttempt, shouldRestoreAttempt, type StoredGameResult } from "@/lib/session-storage";
 
@@ -33,10 +32,10 @@ export function resolveStudioBootstrap({
 }): StudioBootstrap {
   const dailyOptions = getCanonicalDailyOptions(nowMs);
   const daily = prepare(dailyOptions);
-  const progress = stored.game?.progress ?? createEmptyProgress();
+  const progress = stored.progress;
 
-  if (stored.game && shouldRestoreAttempt(stored.game.currentAttempt, daily.run.puzzleId)) {
-    const resumed = prepareStoredAttempt(stored.game.currentAttempt, nowMs);
+  if (stored.currentAttempt && shouldRestoreAttempt(stored.currentAttempt, daily.run.puzzleId)) {
+    const resumed = prepareStoredAttempt(stored.currentAttempt, nowMs);
     const current = visible ? resumed : setAttemptVisibility(resumed, false, nowMs);
     const warning = shared.kind === "invalid"
       ? "That shared puzzle link was invalid, so your saved attempt was resumed."

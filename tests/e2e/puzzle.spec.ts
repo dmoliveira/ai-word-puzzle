@@ -1,6 +1,15 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const sessionStorageKey = "astra-lexa:v2";
+const sessionStorageKey = "astra-lexa:v3";
+const pagehideStoragePrefix = "astra-lexa:v3:pagehide:";
+const localStorageKeys = [
+  sessionStorageKey,
+  "astra-lexa:v3:previous",
+  "astra-lexa:v3:commit",
+  "astra-lexa:v2",
+  "astra-lexa-session",
+  "astra-lexa-progress",
+];
 let preparedOpenSequence = 0;
 const deterministicQuery = new URLSearchParams({
   mode: "custom",
@@ -23,12 +32,16 @@ function escapeRegExp(value: string) {
 async function openPreparedPuzzle(page: Page, overrides: Record<string, string> = {}) {
   if (page.url().startsWith("http://127.0.0.1:3100")) {
     preparedOpenSequence += 1;
-    await page.addInitScript(({ key, flag }) => {
+    await page.addInitScript(({ keys, flag, deferredPrefix }) => {
       if (!window.sessionStorage.getItem(flag)) {
-        window.localStorage.removeItem(key);
+        keys.forEach((key) => window.localStorage.removeItem(key));
+        for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+          const key = window.localStorage.key(index);
+          if (key?.startsWith(deferredPrefix)) window.localStorage.removeItem(key);
+        }
         window.sessionStorage.setItem(flag, "true");
       }
-    }, { key: sessionStorageKey, flag: `astra-e2e-reset-${preparedOpenSequence}` });
+    }, { keys: localStorageKeys, flag: `astra-e2e-reset-${preparedOpenSequence}`, deferredPrefix: pagehideStoragePrefix });
   }
   const query = new URLSearchParams(deterministicQuery);
   Object.entries(overrides).forEach(([key, value]) => query.set(key, value));
@@ -67,8 +80,8 @@ async function solveRunFromPersistedFixture(page: Page) {
       throw new Error("Expected the current run to be persisted before solving it");
     }
 
-    const game = JSON.parse(raw) as { currentAttempt: { run: { words: Array<{ answer: string }> } } };
-    return game.currentAttempt.run.words.map((word) => word.answer);
+    const game = JSON.parse(raw) as { branches: { attempt: { value: { run: { words: Array<{ answer: string }> } } } } };
+    return game.branches.attempt.value.run.words.map((word) => word.answer);
   }, sessionStorageKey);
 
   for (let index = 0; index < answers.length; index += 1) {
@@ -85,7 +98,7 @@ async function readStoredAttempt(page: Page) {
       throw new Error("Expected a persisted v2 game");
     }
     return (JSON.parse(raw) as {
-      currentAttempt: {
+      branches: { attempt: { value: {
         attemptId: string;
         activeWordId: string | null;
         completedAt: string | null;
@@ -101,8 +114,8 @@ async function readStoredAttempt(page: Page) {
             placements: Array<{ wordId: string; clueNumber: number; direction: "across" | "down"; row: number; col: number }>;
           };
         };
-      };
-    }).currentAttempt;
+      } } };
+    }).branches.attempt.value;
   }, sessionStorageKey);
 }
 
@@ -147,8 +160,8 @@ async function solveQuestRunFromPersistedFixture(page: Page) {
 async function readStoredAnswers(page: Page) {
   await readStoredAttempt(page);
   return page.evaluate((key) => {
-    const game = JSON.parse(window.localStorage.getItem(key)!) as { currentAttempt: { run: { words: Array<{ answer: string }> } } };
-    return game.currentAttempt.run.words.map((word) => word.answer.toUpperCase());
+    const game = JSON.parse(window.localStorage.getItem(key)!) as { branches: { attempt: { value: { run: { words: Array<{ answer: string }> } } } } };
+    return game.branches.attempt.value.run.words.map((word) => word.answer.toUpperCase());
   }, sessionStorageKey);
 }
 
@@ -454,12 +467,12 @@ test("an untouched prepared puzzle creates no attempt, timer, storage, or histor
   await expect(page.getByTestId("run-status")).toHaveText("Ready");
   await expect(page.getByTestId("elapsed-time")).toHaveText("00:00");
   await expect(page.getByTestId("recent-run-card")).toHaveCount(0);
-  expect(await page.evaluate((key) => window.localStorage.getItem(key), sessionStorageKey)).toBeNull();
+  expect(await page.evaluate((keys) => keys.map((key) => window.localStorage.getItem(key)), localStorageKeys)).toEqual(localStorageKeys.map(() => null));
 
   await page.getByRole("button", { name: "Open Setup", exact: true }).click();
   await page.getByRole("button", { name: "Play", exact: true }).click();
   await page.waitForTimeout(150);
-  expect(await page.evaluate((key) => window.localStorage.getItem(key), sessionStorageKey)).toBeNull();
+  expect(await page.evaluate((keys) => keys.map((key) => window.localStorage.getItem(key)), localStorageKeys)).toEqual(localStorageKeys.map(() => null));
 
   await page.getByTestId("start-puzzle").click();
   await expect(page.locator('main#puzzle-studio[data-run-state="attempt"]')).toBeVisible();
@@ -637,16 +650,54 @@ test("pagehide flushes one settled snapshot and bfcache restore excludes hidden 
   await openPuzzle(page, { timerEnabled: "true" });
   await readStoredAttempt(page);
   await page.waitForTimeout(200);
+  const canonicalBeforeHide = await page.evaluate((key) => window.localStorage.getItem(key), sessionStorageKey);
 
   await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
+  const stagedState = await page.evaluate(({ key, prefix }) => ({
+    canonical: window.localStorage.getItem(key),
+    deferred: Object.keys(window.localStorage).filter((storageKey) => storageKey.startsWith(prefix)),
+  }), { key: sessionStorageKey, prefix: pagehideStoragePrefix });
+  expect(stagedState.canonical).toBe(canonicalBeforeHide);
+  expect(stagedState.deferred).toHaveLength(1);
   await page.waitForTimeout(1_200);
   await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
-  await page.waitForTimeout(120);
+  await expect.poll(() => page.evaluate((prefix) => Object.keys(window.localStorage).filter((key) => key.startsWith(prefix)).length, pagehideStoragePrefix)).toBe(0);
   await page.getByRole("button", { name: "Pause", exact: true }).first().click();
   const restored = await readStoredAttempt(page);
 
   expect(restored.elapsedMs).toBeLessThan(1_000);
   await expect(page.getByTestId("run-status")).toHaveText("Paused");
+});
+
+test("two tabs serialize the same base revision and reject one stale writer", async ({ page, context }) => {
+  const secondPage = await context.newPage();
+  await openPreparedPuzzle(page, { seed: "race-first" });
+  await openPreparedPuzzle(secondPage, { seed: "race-second" });
+  expect(await page.evaluate(() => Boolean(navigator.locks))).toBe(true);
+
+  await Promise.all([
+    page.getByTestId("start-puzzle").evaluate((button: HTMLButtonElement) => button.click()),
+    secondPage.getByTestId("start-puzzle").evaluate((button: HTMLButtonElement) => button.click()),
+  ]);
+
+  const pages = [page, secondPage];
+  await expect.poll(async () => {
+    const statuses = (await Promise.all(pages.map((candidate) => candidate.getByTestId("storage-status").allTextContents()))).flat();
+    return statuses.filter((status) => /another tab changed this local save/i.test(status)).length;
+  }).toBe(1);
+  const runStates = await Promise.all(pages.map((candidate) => candidate.locator("main#puzzle-studio").getAttribute("data-run-state")));
+  expect(runStates.filter((state) => state === "attempt")).toHaveLength(2);
+  const pageStatuses = await Promise.all(pages.map((candidate) => candidate.getByTestId("storage-status").allTextContents()));
+  const rejectedIndex = pageStatuses.findIndex((statuses) => statuses.some((status) => /another tab changed this local save/i.test(status)));
+  expect(rejectedIndex).toBeGreaterThanOrEqual(0);
+  const canonicalSeed = await page.evaluate((key) => {
+    const raw = window.localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as { branches: { attempt: { value: { run: { seed: string } } } } }).branches.attempt.value.run.seed : null;
+  }, sessionStorageKey);
+  expect(["race-first", "race-second"]).toContain(canonicalSeed);
+  expect(canonicalSeed).not.toBe(["race-first", "race-second"][rejectedIndex]);
+
+  await secondPage.close();
 });
 
 test("shared daily options reopen the requested seeded run", async ({ page }) => {
@@ -720,12 +771,22 @@ test("unfinished replacement is cancel-first, focus-safe, and idempotent", async
   await expect(dialog).toBeHidden();
   await expect(page.getByTestId("run-title")).toBeFocused();
   const stored = await page.evaluate((key) => JSON.parse(window.localStorage.getItem(key)!) as {
-    currentAttempt: { attemptId: string };
-    progress: { history: Array<{ attemptId: string; solvedCount: number }> };
+    branches: {
+      attempt: { value: { attemptId: string } };
+      progress: { value: { history: Array<{ attemptId: string; solvedCount: number }> } };
+    };
   }, sessionStorageKey);
-  expect(stored.currentAttempt.attemptId).not.toBe(source.attemptId);
-  expect(stored.progress.history.filter((entry) => entry.attemptId === stored.currentAttempt.attemptId)).toHaveLength(1);
-  expect(stored.progress.history.find((entry) => entry.attemptId === source.attemptId)?.solvedCount).toBe(1);
+  const storedAttempt = stored.branches.attempt.value;
+  const storedProgress = stored.branches.progress.value;
+  expect(storedAttempt.attemptId).not.toBe(source.attemptId);
+  expect(storedProgress.history.filter((entry) => entry.attemptId === storedAttempt.attemptId)).toHaveLength(1);
+  expect(storedProgress.history.find((entry) => entry.attemptId === source.attemptId)?.solvedCount).toBe(1);
+  await page.waitForTimeout(250);
+  const previousAttemptId = await page.evaluate((key) => {
+    const raw = window.localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as { branches: { attempt: { value: { attemptId: string } } } }).branches.attempt.value.attemptId : null;
+  }, "astra-lexa:v3:previous");
+  expect(previousAttemptId).toBe(source.attemptId);
 
   const historyCard = page.getByTestId("recent-run-card").first();
   await expect(historyCard).toBeVisible();
@@ -738,7 +799,7 @@ test("replacement write failure leaves the source run and storage unchanged", as
   await expect.poll(async () => Object.keys((await readStoredAttempt(page)).cellEntries).length).toBeGreaterThan(0);
   await page.waitForTimeout(150);
   const source = await readStoredAttempt(page);
-  const rawSource = await page.evaluate((key) => window.localStorage.getItem(key), sessionStorageKey);
+  const rawSource = await page.evaluate((keys) => Object.fromEntries(keys.map((key) => [key, window.localStorage.getItem(key)])), localStorageKeys);
   await page.evaluate(() => {
     const runtimeWindow = window as typeof window & { __astraOriginalSetItem?: Storage["setItem"] };
     runtimeWindow.__astraOriginalSetItem = Storage.prototype.setItem;
@@ -753,10 +814,10 @@ test("replacement write failure leaves the source run and storage unchanged", as
 
   await expect(page.getByTestId("run-replacement-dialog")).toBeHidden();
   await expect(trigger).toBeFocused();
-  await expect(page.getByRole("status")).toContainText(/nothing was replaced/i);
+  await expect(page.getByTestId("storage-status")).toContainText(/local storage is full/i);
   expect((await readStoredAttempt(page)).attemptId).toBe(source.attemptId);
   expect((await readStoredAttempt(page)).cellEntries).toEqual(source.cellEntries);
-  expect(await page.evaluate((key) => window.localStorage.getItem(key), sessionStorageKey)).toBe(rawSource);
+  expect(await page.evaluate((keys) => Object.fromEntries(keys.map((key) => [key, window.localStorage.getItem(key)])), localStorageKeys)).toEqual(rawSource);
 
   await page.evaluate(() => {
     const runtimeWindow = window as typeof window & { __astraOriginalSetItem?: Storage["setItem"] };
@@ -765,6 +826,98 @@ test("replacement write failure leaves the source run and storage unchanged", as
       delete runtimeWindow.__astraOriginalSetItem;
     }
   });
+});
+
+test("autosave failure stays visible and clears only after a verified retry", async ({ page }) => {
+  await openPuzzle(page);
+  await readStoredAttempt(page);
+  await page.evaluate(() => {
+    const runtimeWindow = window as typeof window & { __astraOriginalSetItem?: Storage["setItem"] };
+    runtimeWindow.__astraOriginalSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = () => {
+      throw new DOMException("Storage full", "QuotaExceededError");
+    };
+  });
+
+  const input = page.getByTestId("active-answer-input");
+  await input.fill("ab");
+  await expect(page.getByTestId("storage-status")).toContainText(/not saved locally.*storage is full/i);
+  await expect(page.getByRole("heading", { name: "Facts currently in this tab" })).toBeVisible();
+
+  await page.evaluate(() => {
+    const runtimeWindow = window as typeof window & { __astraOriginalSetItem?: Storage["setItem"] };
+    if (runtimeWindow.__astraOriginalSetItem) {
+      Storage.prototype.setItem = runtimeWindow.__astraOriginalSetItem;
+      delete runtimeWindow.__astraOriginalSetItem;
+    }
+  });
+  await input.fill("abc");
+
+  await expect(page.getByTestId("storage-status")).toBeHidden();
+  await expect.poll(async () => Object.keys((await readStoredAttempt(page)).cellEntries).length).toBeGreaterThan(0);
+});
+
+test("corrupt newest v3 save restores the previous verified envelope visibly", async ({ page }) => {
+  await openPuzzle(page);
+  await readStoredAttempt(page);
+  const input = page.getByTestId("active-answer-input");
+  await input.fill("ab");
+  await expect.poll(() => page.evaluate((key) => window.localStorage.getItem(key) !== null, "astra-lexa:v3:previous")).toBe(true);
+  await page.evaluate((key) => {
+    window.localStorage.setItem(key, "corrupt-primary");
+    Storage.prototype.setItem = () => {
+      throw new DOMException("Simulated crash", "SecurityError");
+    };
+  }, sessionStorageKey);
+
+  await page.reload();
+
+  await expect(page.locator('main[data-hydrated="true"][data-run-state="attempt"]')).toBeVisible();
+  await expect(page.getByTestId("storage-status")).toContainText(/previous verified save was restored/i);
+  await expect(page.getByTestId("active-answer-input")).toHaveValue("");
+});
+
+test("a verified pending first adoption restores read-only instead of stale v2", async ({ page }) => {
+  await openPuzzle(page);
+  await expect.poll(() => page.evaluate((key) => window.localStorage.getItem(key) !== null, sessionStorageKey)).toBe(true);
+  const pendingAttemptId = await page.evaluate(({ primaryKey, markerKey, v2Key }) => {
+    const raw = window.localStorage.getItem(primaryKey);
+    if (!raw) throw new Error("Expected a v3 primary before simulating interrupted adoption.");
+    const envelope = JSON.parse(raw) as {
+      saveId: string;
+      branches: { attempt: { value: { attemptId: string } }; progress: { value: unknown } };
+    };
+    window.localStorage.setItem(v2Key, JSON.stringify({
+      schemaVersion: 2,
+      currentAttempt: { ...envelope.branches.attempt.value, attemptId: "attempt-stale-v2" },
+      progress: envelope.branches.progress.value,
+    }));
+    window.localStorage.setItem(markerKey, JSON.stringify({
+      format: "astra-lexa/local-save-commit",
+      markerVersion: 1,
+      storageVersion: 3,
+      committedSaveId: null,
+      pendingSaveId: envelope.saveId,
+    }));
+    return envelope.branches.attempt.value.attemptId;
+  }, { primaryKey: sessionStorageKey, markerKey: "astra-lexa:v3:commit", v2Key: "astra-lexa:v2" });
+
+  await page.reload();
+
+  await expect(page.locator('main[data-hydrated="true"][data-run-state="attempt"]')).toBeVisible();
+  await expect(page.getByTestId("storage-status")).toContainText(/verified interrupted save was restored read-only/i);
+  expect((await readStoredAttempt(page)).attemptId).toBe(pendingAttemptId);
+  expect((await readStoredAttempt(page)).attemptId).not.toBe("attempt-stale-v2");
+  const canonicalBeforeEdit = await page.evaluate((key) => window.localStorage.getItem(key), sessionStorageKey);
+  const input = page.getByTestId("active-answer-input");
+  await input.fill("ab");
+  await page.waitForTimeout(250);
+  expect(await page.evaluate((key) => window.localStorage.getItem(key), sessionStorageKey)).toBe(canonicalBeforeEdit);
+  await page.getByRole("button", { name: "Fresh run", exact: true }).click();
+  await expect(page.getByTestId("run-replacement-dialog")).toBeHidden();
+  await expect(input).toHaveValue("ab");
+  await expect(page.getByTestId("storage-status")).toContainText(/this tab will not overwrite local data/i);
+  expect(await page.evaluate((key) => window.localStorage.getItem(key), sessionStorageKey)).toBe(canonicalBeforeEdit);
 });
 
 test("learning mode exposes vocabulary support after deliberate review", async ({ page }) => {

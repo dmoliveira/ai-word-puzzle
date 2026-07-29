@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { AssistSummary, CurrentRunState, PersistedRunState, ProgressSnapshot, PuzzleBoardCell, PuzzlePlacement, PuzzleOptions, PuzzleWord, RunSummary, TopicId } from "@/lib/game-types";
 import { buildPuzzleRun, createHintLadder, PuzzleGenerationError, sanitizeGuess } from "@/lib/puzzle-generator";
 import { isCrosswordContentPack, isCrosswordTopic } from "@/lib/clue-catalog";
@@ -23,7 +23,7 @@ import {
   startPreparedAttempt,
   summarizeAssists,
 } from "@/lib/run-state";
-import { readStoredGame, writeStoredGame } from "@/lib/session-storage";
+import { readStoredGame, reconcilePagehideSnapshots, stagePagehideSnapshot, writeStoredGame, type StoredGameResult, type StorageWriteResult } from "@/lib/session-storage";
 import {
   applyCellEntry,
   applyWordEntry,
@@ -58,6 +58,10 @@ type QuestPathState = {
 type PendingRunReplacement = {
   options: PuzzleOptions;
 };
+type StorageStatus = {
+  tone: "warning" | "recovered";
+  message: string;
+} | null;
 
 const bootstrapOptions: PuzzleOptions = {
   mode: "custom",
@@ -73,6 +77,61 @@ const bootstrapOptions: PuzzleOptions = {
   seed: "bootstrap-shell",
 };
 const normalizeOptions = normalizePuzzleOptions;
+
+function getStorageReadStatus(stored: StoredGameResult): StorageStatus {
+  if (stored.issues.includes("future-version")) {
+    return { tone: "warning", message: "This local save was created by a newer Astra Lexa version. Nothing was overwritten." };
+  }
+  if (stored.issues.includes("read-denied")) {
+    return { tone: "warning", message: "Local storage is blocked. Changes in this tab are not saved." };
+  }
+  if (stored.issues.includes("recovery-required")) {
+    return { tone: "warning", message: "Local saves could not be verified. Older v2 data was not used because storage v3 was already present." };
+  }
+  if (stored.issues.includes("recovered-mixed")) {
+    return { tone: "recovered", message: "Valid attempt and progress data were recovered from the two newest local saves." };
+  }
+  if (stored.issues.includes("recovered-previous")) {
+    return { tone: "recovered", message: "The newest local save could not be opened, so the previous verified save was restored." };
+  }
+  if (stored.issues.includes("recovered-pending")) {
+    return { tone: "recovered", message: "A verified interrupted save was restored read-only. This tab will not overwrite local data." };
+  }
+  if (stored.issues.includes("interrupted-adoption")) {
+    return { tone: "recovered", message: "An interrupted save was ignored and your earlier local data was restored." };
+  }
+  if (stored.issues.includes("progress-reset") || stored.issues.includes("attempt-unavailable")) {
+    return { tone: "recovered", message: "Part of the local save was unavailable; valid data was kept and the damaged section was reset." };
+  }
+  return null;
+}
+
+function getStorageFailureMessage(result: Exclude<StorageWriteResult, { ok: true }>) {
+  switch (result.code) {
+    case "quota-exceeded":
+      return "Changes are not saved—local storage is full. Keep this tab open, free site storage, then retry.";
+    case "future-version":
+      return "This local save belongs to a newer Astra Lexa version. Nothing was overwritten.";
+    case "concurrent-write":
+      return "Another tab changed this local save. Reload before replacing or importing a puzzle.";
+    case "lock-timeout":
+      return "Another tab is still saving. These changes are not saved yet; retry shortly.";
+    case "coordination-unavailable":
+      return "This browser could not coordinate local saves across tabs. These changes are not saved.";
+    case "commit-uncertain":
+    case "verification-failed":
+    case "readback-mismatch":
+      return "The local save could not be verified. Reload before replacing or importing a puzzle.";
+    case "recovery-required":
+      return "Local saves require recovery. Older v2 data was not used and nothing was overwritten.";
+    case "candidate-too-large":
+      return "Changes are not saved because this local puzzle record is too large.";
+    case "candidate-invalid":
+      return "Changes are not saved because the local puzzle record failed validation.";
+    default:
+      return "Changes are not saved because this browser blocked local storage.";
+  }
+}
 
 function createRuntimeSeed() {
   return `custom-${Date.now()}`;
@@ -392,8 +451,10 @@ export function WordPuzzleStudio() {
   const replacementDialogRef = useRef<HTMLDialogElement | null>(null);
   const replacementCancelRef = useRef<HTMLButtonElement | null>(null);
   const replacementInvokerRef = useRef<HTMLElement | null>(null);
+  const replacementFocusRestoreRef = useRef<HTMLElement | null>(null);
   const replacementRequestRef = useRef<PendingRunReplacement | null>(null);
   const replacementLockRef = useRef(false);
+  const replacementCommitInFlightRef = useRef(false);
   const reviewOriginRef = useRef<{ element: HTMLElement | null; panel: MobilePanel }>({ element: null, panel: "board" });
   const reviewHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const runHeadingRef = useRef<HTMLHeadingElement | null>(null);
@@ -417,6 +478,7 @@ export function WordPuzzleStudio() {
   const [questPath, setQuestPath] = useState<QuestPathState>({ anchor: null, cells: [] });
   const [isStarting, setIsStarting] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
+  const [storageStatus, setStorageStatus] = useState<StorageStatus>(null);
   const [toast, setToast] = useState<ToastState>(null);
   const [historyModeFilter, setHistoryModeFilter] = useState<HistoryFilterMode>("all");
   const [historyStatusFilter, setHistoryStatusFilter] = useState<HistoryFilterStatus>("all");
@@ -430,31 +492,85 @@ export function WordPuzzleStudio() {
   const stateRef = useRef(state);
   const progressRef = useRef(progress);
   const skipBootstrapPersistenceRef = useRef(true);
+  const skipNextPersistenceRef = useRef(false);
   const pendingPersistenceTimerRef = useRef<number | null>(null);
+  const storageRevisionRef = useRef<string | null>(null);
+  const storageWritableRef = useRef(true);
+  const storageStatusRef = useRef<StorageStatus>(null);
+  const storageWriterIdRef = useRef("");
+  const storageSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const applyStorageWriteResult = useCallback((result: StorageWriteResult) => {
+    if (result.ok) {
+      storageRevisionRef.current = result.saveId;
+      storageWritableRef.current = true;
+      if (storageStatusRef.current?.tone === "warning") setAnnouncement("Progress is saved locally again.");
+      storageStatusRef.current = null;
+      setStorageStatus(null);
+      return true;
+    }
+
+    const message = getStorageFailureMessage(result);
+    if (["future-version", "concurrent-write", "commit-uncertain", "recovery-required"].includes(result.code)) {
+      storageWritableRef.current = false;
+    }
+    const status = { tone: "warning", message } as const;
+    storageStatusRef.current = status;
+    setStorageStatus(status);
+    setAnnouncement(message);
+    return false;
+  }, []);
+  const queueStorageWrite = useCallback((nextState: PersistedRunState, nextProgress: ProgressSnapshot, nowMs: number) => {
+    const operation = storageSaveQueueRef.current.then(async () => {
+      if (!storageWritableRef.current) {
+        return { ok: false, code: "recovery-required", stage: "preflight", preservation: "unchanged", retryable: false } as const;
+      }
+      const result = await writeStoredGame(window.localStorage, nextState, nextProgress, nowMs, {
+        expectedSaveId: storageRevisionRef.current,
+      });
+      if (result.ok) storageRevisionRef.current = result.saveId;
+      return result;
+    });
+    storageSaveQueueRef.current = operation.then(() => undefined, () => undefined);
+    return operation;
+  }, []);
   const lexiconSize = wordBank.length;
   const theme = getThemeStyle(state.run.options.style);
 
   useEffect(() => {
-    const handle = window.setTimeout(() => {
+    let cancelled = false;
+    const handle = window.setTimeout(async () => {
       const nowMs = readNow();
+      storageWriterIdRef.current ||= globalThis.crypto?.randomUUID?.() ?? `${nowMs.toString(36)}-${Math.random().toString(36).slice(2)}`;
+      const deferredResult = await reconcilePagehideSnapshots(window.localStorage, nowMs);
+      if (cancelled) return;
       const stored = readStoredGame(window.localStorage, nowMs);
       const shared = parseSharedOptions(window.location.search, nowMs);
       const resolved = resolveStudioBootstrap({ stored, shared, nowMs, visible: !document.hidden });
 
       stateRef.current = resolved.current;
       progressRef.current = resolved.progress;
+      storageRevisionRef.current = stored.committedSaveId;
+      storageWritableRef.current = stored.writable;
       setOptions(resolved.builderOptions);
       setState(resolved.current);
       setProgress(resolved.progress);
       setBootstrapSource(resolved.source);
       setRunError(resolved.warning);
+      const nextStorageStatus = getStorageReadStatus(stored) ?? (deferredResult && !deferredResult.ok
+        ? { tone: "warning" as const, message: getStorageFailureMessage(deferredResult) }
+        : null);
+      storageStatusRef.current = nextStorageStatus;
+      setStorageStatus(nextStorageStatus);
       setFocusedCellKey(getFirstOpenCellKey(resolved.current, resolved.current.activeWordId));
       setMobilePanel(resolved.current.run.options.boardView === "crossword" ? "clues" : "board");
       setClockNow(nowMs);
       setHydrated(true);
     }, 0);
 
-    return () => window.clearTimeout(handle);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
   }, []);
 
   useEffect(() => {
@@ -475,11 +591,16 @@ export function WordPuzzleStudio() {
       return;
     }
 
-    if (!isStartedAttempt(state)) {
+    if (skipNextPersistenceRef.current) {
+      skipNextPersistenceRef.current = false;
       return;
     }
 
-    const handle = window.setTimeout(() => {
+    if (!isStartedAttempt(state) || !storageWritableRef.current) {
+      return;
+    }
+
+    const handle = window.setTimeout(async () => {
       pendingPersistenceTimerRef.current = null;
       if (!isStartedAttempt(stateRef.current)) {
         return;
@@ -489,7 +610,7 @@ export function WordPuzzleStudio() {
       const nextProgress = recordRunProgress(progressRef.current, current, nowMs);
       progressRef.current = nextProgress;
       setProgress(nextProgress);
-      writeStoredGame(window.localStorage, current, nextProgress, nowMs);
+      applyStorageWriteResult(await queueStorageWrite(current, nextProgress, nowMs));
     }, 120);
     pendingPersistenceTimerRef.current = handle;
 
@@ -499,7 +620,7 @@ export function WordPuzzleStudio() {
         pendingPersistenceTimerRef.current = null;
       }
     };
-  }, [hydrated, state]);
+  }, [applyStorageWriteResult, hydrated, queueStorageWrite, state]);
 
   useEffect(() => {
     if (!hydrated) {
@@ -531,10 +652,28 @@ export function WordPuzzleStudio() {
       progressRef.current = nextProgress;
       setState(current);
       setProgress(nextProgress);
-      writeStoredGame(window.localStorage, current, nextProgress, nowMs);
+      if (storageWritableRef.current) {
+        const staged = stagePagehideSnapshot(window.localStorage, current, nextProgress, nowMs, {
+          baseSaveId: storageRevisionRef.current,
+          writerId: storageWriterIdRef.current,
+        });
+        if (!staged.ok) {
+          const message = staged.code === "quota-exceeded"
+            ? "Changes could not be staged before this page closed because local storage is full."
+            : "Changes could not be staged before this page closed. Keep this tab open and retry.";
+          const status = { tone: "warning", message } as const;
+          storageStatusRef.current = status;
+          setStorageStatus(status);
+        }
+      }
     };
     const handlePageShow = (event: PageTransitionEvent) => {
-      if (event.persisted) syncAttemptVisibility(!document.hidden);
+      if (event.persisted) {
+        syncAttemptVisibility(!document.hidden);
+        void reconcilePagehideSnapshots(window.localStorage, readNow()).then((result) => {
+          if (result) applyStorageWriteResult(result);
+        });
+      }
     };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -545,7 +684,7 @@ export function WordPuzzleStudio() {
       window.removeEventListener("pagehide", handlePageHide);
       window.removeEventListener("pageshow", handlePageShow);
     };
-  }, [hydrated]);
+  }, [applyStorageWriteResult, hydrated]);
 
   useEffect(() => {
     if (!hydrated || !isStartedAttempt(state) || state.paused || state.completedAt || !state.run.options.timerEnabled) {
@@ -627,6 +766,16 @@ export function WordPuzzleStudio() {
       dialog.close();
     }
   }, [pendingReplacement]);
+
+  useEffect(() => {
+    if (pendingReplacement || isStarting || !replacementFocusRestoreRef.current) return;
+    const invoker = replacementFocusRestoreRef.current;
+    replacementFocusRestoreRef.current = null;
+    const handle = window.requestAnimationFrame(() => {
+      if (invoker.isConnected && !invoker.matches(":disabled")) invoker.focus();
+    });
+    return () => window.cancelAnimationFrame(handle);
+  }, [isStarting, pendingReplacement]);
 
   const solvedCount = state.solvedIds.length;
   const started = isStartedAttempt(state);
@@ -737,6 +886,7 @@ export function WordPuzzleStudio() {
   const filteredHistory = progress.history
     .filter((entry) => (historyModeFilter === "all" ? true : entry.mode === historyModeFilter))
     .filter((entry) => (historyStatusFilter === "all" ? true : historyStatusFilter === "finished" ? entry.finished : !entry.finished));
+  const localSaveHealthy = storageStatus?.tone !== "warning";
 
   useEffect(() => {
     if (!hydrated) {
@@ -883,24 +1033,25 @@ export function WordPuzzleStudio() {
     }
     replacementRequestRef.current = null;
     replacementInvokerRef.current = null;
+    replacementFocusRestoreRef.current = restoreFocus ? invoker : null;
     replacementLockRef.current = false;
+    replacementCommitInFlightRef.current = false;
     setPendingReplacement(null);
     setIsStarting(false);
 
-    if (restoreFocus) {
-      window.requestAnimationFrame(() => invoker?.focus());
-    }
   }
 
-  function commitRunReplacement(request: PendingRunReplacement) {
+  async function commitRunReplacement(request: PendingRunReplacement) {
+    if (replacementCommitInFlightRef.current) return;
+    replacementCommitInFlightRef.current = true;
     const nowMs = readNow();
     setIsStarting(true);
     setRunError(null);
-    const result = replaceRunTransaction({
+    const result = await replaceRunTransaction({
       current: stateRef.current,
       progress: progressRef.current,
       buildRun: () => buildPuzzleRun(request.options),
-      persist: (candidate, nextProgress, persistedAt) => writeStoredGame(window.localStorage, candidate, nextProgress, persistedAt),
+      persist: queueStorageWrite,
       nowMs,
     });
 
@@ -909,7 +1060,10 @@ export function WordPuzzleStudio() {
         ? result.error instanceof PuzzleGenerationError
           ? result.error.message
           : "Could not generate the requested local run. Nothing was replaced."
-        : "Could not save your current run, so nothing was replaced.";
+        : result.storage
+          ? getStorageFailureMessage(result.storage)
+          : "Could not save your current run, so nothing was replaced.";
+      if (result.storage) applyStorageWriteResult(result.storage);
       setRunError(message);
       setAnnouncement(message);
       showToast(message, "muted");
@@ -921,6 +1075,9 @@ export function WordPuzzleStudio() {
       window.clearTimeout(pendingPersistenceTimerRef.current);
       pendingPersistenceTimerRef.current = null;
     }
+    applyStorageWriteResult(result.storage);
+    skipBootstrapPersistenceRef.current = false;
+    skipNextPersistenceRef.current = true;
     stateRef.current = result.state;
     progressRef.current = result.progress;
     setOptions(result.state.run.options);
@@ -948,6 +1105,13 @@ export function WordPuzzleStudio() {
     if (replacementLockRef.current) {
       return;
     }
+    if (!storageWritableRef.current) {
+      const message = storageStatusRef.current?.message ?? "This local save is read-only. Nothing was replaced.";
+      setRunError(message);
+      setAnnouncement(message);
+      showToast(message, "muted");
+      return;
+    }
 
     const normalized = normalizeOptions(nextOptions);
     const requestOptions = normalized.mode === "custom" && !normalized.seed.trim()
@@ -964,10 +1128,11 @@ export function WordPuzzleStudio() {
       return;
     }
 
-    commitRunReplacement(request);
+    void commitRunReplacement(request);
   }
 
   function cancelRunReplacement() {
+    if (replacementCommitInFlightRef.current) return;
     finishReplacementRequest(true);
     setAnnouncement("Current run kept. Nothing was replaced.");
   }
@@ -979,12 +1144,7 @@ export function WordPuzzleStudio() {
       return;
     }
 
-    replacementRequestRef.current = null;
-    setPendingReplacement(null);
-    if (replacementDialogRef.current?.open) {
-      replacementDialogRef.current.close();
-    }
-    commitRunReplacement(request);
+    void commitRunReplacement(request);
   }
 
   function replaySavedRun(summary: RunSummary) {
@@ -1879,6 +2039,17 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
           </div>
         </section>
 
+        {storageStatus ? (
+          <div
+            data-testid="storage-status"
+            role="status"
+            aria-live="polite"
+            className={`rounded-2xl border px-4 py-3 text-sm ${storageStatus.tone === "warning" ? "border-amber-400/35 bg-amber-500/10 text-amber-100" : "border-sky-400/30 bg-sky-500/10 text-sky-100"}`}
+          >
+            <span className="font-semibold">{storageStatus.tone === "warning" ? "Not saved locally." : "Local save recovered."}</span>{" "}{storageStatus.message}
+          </div>
+        ) : null}
+
         <div className="glass-card quest-card-frame flex flex-col gap-3 rounded-[2rem] px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <div>
             <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Current setup</div>
@@ -2571,7 +2742,7 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
                 </div>
                 <div className="text-xs uppercase tracking-[0.28em] text-slate-400">Run complete</div>
                 <h3 ref={completionHeadingRef} tabIndex={-1} className="mt-2 text-3xl font-semibold text-white">Puzzle cleared.</h3>
-                <p className="mt-3 text-sm text-slate-300">{isCanonicalDailyCompletion ? "This canonical clear is saved in your local archive and streak." : "This run is saved in your local history without changing the canonical daily streak."} Replay this exact seed, review the board, or share the result.</p>
+                <p className="mt-3 text-sm text-slate-300">{localSaveHealthy ? (isCanonicalDailyCompletion ? "This canonical clear is saved in your local archive and streak." : "This run is saved in your local history without changing the canonical daily streak.") : "This result is only in this tab until local saving recovers."} Replay this exact seed, review the board, or share the result.</p>
 
                 <div className="mt-5">
                   <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Run recap</div>
@@ -2654,14 +2825,14 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
               <div className="glass-card quest-card-frame rounded-[2rem] p-5 sm:p-6">
                 <div>
                   <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Local record</div>
-                  <h3 className="mt-1 text-lg font-semibold text-white">Facts saved on this device</h3>
-                  <p className="mt-1 text-sm text-slate-300">No account or remote leaderboard is implied; clearing browser data removes this record.</p>
+                  <h3 className="mt-1 text-lg font-semibold text-white">{localSaveHealthy ? "Facts saved on this device" : "Facts currently in this tab"}</h3>
+                  <p className="mt-1 text-sm text-slate-300">{localSaveHealthy ? "No account or remote leaderboard is implied; clearing browser data removes this record." : "Local saving is unavailable, so keep this tab open while you resolve the warning above."}</p>
                 </div>
                 <div className="mt-5 grid grid-cols-2 gap-3 text-center">
                   {[
                     [String(dailyClearCount), "Daily clears"],
                     [String(finishedHistoryCount), "Completed runs"],
-                    [String(progress.history.length), "Attempts saved"],
+                    [String(progress.history.length), localSaveHealthy ? "Attempts saved" : "Attempts in tab"],
                     [String(historicalAssistCount), "Assists recorded"],
                   ].map(([value, label]) => (
                     <div key={label} className="rounded-2xl border border-white/10 bg-white/4 px-3 py-3">
@@ -2677,7 +2848,7 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
               <div className="mb-4">
                 <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Daily activity</div>
                 <h3 className="mt-1 text-lg font-semibold text-white">Last seven UTC days</h3>
-                <p className="mt-1 text-sm text-slate-300">Completed and in-progress markers come only from canonical daily attempts saved in this browser.</p>
+                <p className="mt-1 text-sm text-slate-300">{localSaveHealthy ? "Completed and in-progress markers come only from canonical daily attempts saved in this browser." : "Markers include unsaved changes held only in this tab until local saving recovers."}</p>
               </div>
               <div className="grid gap-2 sm:grid-cols-4 xl:grid-cols-7">
                 {archive.slice(0, 7).map((entry) => (
@@ -2809,7 +2980,7 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
                 </div>
                 <div className="mt-6">
                   <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Local history</div>
-                  <p className="mt-2 text-xs leading-5 text-slate-400">History cards always start a fresh replay. Only the current saved attempt resumes when you return to the app.</p>
+                  <p className="mt-2 text-xs leading-5 text-slate-400">History cards always start a fresh replay. {localSaveHealthy ? "Only the current saved attempt resumes when you return to the app." : "Recent changes will not resume after this tab closes unless local saving recovers."}</p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {(["all", "daily", "custom"] as const).map((mode) => (
                       <button key={mode} type="button" aria-pressed={historyModeFilter === mode} onClick={() => setHistoryModeFilter(mode)} className={`rounded-full border px-3 py-1.5 text-xs capitalize ${historyModeFilter === mode ? "border-fuchsia-400/30 bg-fuchsia-500/10 text-fuchsia-100" : "border-white/10 text-slate-300"}`}>
@@ -2870,8 +3041,8 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
                 Your latest progress will be saved in local history before the new puzzle opens. If saving or generation fails, this run will stay unchanged.
               </p>
               <div className="mt-5 flex flex-wrap justify-end gap-2">
-                <button ref={replacementCancelRef} type="button" onClick={cancelRunReplacement} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">Cancel</button>
-                <button type="button" onClick={acceptRunReplacement} disabled={isStarting} className="accent-chip rounded-full px-4 py-2 text-sm font-semibold disabled:opacity-60">Save and replace</button>
+                <button ref={replacementCancelRef} type="button" onClick={cancelRunReplacement} disabled={isStarting} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100 disabled:opacity-60">Cancel</button>
+                <button type="button" onClick={acceptRunReplacement} disabled={isStarting} className="accent-chip rounded-full px-4 py-2 text-sm font-semibold disabled:opacity-60">{isStarting ? "Saving..." : "Save and replace"}</button>
               </div>
             </div>
           ) : null}

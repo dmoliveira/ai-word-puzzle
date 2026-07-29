@@ -28,22 +28,22 @@ test("only unfinished started attempts require replacement confirmation", () => 
   assert.equal(needsRunReplacementConfirmation(completed), false);
 });
 
-test("successful replacement settles outgoing progress and persists one candidate before commit", () => {
+test("successful replacement settles outgoing progress and persists one candidate before commit", async () => {
   const current = createAttemptFromRun(buildRun("outgoing"), 1_000, "attempt-outgoing");
   const progress = createEmptyProgress();
   const writes: Array<{ attemptId: string; historyIds: string[]; nowMs: number }> = [];
 
-  const result = replaceRunTransaction({
+  const result = await replaceRunTransaction({
     current,
     progress,
     buildRun: () => buildRun("candidate"),
-    persist: (candidate, nextProgress, nowMs) => {
+    persist: async (candidate, nextProgress, nowMs) => {
       writes.push({
         attemptId: candidate.attemptId,
         historyIds: nextProgress.history.map((entry) => entry.attemptId),
         nowMs,
       });
-      return true;
+      return { ok: true, saveId: "save-replacement-0001", bytes: 1 };
     },
     nowMs: 5_000,
     attemptId: "attempt-candidate",
@@ -69,34 +69,34 @@ for (const scenario of [
     name: "generation failure",
     reason: "generation-failed" as const,
     buildRun: () => { throw new Error("generation denied"); },
-    persist: () => { throw new Error("persistence must not run"); },
+    persist: async () => { throw new Error("persistence must not run"); },
     expectedWrites: 0,
   },
   {
     name: "persistence denial",
     reason: "persistence-failed" as const,
     buildRun: () => buildRun("denied-candidate"),
-    persist: () => false,
+    persist: async () => ({ ok: false as const, code: "write-denied" as const, stage: "primary" as const, preservation: "unchanged" as const, retryable: true }),
     expectedWrites: 1,
   },
   {
     name: "persistence exception",
     reason: "persistence-failed" as const,
     buildRun: () => buildRun("throwing-candidate"),
-    persist: () => { throw new Error("quota"); },
+    persist: async () => { throw new Error("quota"); },
     expectedWrites: 1,
   },
 ]) {
-  test(`${scenario.name} returns the exact source state without a partial commit`, () => {
+  test(`${scenario.name} returns the exact source state without a partial commit`, async () => {
     const current = createAttemptFromRun(buildRun("source"), 1_000, "attempt-source");
     const progress = createEmptyProgress();
     let writes = 0;
 
-    const result = replaceRunTransaction({
+    const result = await replaceRunTransaction({
       current,
       progress,
       buildRun: scenario.buildRun,
-      persist: () => {
+      persist: async () => {
         writes += 1;
         return scenario.persist();
       },
