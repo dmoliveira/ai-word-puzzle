@@ -13,7 +13,7 @@
     "build": "next build",
     "lint": "eslint .",
     "test": "tsx --test",
-    "test:generator": "GENERATOR_MATRIX_SEEDS=32 tsx --test lib/board-generator.test.ts lib/puzzle-generator.test.ts",
+    "test:generator": "GENERATOR_MATRIX_SEEDS=32 tsx --test lib/board-generator.test.ts lib/puzzle-generator.test.ts lib/quest-v4-engine.test.ts",
     "test:e2e": "playwright test",
     "test:export": "playwright test --config=playwright.export.config.ts",
     "smoke:deployment": "node scripts/smoke-deployment.mjs",
