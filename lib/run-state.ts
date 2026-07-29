@@ -1,4 +1,4 @@
-import type { AssistLedger, AssistSummary, PersistedRunState, PuzzleRun } from "@/lib/game-types";
+import type { AssistLedger, AssistSummary, CurrentRunState, PersistedRunState, PreparedRunState, PuzzleRun } from "@/lib/game-types";
 
 export const runStateSchemaVersion = 2 as const;
 
@@ -15,6 +15,49 @@ export function createEmptyAssistLedger(): AssistLedger {
 export function createAttemptId(nowMs = Date.now(), randomId?: string) {
   const generated = randomId ?? globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
   return `attempt-${nowMs.toString(36)}-${generated}`;
+}
+
+export function createPreparedRunState(run: PuzzleRun): PreparedRunState {
+  return {
+    attemptId: null,
+    startedAt: null,
+    completedAt: null,
+    run,
+    guesses: {},
+    cellEntries: {},
+    solvedIds: [],
+    activeWordId: run.words[0]?.id ?? null,
+    assists: createEmptyAssistLedger(),
+    paused: false,
+    elapsedMs: 0,
+    lastTickAt: null,
+  };
+}
+
+export function isStartedAttempt(state: CurrentRunState): state is PersistedRunState {
+  return state.attemptId !== null && state.startedAt !== null;
+}
+
+export function startPreparedAttempt(
+  state: CurrentRunState,
+  nowMs = Date.now(),
+  attemptId = createAttemptId(nowMs),
+): PersistedRunState {
+  if (isStartedAttempt(state)) {
+    return state;
+  }
+
+  return {
+    schemaVersion: runStateSchemaVersion,
+    ...state,
+    attemptId,
+    startedAt: new Date(nowMs).toISOString(),
+    lastTickAt: state.run.options.timerEnabled ? nowMs : null,
+  };
+}
+
+export function canAcceptPlayIntent(state: CurrentRunState) {
+  return !isStartedAttempt(state) || canMutateAttempt(state);
 }
 
 export function createAttemptFromRun(run: PuzzleRun, nowMs = Date.now(), attemptId = createAttemptId(nowMs)): PersistedRunState {

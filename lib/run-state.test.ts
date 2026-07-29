@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildPuzzleRun } from "@/lib/puzzle-generator";
 import {
+  canAcceptPlayIntent,
   canMutateAttempt,
   createAttemptFromRun,
+  createPreparedRunState,
   finalizeAttempt,
   getAssistCount,
   getDisplayedElapsedMs,
+  isStartedAttempt,
   recordAnagram,
   recordHintStep,
   recordPuzzleReveal,
@@ -16,6 +19,7 @@ import {
   setAttemptPaused,
   setAttemptVisibility,
   snapshotAttempt,
+  startPreparedAttempt,
 } from "@/lib/run-state";
 
 function createState(nowMs = 1_000) {
@@ -28,6 +32,33 @@ function createState(nowMs = 1_000) {
   });
   return createAttemptFromRun(run, nowMs, `attempt-${nowMs}`);
 }
+
+test("prepared puzzles have no attempt identity, timestamps, or active clock", () => {
+  const prepared = createPreparedRunState(createState().run);
+
+  assert.equal(prepared.attemptId, null);
+  assert.equal(prepared.startedAt, null);
+  assert.equal(prepared.completedAt, null);
+  assert.equal(prepared.elapsedMs, 0);
+  assert.equal(prepared.lastTickAt, null);
+  assert.equal(isStartedAttempt(prepared), false);
+  assert.equal(canAcceptPlayIntent(prepared), true);
+});
+
+test("starting a prepared puzzle uses the supplied identity and clock exactly once", () => {
+  const prepared = {
+    ...createPreparedRunState(createState().run),
+    activeWordId: createState().run.words[1].id,
+  };
+  const started = startPreparedAttempt(prepared, 12_345, "attempt-explicit");
+
+  assert.equal(started.attemptId, "attempt-explicit");
+  assert.equal(started.startedAt, new Date(12_345).toISOString());
+  assert.equal(started.lastTickAt, 12_345);
+  assert.equal(started.activeWordId, prepared.activeWordId);
+  assert.equal(isStartedAttempt(started), true);
+  assert.equal(startPreparedAttempt(started, 99_999, "attempt-replacement"), started);
+});
 
 test("attempt identity is separate from deterministic puzzle identity", () => {
   const run = createState().run;

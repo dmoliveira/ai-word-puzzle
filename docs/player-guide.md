@@ -2,6 +2,8 @@
 
 ## Choose a mode
 
+Opening Astra Lexa prepares a puzzle without starting its timer or adding a history card. An attempt begins when you choose **Start puzzle**, enter the first letter, select a Quest endpoint, use an assist, or explicitly start/replay another run. An untouched prepared daily updates at the next UTC date; an attempt that has already started keeps its original seed.
+
 ### Daily crossword
 
 The Daily button opens one canonical puzzle for the current UTC date. Daily streak credit requires all of the following:
@@ -44,6 +46,7 @@ Hints, revealed letters, scrambles, word reveals, and a full-puzzle reveal are r
 ## Resume, replay, and share
 
 - Returning to the app resumes only the current unfinished saved attempt.
+- A shared or malformed link never replaces an unfinished saved attempt during page load; the saved attempt resumes with a visible explanation.
 - History cards always start a fresh replay; they do not resume old partial entries.
 - Shared links carry puzzle options and seed, not your entries, score, streak, or history.
 - Completion text reports elapsed time and the persisted assist breakdown.

@@ -51,7 +51,7 @@ function createFixture() {
     '<meta name="twitter:description" content="Play a free daily crossword or create a seeded word quest with accessible keyboard, touch, hints, review, and browser-local progress.">',
     '<meta name="twitter:image" content="https://example.com/app/og-image.png">',
   ].join("");
-  const html = `<html><head>${head}<script src="/app/_next/main.js"></script></head><body><h1>Astra Lexa daily crossword and word quest</h1><main id="puzzle-studio"></main></body></html>`;
+  const html = `<html><head>${head}<script src="/app/_next/main.js"></script></head><body><h1>Astra Lexa daily crossword and word quest</h1><main id="puzzle-studio" data-bootstrap-state="pending" data-run-state="none"><section data-testid="studio-boot">Preparing your puzzle</section></main></body></html>`;
   write(root, "index.html", html);
   write(root, "404.html", '<html><head><script src="/app/_next/main.js"></script></head><body></body></html>');
   write(root, "_next/main.js", "");
@@ -96,6 +96,8 @@ test("validator rejects canonical, base-path, and missing-asset tampering", () =
     (root) => write(root, "index.html", read(root, "index.html").replace(siteUrl, "https://wrong.example/")),
     (root) => write(root, "index.html", read(root, "index.html").replace("/app/_next/main.js", "/_next/main.js")),
     (root) => write(root, "index.html", read(root, "index.html").replace("/app/_next/main.js", "/app/%2e%2e/secret.txt")),
+    (root) => write(root, "index.html", read(root, "index.html").replace('data-bootstrap-state="pending"', 'data-bootstrap-state="ready"')),
+    (root) => write(root, "index.html", read(root, "index.html").replace("</main>", '<input data-testid="active-answer-input"></main>')),
     (root) => rmSync(join(root, "og-image.png")),
   ];
 

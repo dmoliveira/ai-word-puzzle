@@ -186,6 +186,23 @@ export type PersistedRunState = {
   lastTickAt: number | null;
 };
 
+export type PreparedRunState = {
+  attemptId: null;
+  startedAt: null;
+  completedAt: null;
+  run: PuzzleRun;
+  guesses: Record<string, string>;
+  cellEntries: Record<string, string>;
+  solvedIds: string[];
+  activeWordId: string | null;
+  assists: AssistLedger;
+  paused: false;
+  elapsedMs: 0;
+  lastTickAt: null;
+};
+
+export type CurrentRunState = PreparedRunState | PersistedRunState;
+
 export type AssistSummary = {
   total: number;
   hintSteps: number;

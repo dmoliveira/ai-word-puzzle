@@ -158,6 +158,11 @@ export function validateStaticExport({
   const title = indexHtml.match(/<title>([^<]*)<\/title>/i)?.[1];
   invariant(title && decodeHtml(title) === stableTitle, "Exported title is missing or incorrect.");
   invariant(indexHtml.includes('id="puzzle-studio"'), "Exported index is missing the puzzle-studio anchor.");
+  invariant(indexHtml.includes('data-bootstrap-state="pending"') && indexHtml.includes('data-run-state="none"'), "Exported index must contain the date-neutral pending studio shell.");
+  invariant(!indexHtml.includes('data-bootstrap-state="ready"') && !indexHtml.includes('data-run-state="attempt"'), "Exported index must not contain a resolved or started puzzle.");
+  for (const answerDerivedMarker of ['data-testid="progress-label"', 'data-testid="active-answer-input"', 'data-testid="completion-card"', 'data-testid="board-cell-']) {
+    invariant(!indexHtml.includes(answerDerivedMarker), `Exported index contains answer-derived studio markup: ${answerDerivedMarker}`);
+  }
 
   const canonicalLinks = findLinks(indexHtml, "canonical");
   invariant(canonicalLinks.length === 1 && getAttribute(canonicalLinks[0], "href") === siteUrl.toString(), "Exported canonical URL is missing or incorrect.");

@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const sessionStorageKey = "astra-lexa:v2";
+let preparedOpenSequence = 0;
 const deterministicQuery = new URLSearchParams({
   mode: "custom",
   seed: "e2e-baseline",
@@ -19,13 +20,29 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-async function openPuzzle(page: Page, overrides: Record<string, string> = {}) {
+async function openPreparedPuzzle(page: Page, overrides: Record<string, string> = {}) {
+  if (page.url().startsWith("http://127.0.0.1:3100")) {
+    preparedOpenSequence += 1;
+    await page.addInitScript(({ key, flag }) => {
+      if (!window.sessionStorage.getItem(flag)) {
+        window.localStorage.removeItem(key);
+        window.sessionStorage.setItem(flag, "true");
+      }
+    }, { key: sessionStorageKey, flag: `astra-e2e-reset-${preparedOpenSequence}` });
+  }
   const query = new URLSearchParams(deterministicQuery);
   Object.entries(overrides).forEach(([key, value]) => query.set(key, value));
 
   await page.goto(`/?${query.toString()}`);
+  await expect(page.locator('main#puzzle-studio[data-bootstrap-state="ready"]')).toBeVisible();
   await expect(page.locator("span").filter({ hasText: new RegExp(`^seed ${query.get("seed")}$`) }).first()).toBeVisible();
   await expect(page.getByTestId("progress-label")).toContainText("0/");
+}
+
+async function openPuzzle(page: Page, overrides: Record<string, string> = {}) {
+  await openPreparedPuzzle(page, overrides);
+  await page.getByTestId("start-puzzle").evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page.locator('main#puzzle-studio[data-run-state="attempt"]')).toBeVisible();
 }
 
 async function openSetup(page: Page) {
@@ -393,6 +410,26 @@ test("compact crossword and quest modes preserve their intended first panel", as
   await expect(page.getByRole("heading", { name: "Quest board" })).toBeVisible();
 });
 
+test("an untouched prepared puzzle creates no attempt, timer, storage, or history", async ({ page }) => {
+  await openPreparedPuzzle(page);
+  await page.waitForTimeout(250);
+
+  await expect(page.locator('main#puzzle-studio[data-run-state="prepared"]')).toBeVisible();
+  await expect(page.getByTestId("run-status")).toHaveText("Ready");
+  await expect(page.getByTestId("elapsed-time")).toHaveText("00:00");
+  await expect(page.getByTestId("recent-run-card")).toHaveCount(0);
+  expect(await page.evaluate((key) => window.localStorage.getItem(key), sessionStorageKey)).toBeNull();
+
+  await page.getByRole("button", { name: "Open Setup", exact: true }).click();
+  await page.getByRole("button", { name: "Play", exact: true }).click();
+  await page.waitForTimeout(150);
+  expect(await page.evaluate((key) => window.localStorage.getItem(key), sessionStorageKey)).toBeNull();
+
+  await page.getByTestId("start-puzzle").click();
+  await expect(page.locator('main#puzzle-studio[data-run-state="attempt"]')).toBeVisible();
+  await expect.poll(() => page.evaluate((key) => window.localStorage.getItem(key) !== null, sessionStorageKey)).toBe(true);
+});
+
 test("pause and resume controls expose the current run state", async ({ page }) => {
   await openPuzzle(page);
 
@@ -419,18 +456,24 @@ test("unfinished progress survives a reload without a placeholder overwrite", as
   expect(afterReload.cellEntries).toEqual(beforeReload.cellEntries);
 });
 
-test("a valid shared link overrides an unfinished saved attempt", async ({ page }) => {
+test("an unfinished saved attempt takes precedence over a shared link", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator('main[data-hydrated="true"]')).toBeVisible();
   await page.getByTestId("active-answer-input").fill("ab");
+  await expect.poll(async () => Object.keys((await readStoredAttempt(page)).cellEntries).length).toBeGreaterThan(0);
   const saved = await readStoredAttempt(page);
 
-  await openPuzzle(page, { seed: "shared-wins" });
-  await expect.poll(async () => (await readStoredAttempt(page)).run.seed).toBe("shared-wins");
-  const shared = await readStoredAttempt(page);
+  const query = new URLSearchParams(deterministicQuery);
+  query.set("seed", "shared-does-not-replace");
+  await page.goto(`/?${query}`);
+  await expect(page.locator('main#puzzle-studio[data-bootstrap-state="ready"][data-run-state="attempt"]')).toBeVisible();
+  const restored = await readStoredAttempt(page);
 
-  expect(shared.attemptId).not.toBe(saved.attemptId);
-  expect(shared.run.seed).toBe("shared-wins");
+  expect(restored.attemptId).toBe(saved.attemptId);
+  expect(restored.run.seed).toBe(saved.run.seed);
+  expect(restored.cellEntries).toEqual(saved.cellEntries);
+  await openSetup(page);
+  await expect(page.getByText(/shared puzzle link was not opened/i)).toBeVisible();
 });
 
 test("paused gameplay actions cannot mutate persisted entries", async ({ page }) => {
@@ -482,6 +525,7 @@ test("completion freezes its timestamp and elapsed time", async ({ page }) => {
 test("a completed canonical daily remains available after reload", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator('main[data-hydrated="true"]')).toBeVisible();
+  await page.getByTestId("start-puzzle").click();
   await solveRunFromPersistedFixture(page);
   await expect.poll(async () => (await readStoredAttempt(page)).completedAt).not.toBeNull();
   const completed = await readStoredAttempt(page);
@@ -505,10 +549,11 @@ test("a completed custom run yields to a fresh canonical daily", async ({ page }
   await page.goto("/");
   await expect(page.locator('main[data-hydrated="true"]')).toBeVisible();
   await expect(page.locator("span").filter({ hasText: new RegExp(`^seed ${today}$`) }).first()).toBeVisible();
-  await expect.poll(async () => (await readStoredAttempt(page)).run.seed).toBe(`daily:${today}`);
-  const daily = await readStoredAttempt(page);
+  await expect(page.locator('main#puzzle-studio[data-run-state="prepared"]')).toBeVisible();
+  const preserved = await readStoredAttempt(page);
 
-  expect(daily.attemptId).not.toBe(completedCustom.attemptId);
+  expect(preserved.attemptId).toBe(completedCustom.attemptId);
+  expect(preserved.run.seed).toBe(completedCustom.run.seed);
 });
 
 test("an invalid shared link falls back safely without crashing", async ({ page }) => {
@@ -517,16 +562,16 @@ test("an invalid shared link falls back safely without crashing", async ({ page 
   await page.getByTestId("active-answer-input").fill("ab");
   await expect.poll(async () => Object.keys((await readStoredAttempt(page)).cellEntries).length).toBeGreaterThan(0);
   const saved = await readStoredAttempt(page);
-  const today = await page.evaluate(() => new Date().toISOString().slice(0, 10));
 
   await page.goto("/?mode=daily&seed=not-a-date&timerEnabled=maybe");
 
   await expect(page.locator('main[data-hydrated="true"]')).toBeVisible();
-  await expect(page.locator("span").filter({ hasText: new RegExp(`^seed ${today}$`) }).first()).toBeVisible();
-  await expect.poll(async () => (await readStoredAttempt(page)).attemptId).not.toBe(saved.attemptId);
-  expect((await readStoredAttempt(page)).cellEntries).toEqual({});
+  await expect(page.getByTestId("run-seed")).toContainText(saved.run.seed.replace(/^daily:/, ""));
+  const restored = await readStoredAttempt(page);
+  expect(restored.attemptId).toBe(saved.attemptId);
+  expect(restored.cellEntries).toEqual(saved.cellEntries);
   await openSetup(page);
-  await expect(page.getByText(/shared puzzle link was invalid/i)).toBeVisible();
+  await expect(page.getByText(/shared puzzle link was invalid.*saved attempt was resumed/i)).toBeVisible();
 });
 
 test("the visible timer does not persist once per second", async ({ page }) => {
@@ -550,6 +595,22 @@ test("the visible timer does not persist once per second", async ({ page }) => {
 
   await page.getByRole("button", { name: "Pause", exact: true }).first().click();
   await expect.poll(() => page.evaluate(() => (window as typeof window & { __storageWriteCount: number }).__storageWriteCount)).toBeGreaterThan(0);
+});
+
+test("pagehide flushes one settled snapshot and bfcache restore excludes hidden time", async ({ page }) => {
+  await openPuzzle(page, { timerEnabled: "true" });
+  await readStoredAttempt(page);
+  await page.waitForTimeout(200);
+
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
+  await page.waitForTimeout(1_200);
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
+  await page.waitForTimeout(120);
+  await page.getByRole("button", { name: "Pause", exact: true }).first().click();
+  const restored = await readStoredAttempt(page);
+
+  expect(restored.elapsedMs).toBeLessThan(1_000);
+  await expect(page.getByTestId("run-status")).toHaveText("Paused");
 });
 
 test("shared daily options reopen the requested seeded run", async ({ page }) => {

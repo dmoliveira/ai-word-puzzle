@@ -1,16 +1,19 @@
 "use client";
 
 import { startTransition, useEffect, useRef, useState } from "react";
-import type { AssistSummary, PersistedRunState, ProgressSnapshot, PuzzleBoardCell, PuzzlePlacement, PuzzleOptions, PuzzleWord, RunSummary, TopicId } from "@/lib/game-types";
+import type { AssistSummary, CurrentRunState, PersistedRunState, ProgressSnapshot, PuzzleBoardCell, PuzzlePlacement, PuzzleOptions, PuzzleWord, RunSummary, TopicId } from "@/lib/game-types";
 import { buildPuzzleRun, createHintLadder, PuzzleGenerationError, sanitizeGuess } from "@/lib/puzzle-generator";
 import { isCrosswordContentPack, isCrosswordTopic } from "@/lib/clue-catalog";
 import { getCanonicalDailyOptions, getPuzzleSizeRange, getUtcDay, isCanonicalDailyOptions, normalizePuzzleOptions, parseSharedOptions } from "@/lib/puzzle-options";
 import { buildDailyArchive, createEmptyProgress, recordRunProgress } from "@/lib/progress";
 import {
   canMutateAttempt,
+  canAcceptPlayIntent,
   createAttemptFromRun,
+  createPreparedRunState,
   finalizeAttempt,
   getDisplayedElapsedMs,
+  isStartedAttempt,
   recordAnagram,
   recordHintStep,
   recordPuzzleReveal,
@@ -18,9 +21,11 @@ import {
   recordWordReveal,
   setAttemptPaused,
   setAttemptVisibility,
+  startPreparedAttempt,
   summarizeAssists,
 } from "@/lib/run-state";
-import { prepareStoredAttempt, readStoredGame, shouldRestoreAttempt, writeStoredGame } from "@/lib/session-storage";
+import { readStoredGame, writeStoredGame } from "@/lib/session-storage";
+import { refreshPreparedDaily, resolveStudioBootstrap, type BootstrapSource } from "@/lib/studio/bootstrap";
 import { getThemeStyle, themeStyles } from "@/lib/themes";
 import { contentCatalog, topicCatalog, wordBank } from "@/lib/word-bank";
 
@@ -44,7 +49,19 @@ type QuestPathState = {
   cells: string[];
 };
 
-const defaultOptions = getCanonicalDailyOptions();
+const bootstrapOptions: PuzzleOptions = {
+  mode: "custom",
+  challenge: "quest",
+  puzzleFamily: "classic",
+  topics: ["myth", "cosmos", "greek"],
+  contentPackId: "auto",
+  puzzleSize: 7,
+  boardView: "crossword",
+  style: "alpha",
+  timerEnabled: true,
+  learningMode: false,
+  seed: "bootstrap-shell",
+};
 const normalizeOptions = normalizePuzzleOptions;
 
 function createRuntimeSeed() {
@@ -106,19 +123,19 @@ function getCellKey(row: number, col: number) {
   return `${row}:${col}`;
 }
 
-function getWordPlacement(state: PersistedRunState, wordId: string) {
+function getWordPlacement(state: CurrentRunState, wordId: string) {
   return state.run.board.placements.find((placement) => placement.wordId === wordId) ?? null;
 }
 
-function getWordById(state: PersistedRunState, wordId: string) {
+function getWordById(state: CurrentRunState, wordId: string) {
   return state.run.words.find((word) => word.id === wordId) ?? null;
 }
 
-function getPlacementByWordId(state: PersistedRunState, wordId: string) {
+function getPlacementByWordId(state: CurrentRunState, wordId: string) {
   return state.run.board.placements.find((placement) => placement.wordId === wordId) ?? null;
 }
 
-function getWordCells(state: PersistedRunState, placement: PuzzlePlacement) {
+function getWordCells(state: CurrentRunState, placement: PuzzlePlacement) {
   const word = getWordById(state, placement.wordId);
   if (!word) {
     return [] as PuzzleBoardCell[];
@@ -131,7 +148,7 @@ function getWordCells(state: PersistedRunState, placement: PuzzlePlacement) {
   }).filter((cell): cell is PuzzleBoardCell => Boolean(cell));
 }
 
-function getCrosswordCellLabel(state: PersistedRunState, cell: PuzzleBoardCell, activeWordId: string | null) {
+function getCrosswordCellLabel(state: CurrentRunState, cell: PuzzleBoardCell, activeWordId: string | null) {
   const clueReferences = cell.wordIds
     .map((wordId) => getPlacementByWordId(state, wordId))
     .filter((placement): placement is PuzzlePlacement => Boolean(placement))
@@ -159,7 +176,7 @@ function getQuestCellLabel(row: number, col: number, letter: string, selected: b
   ].filter((part): part is string => Boolean(part)).join(", ");
 }
 
-function deriveGuessFromCells(state: PersistedRunState, wordId: string) {
+function deriveGuessFromCells(state: CurrentRunState, wordId: string) {
   const placement = getWordPlacement(state, wordId);
   if (!placement) {
     return "";
@@ -170,7 +187,7 @@ function deriveGuessFromCells(state: PersistedRunState, wordId: string) {
     .join("");
 }
 
-function computeSolvedIds(state: PersistedRunState) {
+function computeSolvedIds(state: CurrentRunState) {
   return state.run.words
     .filter((word) => sanitizeGuess(deriveGuessFromCells(state, word.id)) === word.normalized)
     .map((word) => word.id);
@@ -180,11 +197,11 @@ function getHintLevel(wordId: string, hintLevels: Record<string, number>) {
   return hintLevels[wordId] ?? 0;
 }
 
-function buildWordGuessMap(state: PersistedRunState) {
+function buildWordGuessMap(state: CurrentRunState) {
   return Object.fromEntries(state.run.words.map((word) => [word.id, deriveGuessFromCells(state, word.id)]));
 }
 
-function getNextWordId(state: PersistedRunState, currentWordId: string | null, step: 1 | -1, preferUnsolved = true) {
+function getNextWordId(state: CurrentRunState, currentWordId: string | null, step: 1 | -1, preferUnsolved = true) {
   const placements = preferUnsolved
     ? state.run.board.placements.filter((placement) => !state.solvedIds.includes(placement.wordId))
     : state.run.board.placements;
@@ -221,7 +238,7 @@ function countFilledLetters(value: string) {
   return value.replace(/[^a-z]/g, "").length;
 }
 
-function getFirstOpenCellKey(state: PersistedRunState, wordId: string | null) {
+function getFirstOpenCellKey(state: CurrentRunState, wordId: string | null) {
   if (!wordId) {
     return null;
   }
@@ -237,7 +254,7 @@ function getFirstOpenCellKey(state: PersistedRunState, wordId: string | null) {
   return target ? getCellKey(target.row, target.col) : null;
 }
 
-function findNeighborCell(state: PersistedRunState, row: number, col: number, rowStep: number, colStep: number) {
+function findNeighborCell(state: CurrentRunState, row: number, col: number, rowStep: number, colStep: number) {
   let nextRow = row + rowStep;
   let nextCol = col + colStep;
 
@@ -254,7 +271,7 @@ function findNeighborCell(state: PersistedRunState, row: number, col: number, ro
   return null;
 }
 
-function getPreferredWordIdForCell(state: PersistedRunState, cell: PuzzleBoardCell, preferredWordId: string | null) {
+function getPreferredWordIdForCell(state: CurrentRunState, cell: PuzzleBoardCell, preferredWordId: string | null) {
   if (preferredWordId && cell.wordIds.includes(preferredWordId)) {
     return preferredWordId;
   }
@@ -386,16 +403,17 @@ function buildAnagram(answer: string) {
   return reversed === answer.toUpperCase() ? null : reversed;
 }
 
-function isWordReviewAuthorized(state: PersistedRunState, target: Extract<ReviewTarget, { kind: "word" }>) {
-  return target.attemptId === state.attemptId
+function isWordReviewAuthorized(state: CurrentRunState, target: Extract<ReviewTarget, { kind: "word" }>) {
+  return isStartedAttempt(state)
+    && target.attemptId === state.attemptId
     && state.run.words.some((word) => word.id === target.wordId)
     && (state.solvedIds.includes(target.wordId)
       || state.assists.revealedWordIds.includes(target.wordId)
       || state.assists.puzzleRevealed);
 }
 
-function isPuzzleReviewAuthorized(state: PersistedRunState, target: Extract<ReviewTarget, { kind: "puzzle" }>) {
-  return target.attemptId === state.attemptId && (state.completedAt !== null || state.assists.puzzleRevealed);
+function isPuzzleReviewAuthorized(state: CurrentRunState, target: Extract<ReviewTarget, { kind: "puzzle" }>) {
+  return isStartedAttempt(state) && target.attemptId === state.attemptId && (state.completedAt !== null || state.assists.puzzleRevealed);
 }
 
 export function WordPuzzleStudio() {
@@ -413,8 +431,8 @@ export function WordPuzzleStudio() {
   const questPointerMovedRef = useRef(false);
   const questPointerPreviousPathRef = useRef<QuestPathState>({ anchor: null, cells: [] });
   const suppressQuestClickRef = useRef(false);
-  const [options, setOptions] = useState<PuzzleOptions>(defaultOptions);
-  const [state, setState] = useState<PersistedRunState>(() => createFreshState(defaultOptions));
+  const [options, setOptions] = useState<PuzzleOptions>(bootstrapOptions);
+  const [state, setState] = useState<CurrentRunState>(() => createPreparedRunState(buildPuzzleRun(bootstrapOptions)));
   const [reviewTarget, setReviewTarget] = useState<ReviewTarget>({ kind: "none" });
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>("board");
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(false);
@@ -431,42 +449,33 @@ export function WordPuzzleStudio() {
   const [progress, setProgress] = useState<ProgressSnapshot>(createEmptyProgress());
   const [focusedCellKey, setFocusedCellKey] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  const [bootstrapSource, setBootstrapSource] = useState<BootstrapSource>("current-daily");
   const [compactWorkspace, setCompactWorkspace] = useState(false);
   const [announcement, setAnnouncement] = useState("Puzzle ready.");
   const [clockNow, setClockNow] = useState(readNow);
   const stateRef = useRef(state);
   const progressRef = useRef(progress);
+  const skipBootstrapPersistenceRef = useRef(true);
+  const pendingPersistenceTimerRef = useRef<number | null>(null);
   const lexiconSize = wordBank.length;
   const theme = getThemeStyle(state.run.options.style);
 
   useEffect(() => {
     const handle = window.setTimeout(() => {
       const nowMs = readNow();
-      const canonicalOptions = getCanonicalDailyOptions(nowMs);
-      const canonicalState = createFreshState(canonicalOptions, nowMs);
       const stored = readStoredGame(window.localStorage, nowMs);
       const shared = parseSharedOptions(window.location.search, nowMs);
-      const nextProgress = stored.game?.progress ?? createEmptyProgress();
-      let nextState = canonicalState;
+      const resolved = resolveStudioBootstrap({ stored, shared, nowMs, visible: !document.hidden });
 
-      try {
-        if (shared.kind === "valid") {
-          nextState = createFreshState(shared.options, nowMs);
-        } else if (shared.kind === "invalid") {
-          setRunError("That shared puzzle link was invalid, so today’s puzzle was opened instead.");
-        } else if (stored.game && shouldRestoreAttempt(stored.game.currentAttempt, canonicalState.run.puzzleId)) {
-          nextState = prepareStoredAttempt(stored.game.currentAttempt, nowMs);
-        }
-      } catch {
-        nextState = canonicalState;
-        setRunError("That saved puzzle could not be opened, so today’s puzzle was opened instead.");
-      }
-
-      setOptions(nextState.run.options);
-      setState(nextState);
-      setProgress(nextProgress);
-      setFocusedCellKey(getFirstOpenCellKey(nextState, nextState.activeWordId));
-      setMobilePanel(nextState.run.options.boardView === "crossword" ? "clues" : "board");
+      stateRef.current = resolved.current;
+      progressRef.current = resolved.progress;
+      setOptions(resolved.builderOptions);
+      setState(resolved.current);
+      setProgress(resolved.progress);
+      setBootstrapSource(resolved.source);
+      setRunError(resolved.warning);
+      setFocusedCellKey(getFirstOpenCellKey(resolved.current, resolved.current.activeWordId));
+      setMobilePanel(resolved.current.run.options.boardView === "crossword" ? "clues" : "board");
       setClockNow(nowMs);
       setHydrated(true);
     }, 0);
@@ -487,15 +496,35 @@ export function WordPuzzleStudio() {
       return;
     }
 
+    if (skipBootstrapPersistenceRef.current) {
+      skipBootstrapPersistenceRef.current = false;
+      return;
+    }
+
+    if (!isStartedAttempt(state)) {
+      return;
+    }
+
     const handle = window.setTimeout(() => {
+      pendingPersistenceTimerRef.current = null;
+      if (!isStartedAttempt(stateRef.current)) {
+        return;
+      }
       const nowMs = readNow();
-      const nextProgress = recordRunProgress(progressRef.current, state, nowMs);
+      const current = stateRef.current;
+      const nextProgress = recordRunProgress(progressRef.current, current, nowMs);
       progressRef.current = nextProgress;
       setProgress(nextProgress);
-      writeStoredGame(window.localStorage, state, nextProgress, nowMs);
+      writeStoredGame(window.localStorage, current, nextProgress, nowMs);
     }, 120);
+    pendingPersistenceTimerRef.current = handle;
 
-    return () => window.clearTimeout(handle);
+    return () => {
+      window.clearTimeout(handle);
+      if (pendingPersistenceTimerRef.current === handle) {
+        pendingPersistenceTimerRef.current = null;
+      }
+    };
   }, [hydrated, state]);
 
   useEffect(() => {
@@ -503,28 +532,49 @@ export function WordPuzzleStudio() {
       return;
     }
 
-    const handleVisibilityChange = () => {
+    const syncAttemptVisibility = (visible: boolean) => {
       const nowMs = readNow();
-      setState((current) => setAttemptVisibility(current, !document.hidden, nowMs));
+      if (isStartedAttempt(stateRef.current)) {
+        const nextState = setAttemptVisibility(stateRef.current, visible, nowMs);
+        stateRef.current = nextState;
+        setState(nextState);
+      }
       setClockNow(nowMs);
     };
+    const handleVisibilityChange = () => syncAttemptVisibility(!document.hidden);
     const handlePageHide = () => {
       const nowMs = readNow();
+      if (!isStartedAttempt(stateRef.current)) {
+        return;
+      }
+      if (pendingPersistenceTimerRef.current !== null) {
+        window.clearTimeout(pendingPersistenceTimerRef.current);
+        pendingPersistenceTimerRef.current = null;
+      }
       const current = setAttemptVisibility(stateRef.current, false, nowMs);
       const nextProgress = recordRunProgress(progressRef.current, current, nowMs);
+      stateRef.current = current;
+      progressRef.current = nextProgress;
+      setState(current);
+      setProgress(nextProgress);
       writeStoredGame(window.localStorage, current, nextProgress, nowMs);
+    };
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) syncAttemptVisibility(!document.hidden);
     };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener("pageshow", handlePageShow);
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener("pageshow", handlePageShow);
     };
   }, [hydrated]);
 
   useEffect(() => {
-    if (!hydrated || state.paused || state.completedAt || !state.run.options.timerEnabled) {
+    if (!hydrated || !isStartedAttempt(state) || state.paused || state.completedAt || !state.run.options.timerEnabled) {
       return;
     }
 
@@ -533,7 +583,40 @@ export function WordPuzzleStudio() {
     }, 1000);
 
     return () => window.clearInterval(interval);
-  }, [hydrated, state.completedAt, state.paused, state.run.options.timerEnabled]);
+  }, [hydrated, state, state.run.options.timerEnabled]);
+
+  useEffect(() => {
+    if (!hydrated) {
+      return;
+    }
+
+    const refreshDaily = () => {
+      const nowMs = readNow();
+      setClockNow(nowMs);
+      const nextState = refreshPreparedDaily(stateRef.current, bootstrapSource, nowMs);
+      if (nextState === stateRef.current) {
+        return;
+      }
+
+      commitState(nextState);
+      setOptions(nextState.run.options);
+      setFocusedCellKey(getFirstOpenCellKey(nextState, nextState.activeWordId));
+      setMobilePanel(nextState.run.options.boardView === "crossword" ? "clues" : "board");
+      setReviewTarget({ kind: "none" });
+      setRevealConfirm({ kind: "none" });
+      setAnnouncement("A new UTC daily puzzle is ready.");
+    };
+    const handleVisibility = () => {
+      if (!document.hidden) refreshDaily();
+    };
+    const interval = window.setInterval(refreshDaily, 30_000);
+    document.addEventListener("visibilitychange", handleVisibility);
+    refreshDaily();
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [bootstrapSource, hydrated]);
 
   useEffect(() => {
     const query = window.matchMedia("(max-width: 1279px)");
@@ -558,20 +641,23 @@ export function WordPuzzleStudio() {
   }, [revealConfirm]);
 
   const solvedCount = state.solvedIds.length;
+  const started = isStartedAttempt(state);
   const activeWord = state.run.words.find((word) => word.id === state.activeWordId) ?? state.run.words[0] ?? null;
   const activePlacement = activeWord ? getWordPlacement(state, activeWord.id) : null;
   const activeGuess = activeWord ? deriveGuessFromCells(state, activeWord.id) : "";
   const finished = Boolean(state.completedAt) || (solvedCount === state.run.words.length && state.run.words.length > 0);
   const activePlay = !finished;
   const progressLabel = `${solvedCount}/${state.run.words.length} solved`;
-  const runStateLabel = finished ? "Done" : state.paused ? "Paused" : "Live";
+  const runStateLabel = finished ? "Done" : !started ? "Ready" : state.paused ? "Paused" : "Live";
   const cellMap = new Map(state.run.board.cells.map((cell) => [getCellKey(cell.row, cell.col), cell]));
   const archive = buildDailyArchive(progress.history, 10, clockNow);
   const activeFilledCount = countFilledLetters(activeGuess);
   const boardFocusKey = focusedCellKey ?? getFirstOpenCellKey(state, state.activeWordId);
-  const assistSummary = summarizeAssists(state);
+  const assistSummary = started
+    ? summarizeAssists(state)
+    : { total: 0, hintSteps: 0, revealedLetters: 0, anagrams: 0, revealedWords: 0, puzzleRevealed: false };
   const assistsUsed = assistSummary.total;
-  const displayedElapsedMs = getDisplayedElapsedMs(state, clockNow, typeof document === "undefined" || !document.hidden);
+  const displayedElapsedMs = started ? getDisplayedElapsedMs(state, clockNow, typeof document === "undefined" || !document.hidden) : 0;
   const rareSolvedCount = state.run.words.filter((word) => word.frequencyBand === "rare").length;
   const uncommonSolvedCount = state.run.words.filter((word) => word.frequencyBand === "uncommon").length;
   const commonSolvedCount = state.run.words.filter((word) => word.frequencyBand === "common").length;
@@ -612,7 +698,7 @@ export function WordPuzzleStudio() {
   const isQuestView = state.run.options.boardView === "quest";
   const runDay = state.run.seed.replace(/^daily:/, "");
   const today = getUtcDay(clockNow);
-  const isCanonicalDailyAttempt = isCanonicalDailyOptions(state.run.options, state.run.seed) && state.startedAt.slice(0, 10) === runDay;
+  const isCanonicalDailyAttempt = started && isCanonicalDailyOptions(state.run.options, state.run.seed) && state.startedAt.slice(0, 10) === runDay;
   const isCanonicalDailyCompletion = isCanonicalDailyAttempt && state.completedAt?.slice(0, 10) === runDay;
   const runContextLabel = state.run.options.mode === "custom"
     ? "Custom puzzle"
@@ -647,6 +733,8 @@ export function WordPuzzleStudio() {
   const activeClueFeedbackId = activeWord ? `clue-feedback-${activeWord.id}` : undefined;
   const liveMessage = finished
     ? `Puzzle cleared. ${solvedCount} of ${state.run.words.length} words solved.`
+    : !started
+      ? "Puzzle ready. Start or enter your first answer to begin."
     : state.paused
       ? "Puzzle paused. Entries and new assists are locked."
       : activeGuessIncorrect
@@ -681,6 +769,32 @@ export function WordPuzzleStudio() {
   function showToast(message: string, tone: ToastTone = "success") {
     setToast({ message, tone });
     window.setTimeout(() => setToast(null), 1800);
+  }
+
+  function commitState(nextState: CurrentRunState) {
+    stateRef.current = nextState;
+    setState(nextState);
+  }
+
+  function startCurrentAttempt(message = "Puzzle started.") {
+    const nowMs = readNow();
+    const nextState = startPreparedAttempt(stateRef.current, nowMs);
+    if (nextState !== stateRef.current) {
+      commitState(nextState);
+      setClockNow(nowMs);
+      setAnnouncement(message);
+    }
+    return nextState;
+  }
+
+  function updateStartedAttempt(update: (current: PersistedRunState) => PersistedRunState, nowMs = readNow()) {
+    setState((current) => {
+      const startedState = startPreparedAttempt(current, nowMs);
+      const nextState = update(startedState);
+      stateRef.current = nextState;
+      return nextState;
+    });
+    setClockNow(nowMs);
   }
 
   function speakWord(word: string) {
@@ -767,8 +881,10 @@ export function WordPuzzleStudio() {
       const run = buildPuzzleRun(requestOptions);
       startTransition(() => {
         const nextState = createAttemptFromRun(run);
+        stateRef.current = nextState;
         setOptions(run.options);
         setState(nextState);
+        setBootstrapSource("explicit");
         setFocusedCellKey(getFirstOpenCellKey(nextState, nextState.activeWordId));
         setMobilePanel(run.options.boardView === "crossword" ? "clues" : "board");
         setRevealConfirm({ kind: "none" });
@@ -887,22 +1003,27 @@ export function WordPuzzleStudio() {
       return;
     }
 
+    if (!isStartedAttempt(state)) {
+      startCurrentAttempt();
+      return;
+    }
+
     const nowMs = readNow();
     const willPause = !state.paused;
     if (willPause && isQuestView) {
       clearQuestPathSelection();
     }
-    setState((current) => setAttemptPaused(current, willPause, nowMs));
+    setState((current) => isStartedAttempt(current) ? setAttemptPaused(current, willPause, nowMs) : current);
     setAnnouncement(willPause ? "Puzzle paused. Entries and new assists are locked." : `${activeClueName} selected. Puzzle resumed.`);
     setClockNow(nowMs);
   }
 
   function revealHint(wordId: string) {
-    setState((current) => recordHintStep(current, wordId));
+    updateStartedAttempt((current) => recordHintStep(current, wordId));
   }
 
   function revealAnagram(word: PuzzleWord) {
-    if (!canMutateAttempt(state)) {
+    if (!canAcceptPlayIntent(state)) {
       return;
     }
 
@@ -912,7 +1033,7 @@ export function WordPuzzleStudio() {
       return;
     }
 
-    setState((current) => recordAnagram(current, word.id));
+    updateStartedAttempt((current) => recordAnagram(current, word.id));
     setShownAnagrams((current) => ({
       ...current,
       [word.id]: anagram,
@@ -924,29 +1045,31 @@ export function WordPuzzleStudio() {
       return;
     }
 
-    const target = { kind: "word", attemptId: state.attemptId, wordId: activeWord.id } as const;
+    const attempt = startCurrentAttempt("Puzzle started with word review.");
+    const target = { kind: "word", attemptId: attempt.attemptId, wordId: activeWord.id } as const;
     revealInvokerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     reviewOriginRef.current = { element: revealInvokerRef.current, panel: mobilePanel };
-    if (isWordReviewAuthorized(state, target)) {
+    if (isWordReviewAuthorized(attempt, target)) {
       openAuthorizedReview(target);
       return;
     }
 
-    if (!state.paused && canMutateAttempt(state)) {
+    if (!attempt.paused && canMutateAttempt(attempt)) {
       setRevealConfirm(target);
     }
   }
 
   function confirmRevealPuzzle() {
-    const target = { kind: "puzzle", attemptId: state.attemptId } as const;
+    const attempt = startCurrentAttempt("Puzzle started with puzzle review.");
+    const target = { kind: "puzzle", attemptId: attempt.attemptId } as const;
     revealInvokerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     reviewOriginRef.current = { element: revealInvokerRef.current, panel: mobilePanel };
-    if (isPuzzleReviewAuthorized(state, target)) {
+    if (isPuzzleReviewAuthorized(attempt, target)) {
       openAuthorizedReview(target);
       return;
     }
 
-    if (!state.paused && canMutateAttempt(state)) {
+    if (!attempt.paused && canMutateAttempt(attempt)) {
       setRevealConfirm(target);
     }
   }
@@ -1045,30 +1168,33 @@ export function WordPuzzleStudio() {
   }
 
   function solveWordById(wordId: string) {
-    if (!canMutateAttempt(state)) {
+    if (!canAcceptPlayIntent(state)) {
       return false;
     }
 
     const nowMs = readNow();
     setState((current) => {
-      if (!canMutateAttempt(current)) {
-        return current;
+      const attempt = startPreparedAttempt(current, nowMs);
+      if (!canMutateAttempt(attempt)) {
+        return attempt;
       }
 
-      const word = getWordById(current, wordId);
-      const placement = getPlacementByWordId(current, wordId);
+      const word = getWordById(attempt, wordId);
+      const placement = getPlacementByWordId(attempt, wordId);
       if (!word || !placement) {
         return current;
       }
 
-      const nextCellEntries = { ...current.cellEntries };
-      const cells = getWordCells(current, placement);
+      const nextCellEntries = { ...attempt.cellEntries };
+      const cells = getWordCells(attempt, placement);
 
       cells.forEach((cell, index) => {
         nextCellEntries[getCellKey(cell.row, cell.col)] = word.answer[index];
       });
 
-      return finalizeAttempt(buildStateWithEntries(current, nextCellEntries, wordId), nowMs);
+      const nextState = finalizeAttempt(buildStateWithEntries(attempt, nextCellEntries, wordId), nowMs);
+      stateRef.current = nextState;
+      return nextState;
     });
 
     return true;
@@ -1093,10 +1219,12 @@ export function WordPuzzleStudio() {
   }
 
   function transitionQuestEndpoint(row: number, col: number, anchorOverride?: string | null) {
-    if (!canMutateAttempt(state)) {
+    if (!canAcceptPlayIntent(state)) {
       setAnnouncement(state.paused ? "Puzzle paused. Quest selection is locked." : "Puzzle complete. Quest selection is read only.");
       return false;
     }
+
+    startCurrentAttempt("Quest started. Choose the other endpoint.");
 
     const key = getCellKey(row, col);
     const anchor = anchorOverride === undefined ? questPath.anchor : anchorOverride;
@@ -1134,9 +1262,11 @@ export function WordPuzzleStudio() {
   }
 
   function beginQuestPointer(event: React.PointerEvent<HTMLButtonElement>, row: number, col: number) {
-    if (!canMutateAttempt(state)) {
+    if (!canAcceptPlayIntent(state)) {
       return;
     }
+
+    startCurrentAttempt("Quest started. Drag to the other endpoint.");
 
     questPointerStartRef.current = getCellKey(row, col);
     questPointerMovedRef.current = false;
@@ -1150,7 +1280,7 @@ export function WordPuzzleStudio() {
 
   function moveQuestPointer(event: React.PointerEvent<HTMLButtonElement>, fallbackRow: number, fallbackCol: number) {
     const startKey = questPointerStartRef.current;
-    if (!canMutateAttempt(state) || !startKey) {
+    if (!isStartedAttempt(stateRef.current) || !canMutateAttempt(stateRef.current) || !startKey) {
       return;
     }
 
@@ -1277,7 +1407,7 @@ export function WordPuzzleStudio() {
     }
 
     window.requestAnimationFrame(() => {
-      if (resolvedIntent === "answer" && canMutateAttempt(state) && !state.solvedIds.includes(wordId)) {
+      if (resolvedIntent === "answer" && canAcceptPlayIntent(state) && !state.solvedIds.includes(wordId)) {
         activeAnswerInputRef.current?.focus();
       } else if (targetCellKey) {
         boardCellRefs.current[targetCellKey]?.focus();
@@ -1332,7 +1462,7 @@ export function WordPuzzleStudio() {
   }
 
   function updateBoardCellEntry(cell: PuzzleBoardCell, nextLetter: string, options?: { moveBackward?: boolean }) {
-    if (!canMutateAttempt(state)) {
+    if ((!nextLetter && !isStartedAttempt(state)) || !canAcceptPlayIntent(state)) {
       return;
     }
 
@@ -1361,17 +1491,18 @@ export function WordPuzzleStudio() {
     }
 
     setState((current) => {
-      if (!canMutateAttempt(current)) {
-        return current;
+      const attempt = startPreparedAttempt(current, nowMs);
+      if (!canMutateAttempt(attempt)) {
+        return attempt;
       }
 
-      const currentCell = current.run.board.cells.find((entry) => entry.row === cell.row && entry.col === cell.col);
-      const currentWordId = currentCell ? getPreferredWordIdForCell(current, currentCell, current.activeWordId) : null;
+      const currentCell = attempt.run.board.cells.find((entry) => entry.row === cell.row && entry.col === cell.col);
+      const currentWordId = currentCell ? getPreferredWordIdForCell(attempt, currentCell, attempt.activeWordId) : null;
       if (!currentWordId) {
         return current;
       }
 
-      const nextCellEntries = { ...current.cellEntries };
+      const nextCellEntries = { ...attempt.cellEntries };
       const cellKey = getCellKey(cell.row, cell.col);
 
       if (nextLetter) {
@@ -1382,14 +1513,16 @@ export function WordPuzzleStudio() {
 
       const nextState = buildStateWithEntries(
         {
-          ...current,
+          ...attempt,
           activeWordId: currentWordId,
         },
         nextCellEntries,
         currentWordId,
       );
 
-      return finalizeAttempt(nextState, nowMs);
+      const finalized = finalizeAttempt(nextState, nowMs);
+      stateRef.current = finalized;
+      return finalized;
     });
 
     const placement = getPlacementByWordId(state, preferredWordId);
@@ -1453,7 +1586,7 @@ export function WordPuzzleStudio() {
       return;
     }
 
-    if (!canMutateAttempt(state)) {
+    if (!canAcceptPlayIntent(state)) {
       if (event.key === "Backspace" || event.key === "Delete" || /^[a-zA-Z]$/.test(event.key)) {
         event.preventDefault();
       }
@@ -1473,19 +1606,19 @@ export function WordPuzzleStudio() {
   }
 
   function jumpToAdjacentClue(step: 1 | -1) {
-    const nextWordId = getNextWordId(state, state.activeWordId, step, canMutateAttempt(state));
+    const nextWordId = getNextWordId(state, state.activeWordId, step, canAcceptPlayIntent(state));
     if (nextWordId) {
       selectWord(nextWordId, "answer");
     }
   }
 
   function clearActiveWord() {
-    if (!activeWord || !canMutateAttempt(state)) {
+    if (!activeWord || !isStartedAttempt(state) || !canMutateAttempt(state)) {
       return;
     }
 
     setState((current) => {
-      if (!canMutateAttempt(current) || !current.activeWordId) {
+      if (!isStartedAttempt(current) || !canMutateAttempt(current) || !current.activeWordId) {
         return current;
       }
 
@@ -1511,44 +1644,46 @@ export function WordPuzzleStudio() {
   }
 
   function revealActiveLetter() {
-    if (!activeWord || !canMutateAttempt(state)) {
+    if (!activeWord || !canAcceptPlayIntent(state)) {
       return;
     }
 
     const nowMs = readNow();
     setState((current) => {
-      if (!canMutateAttempt(current) || !current.activeWordId) {
-        return current;
+      const attempt = startPreparedAttempt(current, nowMs);
+      if (!canMutateAttempt(attempt) || !attempt.activeWordId) {
+        return attempt;
       }
 
-      const currentWord = getWordById(current, current.activeWordId);
-      const placement = getPlacementByWordId(current, current.activeWordId);
+      const currentWord = getWordById(attempt, attempt.activeWordId);
+      const placement = getPlacementByWordId(attempt, attempt.activeWordId);
       if (!currentWord || !placement) {
         return current;
       }
 
-      const nextCellEntries = { ...current.cellEntries };
-      const cells = getWordCells(current, placement);
+      const nextCellEntries = { ...attempt.cellEntries };
+      const cells = getWordCells(attempt, placement);
       const revealIndex = cells.findIndex((cell, index) => (nextCellEntries[getCellKey(cell.row, cell.col)] ?? "") !== currentWord.answer[index]);
 
       if (revealIndex === -1) {
-        return current;
+        return attempt;
       }
 
       const revealCell = cells[revealIndex];
       const revealedCellKey = getCellKey(revealCell.row, revealCell.col);
       nextCellEntries[revealedCellKey] = currentWord.answer[revealIndex];
-      const assistedState = recordRevealedCell(current, revealedCellKey);
-      return finalizeAttempt(buildStateWithEntries(assistedState, nextCellEntries, currentWord.id), nowMs);
+      const assistedState = recordRevealedCell(attempt, revealedCellKey);
+      const nextState = finalizeAttempt(buildStateWithEntries(assistedState, nextCellEntries, currentWord.id), nowMs);
+      stateRef.current = nextState;
+      return nextState;
     });
   }
 
   function updateWordGuess(word: PuzzleWord, value: string) {
-    if (!canMutateAttempt(state)) {
+    const cleaned = sanitizeGuess(value).slice(0, word.answer.length);
+    if ((!cleaned && !isStartedAttempt(state)) || !canAcceptPlayIntent(state)) {
       return;
     }
-
-    const cleaned = sanitizeGuess(value).slice(0, word.answer.length);
     const placement = getPlacementByWordId(state, word.id);
     if (placement) {
       const clueLabel = `${placement.clueNumber} ${placement.direction}`;
@@ -1563,17 +1698,18 @@ export function WordPuzzleStudio() {
 
     const nowMs = readNow();
     setState((current) => {
-      if (!canMutateAttempt(current)) {
-        return current;
+      const attempt = startPreparedAttempt(current, nowMs);
+      if (!canMutateAttempt(attempt)) {
+        return attempt;
       }
 
-      const currentWord = getWordById(current, word.id);
+      const currentWord = getWordById(attempt, word.id);
       const placement = currentWord ? getWordPlacement(current, currentWord.id) : null;
       if (!currentWord || !placement) {
         return current;
       }
 
-      const nextCellEntries = { ...current.cellEntries };
+      const nextCellEntries = { ...attempt.cellEntries };
 
       for (let index = 0; index < currentWord.answer.length; index += 1) {
         const row = placement.row + (placement.direction === "down" ? index : 0);
@@ -1583,12 +1719,14 @@ export function WordPuzzleStudio() {
 
         if (letter) {
           nextCellEntries[key] = letter;
-        } else if (nextCellEntries[key] && current.run.board.cells.find((cell) => cell.row === row && cell.col === col)?.wordIds.length === 1) {
+        } else if (nextCellEntries[key] && attempt.run.board.cells.find((cell) => cell.row === row && cell.col === col)?.wordIds.length === 1) {
           delete nextCellEntries[key];
         }
       }
 
-      return finalizeAttempt(buildStateWithEntries(current, nextCellEntries, currentWord.id), nowMs);
+      const nextState = finalizeAttempt(buildStateWithEntries(attempt, nextCellEntries, currentWord.id), nowMs);
+      stateRef.current = nextState;
+      return nextState;
     });
   }
 
@@ -1636,7 +1774,7 @@ function getTargetChipClass(word: PuzzleWord, solved: boolean, active: boolean) 
   }
 }
 
-function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
+function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
   const solvedWordId = cell.wordIds.find((wordId) => state.solvedIds.includes(wordId));
   if (!solvedWordId) {
     return null;
@@ -1654,8 +1792,22 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
   return trailClasses[Math.max(0, solvedIndex) % trailClasses.length];
 }
 
+  if (!hydrated) {
+    return (
+      <main id="puzzle-studio" aria-busy="true" data-bootstrap-state="pending" data-run-state="none" data-hydrated="false" className="scroll-shell style-alpha min-h-screen scroll-mt-4 px-4 py-6 sm:px-6 lg:px-8">
+        <div className="mx-auto w-full max-w-[96rem]">
+          <section data-testid="studio-boot" className="glass-card rounded-[2rem] px-5 py-8 sm:px-8">
+            <div className="text-xs font-semibold uppercase tracking-[0.24em] text-fuchsia-300">Local puzzle studio</div>
+            <h2 className="mt-3 text-2xl font-semibold text-white">Preparing your puzzle…</h2>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">Checking this browser for a resumable attempt before preparing the current UTC daily.</p>
+          </section>
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <main id="puzzle-studio" aria-busy={!hydrated} data-hydrated={hydrated ? "true" : "false"} className={`scroll-shell ${theme.className} min-h-screen scroll-mt-4 px-4 py-6 sm:px-6 lg:px-8 ${hydrated ? "" : "pointer-events-none opacity-70"}`}>
+    <main id="puzzle-studio" aria-busy="false" data-bootstrap-state="ready" data-run-state={started ? "attempt" : "prepared"} data-hydrated="true" className={`scroll-shell ${theme.className} min-h-screen scroll-mt-4 px-4 py-6 sm:px-6 lg:px-8`}>
       <div className="mx-auto flex w-full max-w-[96rem] flex-col gap-6">
         <section className="glass-card quest-card-frame quest-card-glow overflow-hidden rounded-[2rem] px-5 py-5 sm:px-6">
           <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
@@ -1683,8 +1835,8 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                   <p className="max-w-3xl text-sm leading-6 text-slate-300">{state.run.blurb}</p>
                   <div className="flex flex-wrap gap-2 text-xs text-slate-200">
                     <span data-testid="progress-label" className="accent-chip rounded-full px-3 py-1 font-semibold uppercase tracking-[0.22em]">{progressLabel}</span>
-                    <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1 uppercase tracking-[0.2em] text-slate-300">{runStateLabel}</span>
-                    <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1 text-slate-300">{formatElapsed(displayedElapsedMs)}</span>
+                    <span data-testid="run-status" className="rounded-full border border-white/10 bg-white/4 px-3 py-1 uppercase tracking-[0.2em] text-slate-300">{runStateLabel}</span>
+                    <span data-testid="elapsed-time" className="rounded-full border border-white/10 bg-white/4 px-3 py-1 text-slate-300">{formatElapsed(displayedElapsedMs)}</span>
                     <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1 text-slate-300">streak {progress.streak}</span>
                     <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1 text-slate-300">{state.run.words[0]?.topicLabel ?? "Mixed"}</span>
                   </div>
@@ -1933,7 +2085,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="text-2xl font-semibold text-white">{state.run.title}</h2>
                     <span className="rounded-full border border-white/10 px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-300">{state.run.options.mode}</span>
-                    <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300">seed {state.run.seed.replace(/^daily:/, "")}</span>
+                    <span data-testid="run-seed" className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300">seed {state.run.seed.replace(/^daily:/, "")}</span>
                   </div>
                   <p className="max-w-4xl text-sm leading-6 text-slate-300">Find all hidden words to complete the puzzle. Keep the board in focus, dip into the clues, and use the side rail for progress and quick controls.</p>
                 </div>
@@ -1941,7 +2093,11 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                 <div className="space-y-3 lg:max-w-md lg:text-right">
                   <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Run controls</div>
                   <div className="flex flex-wrap gap-2 lg:justify-end">
-                    {!finished ? <button type="button" onClick={togglePause} className={secondaryPillClass}>{state.paused ? "Resume" : "Pause"}</button> : null}
+                    {!finished ? (
+                      started
+                        ? <button type="button" onClick={togglePause} className={secondaryPillClass}>{state.paused ? "Resume" : "Pause"}</button>
+                        : <button type="button" data-testid="start-puzzle" onClick={() => startCurrentAttempt()} className="accent-chip rounded-full px-4 py-2 text-sm font-semibold">Start puzzle</button>
+                    ) : null}
                     <button type="button" onClick={() => startNewRun(state.run.options)} className={secondaryPillClass}>Restart</button>
                   </div>
                   <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Review tools</div>
@@ -2053,7 +2209,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                           }
                         }
                       }}
-                      disabled={!canMutateAttempt(state) || state.solvedIds.includes(activeWord.id)}
+                      disabled={!canAcceptPlayIntent(state) || state.solvedIds.includes(activeWord.id)}
                       placeholder={state.paused ? "Paused" : `${activeWord.length} letters`}
                       className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm uppercase tracking-[0.25em] text-white placeholder:text-slate-500 disabled:opacity-60"
                     />
@@ -2107,7 +2263,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                               aria-colindex={col + 1}
                               aria-label={isQuestView ? getQuestCellLabel(row, col, displayLetter, selectedQuestCell, questPath.anchor === key) : cell ? getCrosswordCellLabel(state, cell, state.activeWordId) : undefined}
                               aria-selected={isQuestView ? selectedQuestCell : activeCell}
-                              aria-readonly={!canMutateAttempt(state)}
+                              aria-readonly={!canAcceptPlayIntent(state)}
                               tabIndex={(isQuestView || cell) && boardFocusKey === key ? 0 : -1}
                               onClick={() => {
                                 if (isQuestView) {
@@ -2254,13 +2410,13 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                       <button type="button" onClick={() => jumpToAdjacentClue(1)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100">
                         Next clue
                       </button>
-                      <button type="button" onClick={revealActiveLetter} disabled={!canMutateAttempt(state) || state.solvedIds.includes(activeWord.id)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
+                      <button type="button" onClick={revealActiveLetter} disabled={!canAcceptPlayIntent(state) || state.solvedIds.includes(activeWord.id)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
                         Reveal letter
                       </button>
-                      <button type="button" onClick={() => isQuestView ? clearQuestPathSelection() : clearActiveWord()} disabled={!canMutateAttempt(state) || state.solvedIds.includes(activeWord.id)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
+                      <button type="button" onClick={() => isQuestView ? clearQuestPathSelection() : clearActiveWord()} disabled={!started || !canMutateAttempt(state) || state.solvedIds.includes(activeWord.id)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
                         {isQuestView ? "Clear trail" : "Clear word"}
                       </button>
-                      <button type="button" onClick={() => revealAnagram(activeWord)} disabled={!canMutateAttempt(state) || state.solvedIds.includes(activeWord.id)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
+                      <button type="button" onClick={() => revealAnagram(activeWord)} disabled={!canAcceptPlayIntent(state) || state.solvedIds.includes(activeWord.id)} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
                         Show scramble
                       </button>
                       </div>
@@ -2269,7 +2425,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                     {shownAnagrams[activeWord.id] ? <div className="mt-3 rounded-2xl border border-dashed border-white/12 bg-slate-950/45 px-3 py-2 text-sm uppercase tracking-[0.25em] text-slate-200">Scramble: {shownAnagrams[activeWord.id]}</div> : null}
 
                     <div className="mt-4 flex items-center justify-between gap-3">
-                      <button type="button" onClick={() => revealHint(activeWord.id)} disabled={!canMutateAttempt(state) || getHintLevel(activeWord.id, state.assists.hintStepsByWord) >= 3} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
+                      <button type="button" onClick={() => revealHint(activeWord.id)} disabled={!canAcceptPlayIntent(state) || getHintLevel(activeWord.id, state.assists.hintStepsByWord) >= 3} className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-40">
                         {getHintLevel(activeWord.id, state.assists.hintStepsByWord) >= 3 ? "Hints maxed" : "Get tip"}
                       </button>
                       <span className={`text-xs font-semibold uppercase tracking-[0.2em] ${state.solvedIds.includes(activeWord.id) ? "text-emerald-300" : "text-slate-400"}`}>{state.solvedIds.includes(activeWord.id) ? "Solved" : "In play"}</span>
@@ -2412,7 +2568,7 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
               </div>
             ) : null}
 
-            {finished ? (
+            {finished && started ? (
               <div data-testid="completion-card" className="completion-burst glass-card relative overflow-hidden rounded-[2rem] p-6 text-center">
                 <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top,_rgba(125,211,252,0.24),_transparent_55%),radial-gradient(circle_at_20%_20%,_rgba(250,204,21,0.16),_transparent_35%),radial-gradient(circle_at_80%_10%,_rgba(192,132,252,0.18),_transparent_40%)]" />
                 <div className="pointer-events-none absolute inset-x-0 top-12 flex justify-center gap-3 opacity-70">
@@ -2640,7 +2796,11 @@ function getSolvedTrailClass(state: PersistedRunState, cell: PuzzleBoardCell) {
                   ))}
                 </div>
                 <div className="mt-4 flex flex-wrap gap-2">
-                  {!finished ? <button type="button" onClick={togglePause} className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs text-slate-100">{state.paused ? "Resume" : "Pause"}</button> : null}
+                  {!finished ? (
+                    started
+                      ? <button type="button" onClick={togglePause} className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs text-slate-100">{state.paused ? "Resume" : "Pause"}</button>
+                      : <button type="button" onClick={() => startCurrentAttempt()} className="accent-chip rounded-full px-3 py-2 text-xs font-semibold">Start puzzle</button>
+                  ) : null}
                   <button type="button" onClick={() => startNewRun(state.run.options)} className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs text-slate-100">Restart</button>
                   <button type="button" onClick={shareCurrentRunLink} className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs text-slate-100">Share link</button>
                 </div>
