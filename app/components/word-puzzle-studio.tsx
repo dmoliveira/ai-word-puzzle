@@ -85,6 +85,7 @@ type PendingRunReplacement = {
 type StorageStatus = {
   tone: "warning" | "recovered";
   message: string;
+  retryIntent?: "persist-latest-attempt";
 } | null;
 
 const builderPresetOptions: Record<BuilderPresetId, Partial<PuzzleOptions>> = {
@@ -483,6 +484,9 @@ export function WordPuzzleStudio() {
   const replacementLockRef = useRef(false);
   const replacementCommitInFlightRef = useRef(false);
   const replayVerificationControllerRef = useRef<AbortController | null>(null);
+  const retrySaveButtonRef = useRef<HTMLButtonElement | null>(null);
+  const retrySaveInFlightRef = useRef(false);
+  const focusEventStatusAfterRetryRef = useRef(false);
   const importDialogRef = useRef<HTMLDialogElement | null>(null);
   const importCancelRef = useRef<HTMLButtonElement | null>(null);
   const importFileRef = useRef<HTMLInputElement | null>(null);
@@ -494,6 +498,7 @@ export function WordPuzzleStudio() {
   const reviewHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const runHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const completionHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const eventStatusRef = useRef<HTMLParagraphElement | null>(null);
   const completionTransitionRef = useRef({ hydrated: false, finished: false });
   const workspaceTabRefs = useRef<Record<MobilePanel, HTMLButtonElement | null>>({ board: null, clues: null, review: null, archive: null });
   const questPointerStartRef = useRef<string | null>(null);
@@ -514,6 +519,7 @@ export function WordPuzzleStudio() {
   const [questPath, setQuestPath] = useState<QuestPathState>({ anchor: null, cells: [] });
   const [isStarting, setIsStarting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [isRetryingSave, setIsRetryingSave] = useState(false);
   const [portableUndoAvailable, setPortableUndoAvailable] = useState(false);
   const [portableMessage, setPortableMessage] = useState<{ tone: "success" | "warning"; message: string } | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
@@ -545,26 +551,33 @@ export function WordPuzzleStudio() {
     portableUndoAvailableRef.current = available;
     setPortableUndoAvailable(available);
   }, []);
-  const applyStorageWriteResult = useCallback((result: StorageWriteResult) => {
+  const applyStorageWriteResult = useCallback((
+    result: StorageWriteResult,
+    options: { retryIntent?: "persist-latest-attempt"; successAnnouncement?: string; failureAnnouncement?: (message: string) => string } = {},
+  ) => {
     if (result.ok) {
       storageRevisionRef.current = result.saveId;
       portableUndoAvailableRef.current = false;
       setPortableUndoAvailable(false);
       storageWritableRef.current = true;
-      if (storageStatusRef.current?.tone === "warning") announce("Progress is saved locally again.");
+      if (storageStatusRef.current?.tone === "warning") announce(options.successAnnouncement ?? "Progress is saved locally again.");
       storageStatusRef.current = null;
       setStorageStatus(null);
       return true;
     }
 
     const message = getStorageFailureMessage(result);
-    if (["future-version", "concurrent-write", "commit-uncertain", "recovery-required"].includes(result.code)) {
+    if (!result.retryable || result.preservation === "commit-uncertain") {
       storageWritableRef.current = false;
     }
-    const status = { tone: "warning", message } as const;
+    const status: NonNullable<StorageStatus> = {
+      tone: "warning",
+      message,
+      ...(result.retryable && storageWritableRef.current && options.retryIntent ? { retryIntent: options.retryIntent } : {}),
+    };
     storageStatusRef.current = status;
     setStorageStatus(status);
-    announce(message);
+    announce(options.failureAnnouncement?.(message) ?? message);
     return false;
   }, [announce]);
   const queueStorageWrite = useCallback((nextState: PersistedRunState, nextProgress: ProgressSnapshot, nowMs: number) => {
@@ -581,6 +594,50 @@ export function WordPuzzleStudio() {
     storageSaveQueueRef.current = operation.then(() => undefined, () => undefined);
     return operation;
   }, []);
+  const persistLatestStartedAttempt = useCallback(() => {
+    const current = stateRef.current;
+    if (!isStartedAttempt(current) || !storageWritableRef.current) return null;
+    const nowMs = readNow();
+    const nextProgress = recordRunProgress(progressRef.current, current, nowMs);
+    progressRef.current = nextProgress;
+    setProgress(nextProgress);
+    return queueStorageWrite(current, nextProgress, nowMs);
+  }, [queueStorageWrite]);
+  const retryLocalSave = useCallback(async () => {
+    if (retrySaveInFlightRef.current
+      || replacementCommitInFlightRef.current
+      || importCommitInFlightRef.current
+      || isStarting
+      || isImporting
+      || !storageWritableRef.current
+      || storageStatusRef.current?.retryIntent !== "persist-latest-attempt"
+      || !isStartedAttempt(stateRef.current)) return;
+
+    if (pendingPersistenceTimerRef.current !== null) {
+      window.clearTimeout(pendingPersistenceTimerRef.current);
+      pendingPersistenceTimerRef.current = null;
+    }
+    retrySaveInFlightRef.current = true;
+    setIsRetryingSave(true);
+    announce("Retrying local save.");
+    const operation = persistLatestStartedAttempt();
+    if (!operation) {
+      retrySaveInFlightRef.current = false;
+      setIsRetryingSave(false);
+      return;
+    }
+
+    const result = await operation;
+    const retryStillOwnsFocus = document.activeElement === retrySaveButtonRef.current;
+    const saved = applyStorageWriteResult(result, {
+      retryIntent: "persist-latest-attempt",
+      successAnnouncement: "Progress saved locally.",
+      failureAnnouncement: (message) => `Still not saved locally. ${message}`,
+    });
+    retrySaveInFlightRef.current = false;
+    setIsRetryingSave(false);
+    focusEventStatusAfterRetryRef.current = saved && retryStillOwnsFocus;
+  }, [announce, applyStorageWriteResult, isImporting, isStarting, persistLatestStartedAttempt]);
   const theme = getThemeStyle(state.run.options.style);
 
   useEffect(() => {
@@ -638,6 +695,13 @@ export function WordPuzzleStudio() {
   }, [progress]);
 
   useEffect(() => {
+    if (!isRetryingSave && !storageStatus && focusEventStatusAfterRetryRef.current) {
+      focusEventStatusAfterRetryRef.current = false;
+      eventStatusRef.current?.focus({ preventScroll: true });
+    }
+  }, [announcementEvent.id, isRetryingSave, storageStatus]);
+
+  useEffect(() => {
     if (!hydrated) {
       return;
     }
@@ -661,12 +725,8 @@ export function WordPuzzleStudio() {
       if (!isStartedAttempt(stateRef.current)) {
         return;
       }
-      const nowMs = readNow();
-      const current = stateRef.current;
-      const nextProgress = recordRunProgress(progressRef.current, current, nowMs);
-      progressRef.current = nextProgress;
-      setProgress(nextProgress);
-      applyStorageWriteResult(await queueStorageWrite(current, nextProgress, nowMs));
+      const operation = persistLatestStartedAttempt();
+      if (operation) applyStorageWriteResult(await operation, { retryIntent: "persist-latest-attempt" });
     }, 120);
     pendingPersistenceTimerRef.current = handle;
 
@@ -676,7 +736,7 @@ export function WordPuzzleStudio() {
         pendingPersistenceTimerRef.current = null;
       }
     };
-  }, [applyStorageWriteResult, hydrated, queueStorageWrite, state]);
+  }, [applyStorageWriteResult, hydrated, persistLatestStartedAttempt, state]);
 
   useEffect(() => {
     if (!hydrated) {
@@ -859,6 +919,11 @@ export function WordPuzzleStudio() {
 
   const solvedCount = state.solvedIds.length;
   const started = isStartedAttempt(state);
+  const showRetrySaveAction = storageStatus?.retryIntent === "persist-latest-attempt"
+    && started
+    && storageWritableRef.current
+    && ((!isStarting && !isImporting) || isRetryingSave);
+  const retrySaveActionDisabled = isRetryingSave || isStarting || isImporting;
   const activeWord = state.run.words.find((word) => word.id === state.activeWordId) ?? state.run.words[0] ?? null;
   const activePlacement = activeWord ? getWordPlacement(state, activeWord.id) : null;
   const activeGuess = activeWord ? deriveGuessFromCells(state, activeWord.id) : "";
@@ -2360,10 +2425,30 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
               data-testid="storage-status"
               className={`rounded-2xl border px-4 py-3 text-sm ${storageStatus.tone === "warning" ? "border-amber-400/45 bg-amber-500/10 text-amber-100" : "border-sky-400/40 bg-sky-500/10 text-sky-100"}`}
             >
-              <span className="font-semibold">{storageStatus.tone === "warning" ? "Not saved locally." : "Local save recovered."}</span>{" "}{storageStatus.message}
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div id="storage-status-message">
+                  <span className="font-semibold">{storageStatus.tone === "warning" ? "Not saved locally." : "Local save recovered."}</span>{" "}{storageStatus.message}
+                </div>
+                {showRetrySaveAction ? (
+                  <button
+                    ref={retrySaveButtonRef}
+                    data-testid="retry-local-save"
+                    type="button"
+                    aria-describedby="storage-status-message"
+                    aria-disabled={retrySaveActionDisabled ? "true" : undefined}
+                    aria-busy={isRetryingSave ? "true" : undefined}
+                    onClick={() => {
+                      if (!retrySaveActionDisabled) void retryLocalSave();
+                    }}
+                    className="min-h-11 w-full shrink-0 rounded-xl border border-amber-200/55 bg-amber-100/10 px-4 py-2 font-semibold text-amber-50 outline-none transition hover:bg-amber-100/15 aria-disabled:cursor-wait sm:w-auto"
+                  >
+                    {isRetryingSave ? "Saving…" : "Retry saving"}
+                  </button>
+                ) : null}
+              </div>
             </div>
           ) : null}
-          <p key={announcementEvent.id} data-testid="event-status" role="status" aria-live="polite" aria-atomic="true" className="rounded-2xl border border-slate-400/35 bg-slate-950/45 px-4 py-3 text-sm text-slate-200">
+          <p ref={eventStatusRef} key={announcementEvent.id} tabIndex={-1} data-testid="event-status" role="status" aria-live="polite" aria-atomic="true" className="rounded-2xl border border-slate-400/35 bg-slate-950/45 px-4 py-3 text-sm text-slate-200 outline-none focus-visible:ring-2 focus-visible:ring-cyan-300">
             {announcementEvent.message}
           </p>
         </div>
