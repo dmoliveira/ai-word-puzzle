@@ -12,6 +12,7 @@ import {
   gameStorageKey,
   hasPortableImportUndo,
   importPortableBackup,
+  isStorageFailureRetryable,
   legacySessionStorageKey,
   maxPortableBackupBytes,
   maxV3EnvelopeBytes,
@@ -28,6 +29,7 @@ import {
   storageV3PrimaryKey,
   undoPortableImport,
   writeStoredGame,
+  type StorageFailureCode,
 } from "@/lib/session-storage";
 
 class MemoryStorage implements Storage {
@@ -602,7 +604,10 @@ test("writer rejects invalid and oversized candidates before any mutation", asyn
   duplicateProgress.history.push({ ...duplicateProgress.history[0] });
   const invalid = await writeStoredGame(invalidStorage, state, duplicateProgress, 2_000, { saveId: "save-storage-0001" });
   assert.equal(invalid.ok, false);
-  if (!invalid.ok) assert.equal(invalid.code, "candidate-invalid");
+  if (!invalid.ok) {
+    assert.equal(invalid.code, "candidate-invalid");
+    assert.equal(invalid.retryable, false);
+  }
   assert.equal(invalidStorage.writes, 0);
 
   const largeStorage = new MemoryStorage();
@@ -610,7 +615,10 @@ test("writer rejects invalid and oversized candidates before any mutation", asyn
   largeProgress.history[0].title = "é".repeat(maxV3EnvelopeBytes);
   const large = await writeStoredGame(largeStorage, state, largeProgress, 2_000, { saveId: "save-storage-0001" });
   assert.equal(large.ok, false);
-  if (!large.ok) assert.equal(large.code, "candidate-too-large");
+  if (!large.ok) {
+    assert.equal(large.code, "candidate-too-large");
+    assert.equal(large.retryable, false);
+  }
   assert.equal(largeStorage.writes, 0);
 });
 
@@ -620,8 +628,35 @@ test("concurrent revision mismatch performs no writes", async () => {
   const writes = storage.writes;
   const result = await writeStoredGame(storage, createState(), createEmptyProgress(), 3_000, { expectedSaveId: "save-stale-0000", saveId: "save-storage-0002" });
   assert.equal(result.ok, false);
-  if (!result.ok) assert.equal(result.code, "concurrent-write");
+  if (!result.ok) {
+    assert.equal(result.code, "concurrent-write");
+    assert.equal(result.retryable, false);
+  }
   assert.equal(storage.writes, writes);
+});
+
+test("storage retryability is exhaustive and commit uncertainty always fails closed", () => {
+  const expected = {
+    "storage-unavailable": false,
+    "read-denied": true,
+    "candidate-invalid": false,
+    "candidate-too-large": false,
+    "recovery-required": false,
+    "future-version": false,
+    "concurrent-write": false,
+    "lock-timeout": true,
+    "coordination-unavailable": false,
+    "quota-exceeded": true,
+    "write-denied": true,
+    "readback-mismatch": true,
+    "verification-failed": true,
+    "commit-uncertain": false,
+  } satisfies Record<StorageFailureCode, boolean>;
+
+  for (const [code, retryable] of Object.entries(expected) as Array<[StorageFailureCode, boolean]>) {
+    assert.equal(isStorageFailureRetryable(code, "unchanged"), retryable, code);
+    assert.equal(isStorageFailureRetryable(code, "commit-uncertain"), false, `${code} with uncertain preservation`);
+  }
 });
 
 test("the coordinator serializes competing writes so exactly one stale revision wins", async () => {
@@ -864,11 +899,33 @@ test("quota during primary write leaves the old committed save recoverable", asy
   if (!result.ok) {
     assert.equal(result.code, "quota-exceeded");
     assert.equal(result.stage, "primary");
+    assert.equal(result.retryable, true);
+    assert.notEqual(result.preservation, "commit-uncertain");
   }
   storage.onSet = null;
   const recovered = readStoredGame(storage, 4_000);
   assert.equal(recovered.currentAttempt?.attemptId, "attempt-first");
   assert.equal(recovered.committedSaveId, "save-storage-0001");
+});
+
+test("a failed first adoption enters recovery instead of offering an unsafe retry", async () => {
+  const storage = new MemoryStorage();
+  storage.onSet = (key) => {
+    if (key === storageV3PrimaryKey) throw new DOMException("full", "QuotaExceededError");
+  };
+
+  const result = await writeStoredGame(storage, createState(), createEmptyProgress(), 2_000, { expectedSaveId: null, saveId: "save-first-adoption" });
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.code, "recovery-required");
+    assert.equal(result.stage, "primary");
+    assert.equal(result.retryable, false);
+  }
+  storage.onSet = null;
+  const recovered = readStoredGame(storage, 3_000);
+  assert.equal(recovered.currentAttempt, null);
+  assert.equal(recovered.writable, false);
+  assert.ok(recovered.issues.includes("recovery-required"));
 });
 
 for (const fault of [
@@ -909,21 +966,41 @@ test("commit failure keeps the old marker and previous envelope authoritative", 
 
   const result = await writeStoredGame(storage, createState(2_000, "second", "attempt-second"), createEmptyProgress(), 3_000, { expectedSaveId: "save-storage-0001", saveId: "save-storage-0002" });
   assert.equal(result.ok, false);
-  if (!result.ok) assert.equal(result.stage, "commit");
+  if (!result.ok) {
+    assert.equal(result.code, "commit-uncertain");
+    assert.equal(result.stage, "commit");
+    assert.equal(result.preservation, "commit-uncertain");
+    assert.equal(result.retryable, false);
+  }
   storage.onSet = null;
   const recovered = readStoredGame(storage, 4_000);
   assert.equal(recovered.currentAttempt?.attemptId, "attempt-first");
   assert.equal(recovered.committedSaveId, "save-storage-0001");
 });
 
-test("readback corruption aborts before commit", async () => {
+test("first-adoption readback corruption enters recovery", async () => {
   const storage = new MemoryStorage();
   storage.onGet = (key, value) => key === storageV3PrimaryKey && value ? `${value} ` : value;
   const result = await writeStoredGame(storage, createState(), createEmptyProgress(), 2_000, { saveId: "save-storage-0001" });
   assert.equal(result.ok, false);
   if (!result.ok) {
+    assert.equal(result.code, "recovery-required");
+    assert.equal(result.stage, "primary");
+    assert.equal(result.retryable, false);
+  }
+});
+
+test("readback corruption remains retryable when a previous commit is authoritative", async () => {
+  const storage = new MemoryStorage();
+  assert.equal((await writeStoredGame(storage, createState(1_000, "first", "attempt-first"), createEmptyProgress(), 2_000, { saveId: "save-storage-0001" })).ok, true);
+  storage.onGet = (key, value) => key === storageV3PrimaryKey && value?.includes("save-storage-0002") ? `${value} ` : value;
+  const result = await writeStoredGame(storage, createState(2_000, "second", "attempt-second"), createEmptyProgress(), 3_000, { expectedSaveId: "save-storage-0001", saveId: "save-storage-0002" });
+  assert.equal(result.ok, false);
+  if (!result.ok) {
     assert.equal(result.code, "verification-failed");
     assert.equal(result.stage, "primary");
+    assert.equal(result.preservation, "previous-valid");
+    assert.equal(result.retryable, true);
   }
 });
 

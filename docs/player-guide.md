@@ -61,7 +61,7 @@ Word review presents only structural facts—answer, topic, and length—plus an
 
 The current attempt and recent progress are stored in `localStorage` for this site's exact origin. There is no account, analytics database, cloud sync, or recovery service.
 
-The visible event center announces gameplay, sharing, import, and save outcomes without announcing timer ticks. A local-save warning remains visible until a later write is verified. High-contrast and forced-colors modes retain explicit focus, selection, solved, and error boundaries.
+The visible event center announces gameplay, sharing, import, and save outcomes without announcing timer ticks. A retryable local-save warning offers **Retry saving** and remains visible until the newest in-tab attempt is written and verified; read-only, stale-tab, invalid-record, and uncertain-commit warnings never offer an unsafe retry. High-contrast and forced-colors modes retain explicit focus, selection, solved, and error boundaries.
 
 Clearing site data, using private browsing, changing browsers/devices, or moving to a different domain removes or separates the visible record. A future custom-domain migration also changes the storage origin, so progress from the GitHub Pages URL will not automatically follow.
 

@@ -74,6 +74,31 @@ async function openWordReview(page: Page) {
   await expect(page.getByTestId("review-word-answer")).toBeVisible();
 }
 
+async function holdStorageCommitLock(page: Page) {
+  await page.evaluate(() => {
+    if (!navigator.locks) throw new Error("Storage retry timing test requires Web Locks.");
+    const runtimeWindow = window as typeof window & {
+      __astraStorageLockHeld?: boolean;
+      __astraReleaseStorageLock?: () => void;
+    };
+    let release!: () => void;
+    const blocker = new Promise<void>((resolve) => { release = resolve; });
+    runtimeWindow.__astraStorageLockHeld = false;
+    runtimeWindow.__astraReleaseStorageLock = release;
+    void navigator.locks.request("astra-lexa:v3:commit", { mode: "exclusive" }, async () => {
+      runtimeWindow.__astraStorageLockHeld = true;
+      await blocker;
+      runtimeWindow.__astraStorageLockHeld = false;
+    });
+  });
+  await expect.poll(() => page.evaluate(() => Boolean((window as typeof window & { __astraStorageLockHeld?: boolean }).__astraStorageLockHeld))).toBe(true);
+}
+
+async function releaseStorageCommitLock(page: Page) {
+  await page.evaluate(() => (window as typeof window & { __astraReleaseStorageLock?: () => void }).__astraReleaseStorageLock?.());
+  await expect.poll(() => page.evaluate(() => Boolean((window as typeof window & { __astraStorageLockHeld?: boolean }).__astraStorageLockHeld))).toBe(false);
+}
+
 async function solveRunFromPersistedFixture(page: Page) {
   await expect.poll(() => page.evaluate((key) => window.localStorage.getItem(key) !== null, sessionStorageKey)).toBe(true);
   const answers = await page.evaluate((key) => {
@@ -781,6 +806,7 @@ test("two tabs serialize the same base revision and reject one stale writer", as
   const pageStatuses = await Promise.all(pages.map((candidate) => candidate.getByTestId("storage-status").allTextContents()));
   const rejectedIndex = pageStatuses.findIndex((statuses) => statuses.some((status) => /another tab changed this local save/i.test(status)));
   expect(rejectedIndex).toBeGreaterThanOrEqual(0);
+  await expect(pages[rejectedIndex].getByRole("button", { name: "Retry saving" })).toHaveCount(0);
   const canonicalSeed = await page.evaluate((key) => {
     const raw = window.localStorage.getItem(key);
     return raw ? (JSON.parse(raw) as { branches: { attempt: { value: { run: { seed: string } } } } }).branches.attempt.value.run.seed : null;
@@ -1043,7 +1069,7 @@ test("replacement write failure leaves the source run and storage unchanged", as
   });
 });
 
-test("autosave failure stays visible and clears only after a verified retry", async ({ page }) => {
+test("explicit save retry persists the latest attempt and preserves deliberate focus", async ({ page }) => {
   await openPuzzle(page);
   await expect(page.getByRole("status")).toHaveCount(1);
   await readStoredAttempt(page);
@@ -1057,7 +1083,12 @@ test("autosave failure stays visible and clears only after a verified retry", as
 
   const input = page.getByTestId("active-answer-input");
   await input.fill("ab");
+  await expect(input).toBeFocused();
   await expect(page.getByTestId("storage-status")).toContainText(/not saved locally.*storage is full/i);
+  const retry = page.getByRole("button", { name: "Retry saving" });
+  await expect(retry).toBeVisible();
+  expect((await retry.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+  await expect(retry).toHaveAttribute("aria-describedby", "storage-status-message");
   const warningText = await page.getByTestId("storage-status").textContent();
   await page.getByRole("button", { name: "Next clue" }).click();
   await expect(page.getByTestId("storage-status")).toHaveText(warningText!);
@@ -1067,6 +1098,51 @@ test("autosave failure stays visible and clears only after a verified retry", as
   await expect(page.getByTestId("event-status")).toHaveText(eventBeforeTick!);
   await expect(page.getByRole("heading", { name: "Facts currently in this tab" })).toBeVisible();
 
+  await retry.click();
+  await expect(page.getByTestId("storage-status")).toBeVisible();
+  await expect(page.getByTestId("event-status")).toContainText(/still not saved locally.*storage is full/i);
+  await expect(retry).toBeFocused();
+
+  await page.evaluate(() => {
+    const runtimeWindow = window as typeof window & {
+      __astraOriginalSetItem?: Storage["setItem"];
+      __astraRetrySetItemCount?: number;
+    };
+    if (runtimeWindow.__astraOriginalSetItem) {
+      Storage.prototype.setItem = runtimeWindow.__astraOriginalSetItem;
+      delete runtimeWindow.__astraOriginalSetItem;
+    }
+    const restoredSetItem = Storage.prototype.setItem;
+    runtimeWindow.__astraRetrySetItemCount = 0;
+    Storage.prototype.setItem = function (...args) {
+      runtimeWindow.__astraRetrySetItemCount = (runtimeWindow.__astraRetrySetItemCount ?? 0) + 1;
+      return restoredSetItem.apply(this, args);
+    };
+  });
+  await holdStorageCommitLock(page);
+  await retry.click();
+  const pendingRetry = page.getByTestId("retry-local-save");
+  await expect(pendingRetry).toHaveText("Saving…");
+  await expect(pendingRetry).toHaveAttribute("aria-busy", "true");
+  await expect(pendingRetry).toHaveAttribute("aria-disabled", "true");
+  await pendingRetry.evaluate((button: HTMLButtonElement) => button.click());
+  await releaseStorageCommitLock(page);
+
+  await expect(page.getByTestId("storage-status")).toBeHidden();
+  await expect(page.getByTestId("event-status")).toHaveText("Progress saved locally.");
+  await expect(page.getByTestId("event-status")).toBeFocused();
+  await expect(page.getByRole("status")).toHaveCount(1);
+  expect(await page.evaluate(() => (window as typeof window & { __astraRetrySetItemCount?: number }).__astraRetrySetItemCount)).toBe(4);
+  const saved = await readStoredAttempt(page);
+  expect(Object.keys(saved.cellEntries).length).toBeGreaterThan(0);
+
+  await page.evaluate(() => {
+    const runtimeWindow = window as typeof window & { __astraOriginalSetItem?: Storage["setItem"] };
+    runtimeWindow.__astraOriginalSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = () => { throw new DOMException("Storage full", "QuotaExceededError"); };
+  });
+  await input.fill("cd");
+  await expect(page.getByRole("button", { name: "Retry saving" })).toBeVisible();
   await page.evaluate(() => {
     const runtimeWindow = window as typeof window & { __astraOriginalSetItem?: Storage["setItem"] };
     if (runtimeWindow.__astraOriginalSetItem) {
@@ -1074,10 +1150,18 @@ test("autosave failure stays visible and clears only after a verified retry", as
       delete runtimeWindow.__astraOriginalSetItem;
     }
   });
-  await input.fill("abc");
-
+  await holdStorageCommitLock(page);
+  await page.getByRole("button", { name: "Retry saving" }).click();
+  const nextClue = page.getByRole("button", { name: "Next clue" });
+  await nextClue.focus();
+  await releaseStorageCommitLock(page);
   await expect(page.getByTestId("storage-status")).toBeHidden();
-  await expect.poll(async () => Object.keys((await readStoredAttempt(page)).cellEntries).length).toBeGreaterThan(0);
+  await expect(nextClue).toBeFocused();
+  const savedWithMovedFocus = await readStoredAttempt(page);
+
+  await page.reload();
+  await expect(page.locator('main[data-hydrated="true"][data-run-state="attempt"]')).toBeVisible();
+  expect((await readStoredAttempt(page)).cellEntries).toEqual(savedWithMovedFocus.cellEntries);
 });
 
 test("corrupt newest v3 save restores the previous verified envelope visibly", async ({ page }) => {
@@ -1129,6 +1213,7 @@ test("a verified pending first adoption restores read-only instead of stale v2",
 
   await expect(page.locator('main[data-hydrated="true"][data-run-state="attempt"]')).toBeVisible();
   await expect(page.getByTestId("storage-status")).toContainText(/verified interrupted save was restored read-only/i);
+  await expect(page.getByRole("button", { name: "Retry saving" })).toHaveCount(0);
   expect((await readStoredAttempt(page)).attemptId).toBe(pendingAttemptId);
   expect((await readStoredAttempt(page)).attemptId).not.toBe("attempt-stale-v2");
   const canonicalBeforeEdit = await page.evaluate((key) => window.localStorage.getItem(key), sessionStorageKey);

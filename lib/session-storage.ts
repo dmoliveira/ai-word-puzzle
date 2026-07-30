@@ -83,6 +83,30 @@ export type StorageWriteResult =
     retryable: boolean;
   };
 
+const storageFailureRetryability = {
+  "storage-unavailable": false,
+  "read-denied": true,
+  "candidate-invalid": false,
+  "candidate-too-large": false,
+  "recovery-required": false,
+  "future-version": false,
+  "concurrent-write": false,
+  "lock-timeout": true,
+  "coordination-unavailable": false,
+  "quota-exceeded": true,
+  "write-denied": true,
+  "readback-mismatch": true,
+  "verification-failed": true,
+  "commit-uncertain": false,
+} satisfies Record<StorageFailureCode, boolean>;
+
+export function isStorageFailureRetryable(
+  code: StorageFailureCode,
+  preservation: Exclude<StorageWriteResult, { ok: true }>["preservation"],
+) {
+  return preservation !== "commit-uncertain" && storageFailureRetryability[code];
+}
+
 export type PagehideStageResult =
   | { ok: true; key: string }
   | { ok: false; code: "candidate-invalid" | "candidate-too-large" | "quota-exceeded" | "write-denied" | "readback-mismatch" };
@@ -1379,7 +1403,7 @@ function writeFailure(
   stage: Exclude<StorageWriteResult, { ok: true }>["stage"],
   preservation: Exclude<StorageWriteResult, { ok: true }>["preservation"] = "unchanged",
 ): Exclude<StorageWriteResult, { ok: true }> {
-  return { ok: false, code, stage, preservation, retryable: !["future-version", "commit-uncertain", "recovery-required"].includes(code) };
+  return { ok: false, code, stage, preservation, retryable: isStorageFailureRetryable(code, preservation) };
 }
 
 function commitRawEnvelopeUnlocked(
@@ -1446,9 +1470,15 @@ function commitRawEnvelopeUnlocked(
   const prepareRaw = JSON.stringify(prepareMarker);
   try {
     storage.setItem(storageV3CommitKey, prepareRaw);
-    if (storage.getItem(storageV3CommitKey) !== prepareRaw) return writeFailure("readback-mismatch", "prepare", base ? "previous-valid" : "unchanged");
   } catch (error) {
     return writeFailure(classifyStorageError(error), "prepare", base ? "previous-valid" : "unchanged");
+  }
+  try {
+    if (storage.getItem(storageV3CommitKey) !== prepareRaw) {
+      return base ? writeFailure("readback-mismatch", "prepare", "previous-valid") : writeFailure("recovery-required", "prepare");
+    }
+  } catch {
+    return base ? writeFailure("read-denied", "prepare", "previous-valid") : writeFailure("recovery-required", "prepare");
   }
 
   try {
@@ -1456,10 +1486,10 @@ function commitRawEnvelopeUnlocked(
     const readback = storage.getItem(storageV3PrimaryKey);
     const verified = decodeV3Envelope(readback, nowMs);
     if (readback !== candidateRaw || !verified?.full || verified.saveId !== saveId) {
-      return writeFailure("verification-failed", "primary", base ? "previous-valid" : "unchanged");
+      return base ? writeFailure("verification-failed", "primary", "previous-valid") : writeFailure("recovery-required", "primary");
     }
   } catch (error) {
-    return writeFailure(classifyStorageError(error), "primary", base ? "previous-valid" : "unchanged");
+    return base ? writeFailure(classifyStorageError(error), "primary", "previous-valid") : writeFailure("recovery-required", "primary");
   }
 
   try {
@@ -1472,8 +1502,8 @@ function commitRawEnvelopeUnlocked(
   try {
     storage.setItem(storageV3CommitKey, committedRaw);
     if (storage.getItem(storageV3CommitKey) !== committedRaw) return writeFailure("commit-uncertain", "commit", "commit-uncertain");
-  } catch (error) {
-    return writeFailure(classifyStorageError(error), "commit", base ? "previous-valid" : "unchanged");
+  } catch {
+    return writeFailure("commit-uncertain", "commit", "commit-uncertain");
   }
   return { ok: true, saveId, bytes };
 }
