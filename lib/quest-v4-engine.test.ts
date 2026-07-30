@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import { buildPuzzleRun } from "@/lib/puzzle-generator";
+import { buildQuestPuzzleRun } from "@/lib/quest-puzzle-generator";
 import {
   certifyQuestV4Board,
   findQuestV4Occurrences,
@@ -228,7 +228,7 @@ test("the hidden Quest v4 matrix certifies every return and freezes explicit imp
       for (const puzzleSize of [4, 8, 12]) {
         for (let seedIndex = 0; seedIndex < matrixSeedCount; seedIndex += 1) {
           const seed = `quest-v4-${topic.id}-${challenge}-${puzzleSize}-${seedIndex}`;
-          const run = buildPuzzleRun(
+          const run = buildQuestPuzzleRun(
             { mode: "custom", seed, topics: [topic.id], challenge, puzzleSize, boardView: "quest" },
             Date.now(),
             { generatorVersion: 3 },
@@ -273,7 +273,7 @@ test("every themed content pack is certified or fails explicitly when exact occu
   for (const pack of contentCatalog) {
     const puzzleSize = Math.min(12, pack.answers.length);
     const seed = `quest-v4-pack-${pack.id}`;
-    const run = buildPuzzleRun({
+    const run = buildQuestPuzzleRun({
       mode: "custom",
       seed,
       topics: [pack.topicId],

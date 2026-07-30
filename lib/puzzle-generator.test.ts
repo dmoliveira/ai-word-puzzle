@@ -3,6 +3,8 @@ import test from "node:test";
 import type { PuzzleOptions, PuzzleRun } from "@/lib/game-types";
 import { crosswordContentPackIds, crosswordTopicIds, getEditorialClueCount } from "@/lib/clue-catalog";
 import { buildPuzzleRun, createHintLadder, PuzzleGenerationError, sanitizeGuess, scoreDifficultyMatch } from "@/lib/puzzle-generator";
+import { buildQuestPuzzleRun } from "@/lib/quest-puzzle-generator";
+import { questWordBank } from "@/lib/quest-word-bank";
 import { contentCatalog, topicCatalog, wordBank } from "@/lib/word-bank";
 import { isPuzzleBoardV3, isQuestV4Board } from "@/lib/puzzle-board";
 import { certifyQuestV4Board } from "@/lib/quest-v4-engine";
@@ -134,7 +136,7 @@ test("daily generation is deterministic across representative calendar seeds", (
 
 test("trace-path mode preserves the broad topic catalog with exact 14×14 boards", () => {
   for (const topic of topicCatalog) {
-    const run = buildPuzzleRun({
+    const run = buildQuestPuzzleRun({
       mode: "custom",
       seed: `trace-${topic.id}`,
       topics: [topic.id],
@@ -159,7 +161,7 @@ test("every content pack is certified or fails explicitly without a v3 fallback"
   for (const pack of contentCatalog) {
     const puzzleSize = Math.min(12, pack.answers.length);
     try {
-      const run = buildPuzzleRun({
+      const run = buildQuestPuzzleRun({
         mode: "custom",
         seed: `trace-pack-${pack.id}`,
         topics: [pack.topicId],
@@ -183,6 +185,10 @@ test("every content pack is certified or fails explicitly without a v3 fallback"
 
 test("unsupported crossword options fail explicitly instead of mutating the request", () => {
   assert.throws(
+    () => buildPuzzleRun({ topics: ["myth"], boardView: "quest", puzzleSize: 6 }),
+    (error: unknown) => error instanceof PuzzleGenerationError && error.code === "unsupported-content" && /lazily loaded Quest lexicon/.test(error.message),
+  );
+  assert.throws(
     () => buildPuzzleRun({ topics: ["city"], boardView: "crossword", puzzleSize: 6 }),
     (error: unknown) => error instanceof PuzzleGenerationError && error.code === "unsupported-content",
   );
@@ -197,7 +203,7 @@ test("unsupported crossword options fail explicitly instead of mutating the requ
 });
 
 test("content-pack membership is scoped by owning topic", () => {
-  const signals = wordBank.filter((word) => word.normalized === "signal" && ["cosmos", "city", "invent"].includes(word.topicId));
+  const signals = questWordBank.filter((word) => word.normalized === "signal" && ["cosmos", "city", "invent"].includes(word.topicId));
   assert.ok(signals.length >= 3);
   for (const signal of signals) {
     const packTopics = signal.contentPackIds.map((packId) => contentCatalog.find((pack) => pack.id === packId)!.topicId);
@@ -208,8 +214,8 @@ test("content-pack membership is scoped by owning topic", () => {
 test("crossword catalog is editorial while broad trace content remains available", () => {
   assert.equal(getEditorialClueCount(), 54);
   assert.equal(new Set(wordBank.filter((word) => word.qualityStatus === "approved").map((word) => `${word.topicId}:${word.normalized}`)).size, 52, "two-letter Greek entries stay out of the playable bank");
-  assert.ok(wordBank.length >= 2_500, "trace mode retains the extended local lexicon");
-  assert.ok(wordBank.some((word) => word.source === "synthetic"));
+  assert.ok(questWordBank.length >= 3_500, "the lazy Quest path retains the extended local lexicon");
+  assert.ok(questWordBank.some((word) => word.source === "synthetic"));
 });
 
 test("exact challenge match scores above adjacent and distant entries", () => {

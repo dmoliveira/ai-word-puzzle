@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import type { PuzzleOptions, PuzzlePlacement } from "@/lib/game-types";
 import { buildPuzzleRun } from "@/lib/puzzle-generator";
+import { buildQuestPuzzleRun } from "@/lib/quest-puzzle-generator";
 import { parseSharedOptions } from "@/lib/puzzle-options";
 import { isPuzzleBoardV3 } from "@/lib/puzzle-board";
 
@@ -28,6 +29,12 @@ function digestBoard(board: ReturnType<typeof buildPuzzleRun>["board"]) {
   return createHash("sha256").update(JSON.stringify(board)).digest("hex");
 }
 
+function buildV3(options: PuzzleOptions) {
+  return options.boardView === "quest"
+    ? buildQuestPuzzleRun(options, Date.now(), { generatorVersion: 3 })
+    : buildPuzzleRun(options, Date.now(), { generatorVersion: 3 });
+}
+
 function toSharedSearch(options: PuzzleOptions, includeVersion = true) {
   const params = new URLSearchParams({
     mode: options.mode,
@@ -48,7 +55,7 @@ function toSharedSearch(options: PuzzleOptions, includeVersion = true) {
 
 for (const golden of goldens) {
   test(`generator v3 golden remains exact: ${golden.name}`, () => {
-    const run = buildPuzzleRun(golden.input, Date.now(), { generatorVersion: 3 });
+    const run = buildV3(golden.input);
 
     assert.equal(run.generatorVersion, golden.expected.generatorVersion);
     assert.equal(run.puzzleId, golden.expected.puzzleId);
@@ -64,7 +71,9 @@ for (const golden of goldens) {
     assert.equal(parsed.kind, "valid");
     if (parsed.kind !== "valid") return;
 
-    const run = buildPuzzleRun(parsed.options, Date.now(), { generatorVersion: parsed.generatorVersion });
+    const run = parsed.options.boardView === "quest"
+      ? buildQuestPuzzleRun(parsed.options, Date.now(), { generatorVersion: parsed.generatorVersion })
+      : buildPuzzleRun(parsed.options, Date.now(), { generatorVersion: parsed.generatorVersion });
     assert.equal(run.puzzleId, golden.expected.puzzleId);
     assert.equal(digestBoard(run.board), golden.expected.boardDigest);
   });
@@ -76,7 +85,7 @@ test("an unversioned legacy share remains generator v3", () => {
   assert.equal(parsed.kind, "valid");
   if (parsed.kind !== "valid") return;
 
-  const run = buildPuzzleRun(parsed.options, Date.now(), { generatorVersion: parsed.generatorVersion });
+  const run = buildQuestPuzzleRun(parsed.options, Date.now(), { generatorVersion: parsed.generatorVersion });
   assert.equal(run.generatorVersion, 3);
   assert.equal(run.puzzleId, golden.expected.puzzleId);
   assert.equal(digestBoard(run.board), golden.expected.boardDigest);

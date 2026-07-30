@@ -3,6 +3,7 @@ import { buildPuzzleRun, PuzzleGenerationError } from "@/lib/puzzle-generator";
 import { getCanonicalDailyOptions, type SharedOptionsResult } from "@/lib/puzzle-options";
 import { createPreparedRunState, setAttemptVisibility } from "@/lib/run-state";
 import { prepareStoredAttempt, shouldRestoreAttempt, type StoredGameResult } from "@/lib/session-storage";
+import { buildRunForOptions } from "@/lib/run-builder";
 
 export type BootstrapSource = "stored" | "shared" | "current-daily" | "explicit";
 
@@ -100,6 +101,58 @@ export function resolveStudioBootstrap({
       : null,
     resolvedAtMs: nowMs,
   };
+}
+
+export async function resolveStudioBootstrapAsync(
+  input: {
+    stored: StoredGameResult;
+    shared: SharedOptionsResult;
+    nowMs: number;
+    visible?: boolean;
+  },
+  signal?: AbortSignal,
+): Promise<StudioBootstrap> {
+  const { stored, shared, nowMs, visible = true } = input;
+  const dailyOptions = getCanonicalDailyOptions(nowMs);
+  const daily = prepare(dailyOptions, nowMs);
+  if (stored.currentAttempt && shouldRestoreAttempt(stored.currentAttempt, daily.run.puzzleId)) {
+    return resolveStudioBootstrap(input);
+  }
+  if (shared.kind !== "valid" || shared.options.boardView !== "quest") {
+    return resolveStudioBootstrap(input);
+  }
+
+  const progress = stored.progress;
+  try {
+    const run = await buildRunForOptions(shared.options, nowMs, { generatorVersion: shared.generatorVersion }, signal);
+    const current = createPreparedRunState(run);
+    if (shared.expectedProvenance && (run.generatorVersion !== shared.expectedProvenance.generatorVersion
+      || run.corpusRevision !== shared.expectedProvenance.corpusRevision
+      || run.fingerprintVersion !== shared.expectedProvenance.fingerprintVersion
+      || run.puzzleFingerprint !== shared.expectedProvenance.puzzleFingerprint)) {
+      return {
+        current: daily,
+        builderOptions: daily.run.options,
+        progress,
+        source: "current-daily",
+        warning: "That shared puzzle did not match its expected fingerprint, so nothing was replaced.",
+        resolvedAtMs: nowMs,
+      };
+    }
+    return { current, builderOptions: run.options, progress, source: "shared", warning: null, resolvedAtMs: nowMs };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return {
+      current: daily,
+      builderOptions: daily.run.options,
+      progress,
+      source: "current-daily",
+      warning: error instanceof PuzzleGenerationError
+        ? `That shared puzzle could not be generated: ${error.message}`
+        : "That shared puzzle could not be opened, so today’s puzzle is ready instead.",
+      resolvedAtMs: nowMs,
+    };
+  }
 }
 
 export function refreshPreparedDaily(current: CurrentRunState, source: BootstrapSource, nowMs: number) {

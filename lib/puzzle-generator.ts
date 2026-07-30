@@ -124,19 +124,19 @@ function isEligibleEntry(entry: PuzzleWord, options: PuzzleOptions, contentPack:
     : true;
 }
 
-function countEligibleAnswers(pack: ContentPack, options: PuzzleOptions) {
-  return new Set(wordBank.filter((entry) => isEligibleEntry(entry, options, pack)).map((entry) => entry.normalized)).size;
+function countEligibleAnswers(pack: ContentPack, options: PuzzleOptions, sourceWords: readonly PuzzleWord[]) {
+  return new Set(sourceWords.filter((entry) => isEligibleEntry(entry, options, pack)).map((entry) => entry.normalized)).size;
 }
 
-function getContentPackCandidates(options: PuzzleOptions, minimumSize = 1) {
+function getContentPackCandidates(options: PuzzleOptions, sourceWords: readonly PuzzleWord[], minimumSize = 1) {
   const topics: TopicId[] = options.topics;
   const topicSet = new Set(topics);
   return contentCatalog
     .filter((pack) => topicSet.has(pack.topicId))
-    .filter((pack) => countEligibleAnswers(pack, options) >= minimumSize);
+    .filter((pack) => countEligibleAnswers(pack, options, sourceWords) >= minimumSize);
 }
 
-function resolveContentPack(options: PuzzleOptions, seed: string) {
+function resolveContentPack(options: PuzzleOptions, seed: string, sourceWords: readonly PuzzleWord[]) {
   if (options.puzzleFamily !== "themed") {
     return null;
   }
@@ -147,11 +147,11 @@ function resolveContentPack(options: PuzzleOptions, seed: string) {
       return null;
     }
 
-    const eligibleCount = countEligibleAnswers(explicitPack, options);
+    const eligibleCount = countEligibleAnswers(explicitPack, options, sourceWords);
     return eligibleCount >= options.puzzleSize ? explicitPack : null;
   }
 
-  const candidates = getContentPackCandidates(options, options.puzzleSize);
+  const candidates = getContentPackCandidates(options, sourceWords, options.puzzleSize);
   if (candidates.length === 0) {
     return null;
   }
@@ -159,12 +159,12 @@ function resolveContentPack(options: PuzzleOptions, seed: string) {
   return candidates[hashString(`${seed}:${options.challenge}:content-pack`) % candidates.length];
 }
 
-function resolveFeaturedContentPack(options: PuzzleOptions, seed: string) {
+function resolveFeaturedContentPack(options: PuzzleOptions, seed: string, sourceWords: readonly PuzzleWord[]) {
   if (options.puzzleFamily === "themed") {
-    return resolveContentPack(options, seed);
+    return resolveContentPack(options, seed, sourceWords);
   }
 
-  const candidates = getContentPackCandidates(options, Math.min(options.puzzleSize, 4));
+  const candidates = getContentPackCandidates(options, sourceWords, Math.min(options.puzzleSize, 4));
   if (candidates.length === 0) {
     return null;
   }
@@ -221,7 +221,7 @@ export class PuzzleGenerationError extends Error {
   }
 }
 
-export type PuzzleGenerationRequest = { generatorVersion?: 3 | 4 };
+export type PuzzleGenerationRequest = { generatorVersion?: 3 | 4; sourceWords?: readonly PuzzleWord[] };
 
 export function buildPuzzleRun(input: Partial<PuzzleOptions> = {}, nowMs = Date.now(), request: PuzzleGenerationRequest = {}): PuzzleRun {
   const requestedBoardView = input.boardView ?? "crossword";
@@ -248,17 +248,21 @@ export function buildPuzzleRun(input: Partial<PuzzleOptions> = {}, nowMs = Date.
 
   const resolvedSeed = resolveModeSeed(options.mode, options.seed, nowMs);
   const generatorVersion = request.generatorVersion ?? (options.boardView === "quest" ? 4 : 3);
+  const sourceWords = request.sourceWords ?? wordBank;
+  if (options.boardView === "quest" && !request.sourceWords) {
+    throw new PuzzleGenerationError("unsupported-content", "Quest generation requires the lazily loaded Quest lexicon.");
+  }
   if (generatorVersion === 4 && options.boardView !== "quest") {
     throw new PuzzleGenerationError("unsupported-content", "Generator v4 is available only for Quest boards.");
   }
-  const resolvedContentPack = resolveContentPack(options, resolvedSeed);
+  const resolvedContentPack = resolveContentPack(options, resolvedSeed, sourceWords);
   if (options.puzzleFamily === "themed" && !resolvedContentPack) {
     throw new PuzzleGenerationError("unsupported-content", "That themed pack cannot support the selected puzzle size.");
   }
 
-  const featuredContentPack = resolveFeaturedContentPack(options, resolvedSeed);
+  const featuredContentPack = resolveFeaturedContentPack(options, resolvedSeed, sourceWords);
   const uniqueAnswers = new Map<string, PuzzleWord>();
-  for (const entry of wordBank) {
+  for (const entry of sourceWords) {
     if (!isEligibleEntry(entry, options, resolvedContentPack)) {
       continue;
     }

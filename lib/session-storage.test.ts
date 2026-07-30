@@ -3,6 +3,7 @@ import test from "node:test";
 import type { ProgressSnapshot } from "@/lib/game-types";
 import { createEmptyProgress, recordRunProgress } from "@/lib/progress";
 import { buildPuzzleRun } from "@/lib/puzzle-generator";
+import { buildQuestPuzzleRun } from "@/lib/quest-puzzle-generator";
 import { getRunTargetCells } from "@/lib/puzzle-board";
 import { buildAssistRecap, createAttemptFromRun, finalizeAttempt, recordHintStep, recordRevealedCell, snapshotAttempt } from "@/lib/run-state";
 import {
@@ -76,7 +77,7 @@ function createState(nowMs = 1_000, seed = "storage-tests", attemptId = "attempt
 }
 
 function createQuestV4State(nowMs = 1_000, seed = "trace-myth", attemptId = "attempt-quest-v4") {
-  const run = buildPuzzleRun({ mode: "custom", seed, topics: ["myth"], puzzleSize: 6, boardView: "quest" }, nowMs);
+  const run = buildQuestPuzzleRun({ mode: "custom", seed, topics: ["myth"], puzzleSize: 6, boardView: "quest" }, nowMs);
   return createAttemptFromRun(run, nowMs, attemptId);
 }
 
@@ -114,6 +115,31 @@ test("Quest v4 writes attempt schema 4 and restores only a certified native boar
     const corruptRead = readStoredGame(corruptStorage, 2_000);
     assert.equal(corruptRead.currentAttempt, null);
     assert.ok(corruptRead.issues.includes("attempt-unavailable"));
+  }
+});
+
+test("lexicon-backed Quest v3 and v4 attempts remain synchronously storage-compatible", () => {
+  for (const generatorVersion of [3, 4] as const) {
+    const run = buildQuestPuzzleRun({
+      mode: "custom",
+      seed: "lex-0",
+      topics: ["story"],
+      puzzleSize: 12,
+      boardView: "quest",
+      puzzleFamily: "classic",
+      challenge: "mythic",
+    }, 1_000, { generatorVersion });
+    assert.deepEqual(run.words.filter((word) => word.source === "lexicon").map((word) => word.answer), ["cobblestone", "countryside", "orchardgate"]);
+    const state = createAttemptFromRun(run, 1_000, `attempt-lexicon-v${generatorVersion}`);
+    const raw = serializeStoredGame(state, createEmptyProgress(), 2_000, `save-lexicon-v${generatorVersion}`);
+    const storage = new MemoryStorage();
+    commitRaw(storage, raw);
+
+    const restored = readStoredGame(storage, 2_000).currentAttempt;
+    assert.ok(restored);
+    assert.equal(restored.run.generatorVersion, generatorVersion);
+    assert.deepEqual(restored.run.words, run.words);
+    assert.equal(restored.run.puzzleFingerprint, run.puzzleFingerprint);
   }
 });
 

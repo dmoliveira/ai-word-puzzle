@@ -50,12 +50,13 @@ import {
   deriveGuessFromCells,
   type EntryTransaction,
 } from "@/lib/studio/attempt-entries";
-import { refreshPreparedDaily, resolveStudioBootstrap, type BootstrapSource } from "@/lib/studio/bootstrap";
+import { refreshPreparedDaily, resolveStudioBootstrapAsync, type BootstrapSource } from "@/lib/studio/bootstrap";
 import { needsRunReplacementConfirmation, replaceRunTransaction } from "@/lib/studio/run-replacement";
-import { canReplaySummaryExactly, resolveSavedRunReplay } from "@/lib/studio/replay";
+import { getSavedReplayActionLabel, resolveSavedRunReplay } from "@/lib/studio/replay";
 import { getThemeStyle, themeStyles } from "@/lib/themes";
-import { contentCatalog, topicCatalog, wordBank } from "@/lib/word-bank";
+import { contentCatalog, topicCatalog } from "@/lib/word-bank";
 import { canonicalEndpointKey, getRunGridLetter, getRunPathEndpointKey, getRunTargetCells, getRunWordPath, getRunWordPaths, type RunWordPath } from "@/lib/puzzle-board";
+import { buildRunForOptions } from "@/lib/run-builder";
 
 type ToastTone = "success" | "muted";
 type HistoryFilterMode = "all" | "daily" | "custom";
@@ -79,6 +80,7 @@ type PendingRunReplacement = {
   options: PuzzleOptions;
   expectedProvenance: SharedPuzzleProvenance | null;
   intent: "options" | "today-daily" | "random-custom";
+  verifiedRun: PuzzleRun | null;
 };
 type StorageStatus = {
   tone: "warning" | "recovered";
@@ -480,6 +482,7 @@ export function WordPuzzleStudio() {
   const replacementRequestRef = useRef<PendingRunReplacement | null>(null);
   const replacementLockRef = useRef(false);
   const replacementCommitInFlightRef = useRef(false);
+  const replayVerificationControllerRef = useRef<AbortController | null>(null);
   const importDialogRef = useRef<HTMLDialogElement | null>(null);
   const importCancelRef = useRef<HTMLButtonElement | null>(null);
   const importFileRef = useRef<HTMLInputElement | null>(null);
@@ -578,11 +581,11 @@ export function WordPuzzleStudio() {
     storageSaveQueueRef.current = operation.then(() => undefined, () => undefined);
     return operation;
   }, []);
-  const lexiconSize = wordBank.length;
   const theme = getThemeStyle(state.run.options.style);
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     const handle = window.setTimeout(async () => {
       const nowMs = readNow();
       storageWriterIdRef.current ||= globalThis.crypto?.randomUUID?.() ?? `${nowMs.toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -590,7 +593,11 @@ export function WordPuzzleStudio() {
       if (cancelled) return;
       const stored = readStoredGame(window.localStorage, nowMs);
       const shared = parseSharedOptions(window.location.search, nowMs);
-      const resolved = resolveStudioBootstrap({ stored, shared, nowMs, visible: !document.hidden });
+      const resolved = await resolveStudioBootstrapAsync({ stored, shared, nowMs, visible: !document.hidden }, controller.signal).catch((error) => {
+        if (controller.signal.aborted) return null;
+        throw error;
+      });
+      if (cancelled || !resolved) return;
 
       stateRef.current = resolved.current;
       progressRef.current = resolved.progress;
@@ -615,9 +622,12 @@ export function WordPuzzleStudio() {
 
     return () => {
       cancelled = true;
+      controller.abort();
       window.clearTimeout(handle);
     };
   }, [updatePortableUndoAvailability]);
+
+  useEffect(() => () => replayVerificationControllerRef.current?.abort(), []);
 
   useEffect(() => {
     stateRef.current = state;
@@ -1112,8 +1122,8 @@ export function WordPuzzleStudio() {
     const result = await replaceRunTransaction({
       current: stateRef.current,
       progress: progressRef.current,
-      buildRun: (transitionNowMs) => {
-        const run = buildPuzzleRun(requestOptions, transitionNowMs, { generatorVersion: request.expectedProvenance?.generatorVersion });
+      buildRun: async (transitionNowMs) => {
+        const run = request.verifiedRun ?? await buildRunForOptions(requestOptions, transitionNowMs, { generatorVersion: request.expectedProvenance?.generatorVersion });
         if (request.expectedProvenance && (run.generatorVersion !== request.expectedProvenance.generatorVersion
           || run.corpusRevision !== request.expectedProvenance.corpusRevision
           || run.fingerprintVersion !== request.expectedProvenance.fingerprintVersion
@@ -1176,7 +1186,10 @@ export function WordPuzzleStudio() {
     nextOptions = options,
     expectedProvenance: SharedPuzzleProvenance | null = null,
     intent: PendingRunReplacement["intent"] = "options",
+    verifiedRun: PuzzleRun | null = null,
   ) {
+    replayVerificationControllerRef.current?.abort();
+    replayVerificationControllerRef.current = null;
     if (replacementLockRef.current) {
       return;
     }
@@ -1188,7 +1201,7 @@ export function WordPuzzleStudio() {
       return;
     }
 
-    const request = { options: normalizeOptions(nextOptions), expectedProvenance, intent };
+    const request = { options: normalizeOptions(nextOptions), expectedProvenance, intent, verifiedRun };
     replacementLockRef.current = true;
     replacementInvokerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setRunError(null);
@@ -1218,9 +1231,23 @@ export function WordPuzzleStudio() {
     void commitRunReplacement(request);
   }
 
-  function replaySavedRun(summary: RunSummary) {
-    const replay = resolveSavedRunReplay(summary, readNow());
-    void startNewRun(replay.options, replay.kind === "exact" ? replay.expectedProvenance : null);
+  async function replaySavedRun(summary: RunSummary) {
+    replayVerificationControllerRef.current?.abort();
+    const controller = new AbortController();
+    replayVerificationControllerRef.current = controller;
+    const replay = await resolveSavedRunReplay(summary, readNow(), controller.signal).catch((error) => {
+      if (controller.signal.aborted) return null;
+      throw error;
+    });
+    if (!replay || controller.signal.aborted || replayVerificationControllerRef.current !== controller) return;
+    replayVerificationControllerRef.current = null;
+    if (replay.kind === "unavailable-exact") {
+      const message = "That exact saved puzzle is no longer available. Nothing was replaced; use its settings/current rules only if you choose that separate action.";
+      setRunError(message);
+      announce(message);
+      return;
+    }
+    void startNewRun(replay.options, replay.kind === "exact" ? replay.expectedProvenance : null, "options", replay.kind === "exact" ? replay.run : null);
   }
 
   function startTodayDailyRun() {
@@ -3142,7 +3169,7 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
                           : entry.summary ? `${entry.summary.solvedCount}/${entry.summary.totalWords} solved`
                             : entry.outcome === "started" ? "Started" : "No attempt"
                     }</div>
-                    {entry.summary ? <div className="mt-2 text-[10px] uppercase tracking-[0.16em] text-fuchsia-200">{canReplaySummaryExactly(entry.summary) ? "Replay exact puzzle" : "Use settings/current rules"}</div> : null}
+                    {entry.summary ? <div className="mt-2 text-[10px] uppercase tracking-[0.16em] text-fuchsia-200">{getSavedReplayActionLabel(entry.summary)}</div> : null}
                   </button>
                 ))}
               </div>
@@ -3315,7 +3342,7 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
                     <button key={entry.attemptId} data-testid="recent-run-card" type="button" onClick={() => replaySavedRun(entry)} className="w-full rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-left text-sm text-slate-200 transition hover:border-white/20">
                       <div className="flex items-center justify-between gap-3">
                         <span className="font-medium text-white">{entry.title}</span>
-                        <span className="rounded-full bg-white/6 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-300">{canReplaySummaryExactly(entry) ? "Replay exact puzzle" : "Use settings/current rules"}</span>
+                        <span className="rounded-full bg-white/6 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-300">{getSavedReplayActionLabel(entry)}</span>
                       </div>
                       <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-400">
                         <span>{entry.mode}{entry.canonicalDaily ? " · canonical" : ""}</span>

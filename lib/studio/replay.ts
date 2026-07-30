@@ -2,6 +2,7 @@ import type { PuzzleOptions, PuzzleRun, RunSummary } from "@/lib/game-types";
 import { buildPuzzleRun } from "@/lib/puzzle-generator";
 import { normalizePuzzleOptions, type SharedPuzzleProvenance } from "@/lib/puzzle-options";
 import { currentCorpusRevision, puzzleFingerprintVersion } from "@/lib/puzzle-provenance";
+import { buildRunForOptions } from "@/lib/run-builder";
 
 type ReplaySummary = RunSummary;
 const exactReplayCache = new Map<string, boolean>();
@@ -36,23 +37,26 @@ function matchesSummary(run: PuzzleRun, summary: ReplaySummary, expected: Shared
     && run.puzzleFingerprint === expected.puzzleFingerprint;
 }
 
-export function resolveSavedRunReplay(summary: ReplaySummary, nowMs = Date.now()):
+export async function resolveSavedRunReplay(summary: ReplaySummary, nowMs = Date.now(), signal?: AbortSignal): Promise<
   | { kind: "exact"; options: PuzzleOptions; run: PuzzleRun; expectedProvenance: SharedPuzzleProvenance }
-  | { kind: "current-rules"; options: PuzzleOptions } {
+  | { kind: "current-rules"; options: PuzzleOptions }
+  | { kind: "unavailable-exact"; options: PuzzleOptions }> {
   const options = replayOptions(summary, nowMs);
   const expected = expectedProvenance(summary);
   if (!expected) return { kind: "current-rules", options };
   try {
-    const run = buildPuzzleRun(options, nowMs, { generatorVersion: expected.generatorVersion });
+    const run = await buildRunForOptions(options, nowMs, { generatorVersion: expected.generatorVersion }, signal);
     return matchesSummary(run, summary, expected)
       ? { kind: "exact", options, run, expectedProvenance: expected }
-      : { kind: "current-rules", options };
+      : { kind: "unavailable-exact", options };
   } catch {
-    return { kind: "current-rules", options };
+    if (signal?.aborted) throw new Error("Replay verification was superseded.");
+    return { kind: "unavailable-exact", options };
   }
 }
 
 export function canReplaySummaryExactly(summary: ReplaySummary) {
+  if (summary.options.boardView === "quest") return false;
   const key = JSON.stringify([
     summary.puzzleId,
     summary.generatorVersion,
@@ -64,7 +68,20 @@ export function canReplaySummaryExactly(summary: ReplaySummary) {
   ]);
   const cached = exactReplayCache.get(key);
   if (cached !== undefined) return cached;
-  const exact = resolveSavedRunReplay(summary, Date.parse(summary.createdAt)).kind === "exact";
-  exactReplayCache.set(key, exact);
-  return exact;
+  const expected = expectedProvenance(summary);
+  if (!expected) return false;
+  try {
+    const run = buildPuzzleRun(replayOptions(summary, Date.parse(summary.createdAt)), Date.parse(summary.createdAt), { generatorVersion: expected.generatorVersion });
+    const exact = matchesSummary(run, summary, expected);
+    exactReplayCache.set(key, exact);
+    return exact;
+  } catch {
+    exactReplayCache.set(key, false);
+    return false;
+  }
+}
+
+export function getSavedReplayActionLabel(summary: ReplaySummary) {
+  if (summary.options.boardView === "quest" && expectedProvenance(summary)) return "Verify and replay exact puzzle";
+  return canReplaySummaryExactly(summary) ? "Replay exact puzzle" : "Use settings/current rules";
 }

@@ -65,6 +65,33 @@ test("successful replacement settles outgoing progress and persists one candidat
   assert.equal(progress.history.length, 0, "the source progress stays untouched");
 });
 
+test("async generation settles before persistence and leaves the source untouched while pending", async () => {
+  const current = createAttemptFromRun(buildRun("async-source"), 1_000, "attempt-async-source");
+  const progress = createEmptyProgress();
+  let release!: (run: ReturnType<typeof buildRun>) => void;
+  const generated = new Promise<ReturnType<typeof buildRun>>((resolve) => { release = resolve; });
+  let writes = 0;
+  const transaction = replaceRunTransaction({
+    current,
+    progress,
+    buildRun: () => generated,
+    persist: async () => {
+      writes += 1;
+      return { ok: true, saveId: "save-async", bytes: 1 };
+    },
+    nowMs: 5_000,
+  });
+
+  await Promise.resolve();
+  assert.equal(writes, 0);
+  assert.equal(current.attemptId, "attempt-async-source");
+  assert.equal(progress.history.length, 0);
+  release(buildRun("async-candidate", 5_000));
+  const result = await transaction;
+  assert.equal(result.ok, true);
+  assert.equal(writes, 1);
+});
+
 for (const scenario of [
   {
     name: "generation failure",

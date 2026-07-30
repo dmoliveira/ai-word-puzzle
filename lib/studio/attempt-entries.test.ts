@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildPuzzleRun } from "@/lib/puzzle-generator";
+import { buildQuestPuzzleRun } from "@/lib/quest-puzzle-generator";
 import { createAttemptFromRun, recordRevealedCell } from "@/lib/run-state";
 import { applyCellEntry, applyWordEntry, clearWordEntries, deriveGuessFromCells, getPlacementCells } from "@/lib/studio/attempt-entries";
 import { isPuzzleBoardV3 } from "@/lib/puzzle-board";
@@ -100,7 +101,7 @@ test("a whole-word conflict cannot overwrite a deliberately revealed cell", () =
 });
 
 test("Quest v4 solves through its certified signed path without synthetic placements", () => {
-  const state = createAttemptFromRun(buildPuzzleRun({
+  const state = createAttemptFromRun(buildQuestPuzzleRun({
     mode: "custom",
     seed: "trace-myth",
     topics: ["myth"],

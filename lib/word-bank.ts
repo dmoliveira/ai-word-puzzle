@@ -1,918 +1,2913 @@
-import type { ChallengeLevel, ContentPack, ContentPackId, PuzzleWord, TopicId, TopicPack } from "@/lib/game-types";
-import { getEditorialClue } from "@/lib/clue-catalog";
-import { curatedEnglishLexicon } from "@/lib/lexicon-seeds";
+import type { ContentPack, PuzzleWord, TopicPack } from "@/lib/game-types";
 
-const greekMarks = [
-  "alpha",
-  "beta",
-  "gamma",
-  "delta",
-  "epsilon",
-  "zeta",
-  "eta",
-  "theta",
-  "iota",
-  "kappa",
-  "lambda",
-  "mu",
+export const topicCatalog: TopicPack[] = [
+  {
+    "id": "myth",
+    "label": "Myth & Legend",
+    "mood": "Ancient voices, heroic paths, and temple dust.",
+    "scene": [
+      "laurel fire",
+      "marble echo",
+      "heroic hush"
+    ],
+    "icons": [
+      "owl",
+      "torch",
+      "lyre",
+      "column"
+    ],
+    "easy": [],
+    "medium": [],
+    "hard": []
+  },
+  {
+    "id": "cosmos",
+    "label": "Cosmos",
+    "mood": "Orbital drift, radiant dust, and patient signals.",
+    "scene": [
+      "signal haze",
+      "planet glow",
+      "midnight orbit"
+    ],
+    "icons": [
+      "star",
+      "ring",
+      "comet",
+      "planet"
+    ],
+    "easy": [],
+    "medium": [],
+    "hard": []
+  },
+  {
+    "id": "ocean",
+    "label": "Ocean",
+    "mood": "Salt air, deep water, and bright things under the tide.",
+    "scene": [
+      "foam trail",
+      "tidal shimmer",
+      "harbor hush"
+    ],
+    "icons": [
+      "wave",
+      "shell",
+      "anchor",
+      "coral"
+    ],
+    "easy": [],
+    "medium": [],
+    "hard": []
+  },
+  {
+    "id": "garden",
+    "label": "Garden",
+    "mood": "Green patience, petals, and bright rooted calm.",
+    "scene": [
+      "petal rain",
+      "green lattice",
+      "morning soil"
+    ],
+    "icons": [
+      "leaf",
+      "petal",
+      "sprout",
+      "moss"
+    ],
+    "easy": [],
+    "medium": [],
+    "hard": []
+  },
+  {
+    "id": "city",
+    "label": "City Light",
+    "mood": "Late trains, glass towers, and rooftop stories.",
+    "scene": [
+      "neon crosswalk",
+      "tower mist",
+      "subway thunder"
+    ],
+    "icons": [
+      "tram",
+      "tower",
+      "neon",
+      "alley"
+    ],
+    "easy": [],
+    "medium": [],
+    "hard": []
+  },
+  {
+    "id": "music",
+    "label": "Music",
+    "mood": "Rhythm, resonance, and rooms that remember songs.",
+    "scene": [
+      "velvet stage",
+      "amp glow",
+      "vinyl midnight"
+    ],
+    "icons": [
+      "note",
+      "amp",
+      "drum",
+      "vinyl"
+    ],
+    "easy": [],
+    "medium": [],
+    "hard": []
+  },
+  {
+    "id": "kitchen",
+    "label": "Kitchen",
+    "mood": "Steam, spice, and good timing.",
+    "scene": [
+      "copper pan",
+      "spice cloud",
+      "lamplit supper"
+    ],
+    "icons": [
+      "spoon",
+      "flame",
+      "bread",
+      "tea"
+    ],
+    "easy": [],
+    "medium": [],
+    "hard": []
+  },
+  {
+    "id": "wild",
+    "label": "Wild Trails",
+    "mood": "Tracks, cliffs, flight, and weathered ground.",
+    "scene": [
+      "ridge wind",
+      "pine shadow",
+      "trail dust"
+    ],
+    "icons": [
+      "peak",
+      "pine",
+      "hawk",
+      "trail"
+    ],
+    "easy": [],
+    "medium": [],
+    "hard": []
+  },
+  {
+    "id": "weather",
+    "label": "Weather",
+    "mood": "Pressure shifts, cloud theaters, and bright fronts.",
+    "scene": [
+      "storm glass",
+      "silver cloud",
+      "rain static"
+    ],
+    "icons": [
+      "cloud",
+      "rain",
+      "sun",
+      "wind"
+    ],
+    "easy": [],
+    "medium": [],
+    "hard": []
+  },
+  {
+    "id": "desert",
+    "label": "Desert",
+    "mood": "Heat shimmer, dune silence, and bright mineral light.",
+    "scene": [
+      "mirage line",
+      "sunstone dust",
+      "dune shadow"
+    ],
+    "icons": [
+      "dune",
+      "sun",
+      "cactus",
+      "stone"
+    ],
+    "easy": [],
+    "medium": [],
+    "hard": []
+  },
+  {
+    "id": "festival",
+    "label": "Festival",
+    "mood": "Lantern glow, moving color, and crowded midnight joy.",
+    "scene": [
+      "lantern parade",
+      "confetti drift",
+      "midnight square"
+    ],
+    "icons": [
+      "lantern",
+      "ribbon",
+      "mask",
+      "drum"
+    ],
+    "easy": [],
+    "medium": [],
+    "hard": []
+  },
+  {
+    "id": "winter",
+    "label": "Winterlight",
+    "mood": "Cold air, silver quiet, and windows full of warmth.",
+    "scene": [
+      "snowglass pane",
+      "frost lantern",
+      "midnight snowfall"
+    ],
+    "icons": [
+      "snow",
+      "frost",
+      "pines",
+      "hearth"
+    ],
+    "easy": [],
+    "medium": [],
+    "hard": []
+  },
+  {
+    "id": "invent",
+    "label": "Invention",
+    "mood": "Workshop sparks and ideas with moving parts.",
+    "scene": [
+      "copper spark",
+      "draft table",
+      "gear hum"
+    ],
+    "icons": [
+      "gear",
+      "spark",
+      "blueprint",
+      "switch"
+    ],
+    "easy": [],
+    "medium": [],
+    "hard": []
+  },
+  {
+    "id": "story",
+    "label": "Storybook",
+    "mood": "Pages, voices, and moonlit turns of plot.",
+    "scene": [
+      "paper lantern",
+      "ink river",
+      "quiet chapter"
+    ],
+    "icons": [
+      "book",
+      "quill",
+      "candle",
+      "mask"
+    ],
+    "easy": [],
+    "medium": [],
+    "hard": []
+  },
+  {
+    "id": "greek",
+    "label": "Greek Letters",
+    "mood": "Glyphs, symbols, and a playful coded layer.",
+    "scene": [
+      "glyph spiral",
+      "scholar glow",
+      "cipher trace"
+    ],
+    "icons": [
+      "alpha",
+      "sigma",
+      "omega",
+      "delta"
+    ],
+    "easy": [],
+    "medium": [],
+    "hard": []
+  }
 ];
 
-const topicPacks: TopicPack[] = [
+export const contentCatalog: ContentPack[] = [
   {
-    id: "myth",
-    label: "Myth & Legend",
-    mood: "Ancient voices, heroic paths, and temple dust.",
-    scene: ["laurel fire", "marble echo", "heroic hush"],
-    icons: ["owl", "torch", "lyre", "column"],
-    easy: "oracle titan hero nymph temple olive echo bronze shield laurel nectar thunder pegasus trident labyrinth siren chimera hydra atlas zephyr ember raven crown scroll voyage".split(" "),
-    medium: "odyssey prophecy immortal ambrosia centaur gorgon relic citadel amphora draught omen fable ritual talisman titaness voyageur festival dynasty horizon sentinel starlit cascade twilight artifact".split(" "),
-    hard: "heliotrope catacomb pantheon aegis harbinger celestial invincible labyrinthine chronicle automaton tempestuous revelation constellation anointed moonstone everglow sovereign spellbound thunderhead glasswork".split(" "),
+    "id": "myth-beings",
+    "topicId": "myth",
+    "label": "Mythic Beings",
+    "summary": "Gods, monsters, and legendary figures.",
+    "answers": [
+      "titan",
+      "hero",
+      "nymph",
+      "pegasus",
+      "siren",
+      "chimera",
+      "hydra",
+      "centaur",
+      "gorgon",
+      "atlas",
+      "immortal",
+      "titaness"
+    ]
   },
   {
-    id: "cosmos",
-    label: "Cosmos",
-    mood: "Orbital drift, radiant dust, and patient signals.",
-    scene: ["signal haze", "planet glow", "midnight orbit"],
-    icons: ["star", "ring", "comet", "planet"],
-    easy: "planet comet rocket meteor galaxy orbit nebula lunar solar crater signal vacuum aurora shuttle rover asteroid satellite stardust eclipse module capsule photon horizon zenith".split(" "),
-    medium: "gravity pulsar stellar ionosphere eclipse velocity vacuum chamber trajectory observatory terminal spectrum fusion antenna ignition quantum radiant orbital eclipse twilight launchpad celestial".split(" "),
-    hard: "interstellar singularity heliosphere exoplanet telemetry afterglow magnetism transponder cryogenic supernova quasar acceleration astrolabe continuum vacuumed propulsion radiantness observatory noctilucent".split(" "),
+    "id": "myth-relics",
+    "topicId": "myth",
+    "label": "Sacred Relics",
+    "summary": "Temples, omens, and old ceremonial artifacts.",
+    "answers": [
+      "oracle",
+      "temple",
+      "olive",
+      "shield",
+      "laurel",
+      "trident",
+      "labyrinth",
+      "prophecy",
+      "ambrosia",
+      "relic",
+      "citadel",
+      "amphora",
+      "omen",
+      "ritual",
+      "talisman",
+      "pantheon",
+      "aegis"
+    ]
   },
   {
-    id: "ocean",
-    label: "Ocean",
-    mood: "Salt air, deep water, and bright things under the tide.",
-    scene: ["foam trail", "tidal shimmer", "harbor hush"],
-    icons: ["wave", "shell", "anchor", "coral"],
-    easy: "coral harbor tide drift anchor shell reef marina dolphin current sailor vessel lagoon splash beacon compass kelp seagull seabed trawler ferry island estuary jetty".split(" "),
-    medium: "brackish lanternfish seabreeze tidepool barnacle moonwake undertow shoreline captaincy whirlpool ropework seaworthy semaphore saltwater coastland floodgate".split(" "),
-    hard: "bioluminescent phosphorescent hydrophone bathysphere cartography tidewater seafaring mariner chronometer breakwater wavecrest weathered shipwright undertidal".split(" "),
+    "id": "cosmos-flight",
+    "topicId": "cosmos",
+    "label": "Orbital Flight",
+    "summary": "Craft, launches, and machines that cross the sky.",
+    "answers": [
+      "rocket",
+      "orbit",
+      "signal",
+      "shuttle",
+      "rover",
+      "satellite",
+      "module",
+      "capsule",
+      "trajectory",
+      "observatory",
+      "antenna",
+      "launchpad"
+    ]
   },
   {
-    id: "garden",
-    label: "Garden",
-    mood: "Green patience, petals, and bright rooted calm.",
-    scene: ["petal rain", "green lattice", "morning soil"],
-    icons: ["leaf", "petal", "sprout", "moss"],
-    easy: "rose tulip fern cedar ivy basil orchard meadow blossom pollen nectar seedling trellis sunflower lavender mint clover willow petal root stem garden".split(" "),
-    medium: "greenhouse rosemary marigold hillside arborist courtyard dewdrop vinework moonflower hummingbird seedpod wildflower rainbarrel grove".split(" "),
-    hard: "photosynthesis chrysanthemum arboriculture vermilion evergreen herbarium pollinator glasshouse horticulture moonpetal understory".split(" "),
+    "id": "cosmos-phenomena",
+    "topicId": "cosmos",
+    "label": "Stellar Phenomena",
+    "summary": "The sky itself: light, dust, and celestial events.",
+    "answers": [
+      "planet",
+      "comet",
+      "meteor",
+      "galaxy",
+      "nebula",
+      "lunar",
+      "solar",
+      "crater",
+      "aurora",
+      "asteroid",
+      "stardust",
+      "eclipse",
+      "photon",
+      "zenith",
+      "pulsar",
+      "stellar",
+      "spectrum",
+      "fusion",
+      "quantum",
+      "celestial"
+    ]
   },
   {
-    id: "city",
-    label: "City Light",
-    mood: "Late trains, glass towers, and rooftop stories.",
-    scene: ["neon crosswalk", "tower mist", "subway thunder"],
-    icons: ["tram", "tower", "neon", "alley"],
-    easy: "avenue subway market skyline bridge lantern cafe mural signal plaza alley rooftop district station tunnel balcony courier traffic".split(" "),
-    medium: "boulevard sidewalk headlight afterhours storefront highrise overpass timetable warehouse underpass cityscape metroline courtyard brickwork".split(" "),
-    hard: "metropolis thoroughfare interchange skyscraper boulevardier cartographer soundscape nightshift infrastructure pedestrian nocturne".split(" "),
+    "id": "ocean-life",
+    "topicId": "ocean",
+    "label": "Sea Life",
+    "summary": "Creatures and living detail beneath the tide.",
+    "answers": [
+      "coral",
+      "shell",
+      "reef",
+      "dolphin",
+      "kelp",
+      "seagull",
+      "seabed",
+      "barnacle",
+      "lanternfish",
+      "tidepool",
+      "brackish",
+      "undertow"
+    ]
   },
   {
-    id: "music",
-    label: "Music",
-    mood: "Rhythm, resonance, and rooms that remember songs.",
-    scene: ["velvet stage", "amp glow", "vinyl midnight"],
-    icons: ["note", "amp", "drum", "vinyl"],
-    easy: "melody chorus rhythm ballad tempo lyric cadence piano violin trumpet drummer echo stanza refrain harmony record microphone".split(" "),
-    medium: "crescendo overture bridgework riffing setlist downbeat headliner resonance songbook backbeat soundcheck tunecraft".split(" "),
-    hard: "symphonic improvisation counterpoint reverberation soundboard orchestral metronomic interlude syncopation".split(" "),
+    "id": "ocean-sailing",
+    "topicId": "ocean",
+    "label": "Sailing & Shore",
+    "summary": "Harbors, navigation, craft, and coastlines.",
+    "answers": [
+      "harbor",
+      "tide",
+      "anchor",
+      "marina",
+      "current",
+      "sailor",
+      "vessel",
+      "beacon",
+      "compass",
+      "trawler",
+      "ferry",
+      "estuary",
+      "captaincy",
+      "shoreline",
+      "seaworthy",
+      "semaphore"
+    ]
   },
   {
-    id: "kitchen",
-    label: "Kitchen",
-    mood: "Steam, spice, and good timing.",
-    scene: ["copper pan", "spice cloud", "lamplit supper"],
-    icons: ["spoon", "flame", "bread", "tea"],
-    easy: "biscuit skillet pepper butter simmer whisk kettle pantry noodle recipe garlic honey berry pastry cocoa supper feast".split(" "),
-    medium: "rosemary marinade sourdough caramel pantrylight spoonful bakehouse cinnamon teacup saucepan".split(" "),
-    hard: "confection hearthstone crystallized aromatic fermentation buttermilk charbroiled".split(" "),
+    "id": "garden-blooms",
+    "topicId": "garden",
+    "label": "Petals & Blooms",
+    "summary": "Flowers, petals, pollen, and bright color.",
+    "answers": [
+      "rose",
+      "tulip",
+      "orchard",
+      "blossom",
+      "pollen",
+      "nectar",
+      "sunflower",
+      "lavender",
+      "petal",
+      "marigold",
+      "moonflower",
+      "wildflower",
+      "chrysanthemum"
+    ]
   },
   {
-    id: "wild",
-    label: "Wild Trails",
-    mood: "Tracks, cliffs, flight, and weathered ground.",
-    scene: ["ridge wind", "pine shadow", "trail dust"],
-    icons: ["peak", "pine", "hawk", "trail"],
-    easy: "forest canyon summit falcon river boulder pine timber meadow otter wolf feather granite valley trail campfire sunrise".split(" "),
-    medium: "ridgeback moonrise waterfall hillside outpost stonepath wanderer firelight highland backpack".split(" "),
-    hard: "wilderness mountaintop thunderstone windcarved expedition glacial riverbend overland".split(" "),
+    "id": "garden-growers",
+    "topicId": "garden",
+    "label": "Roots & Growers",
+    "summary": "Leaves, herbs, vines, and the work of growing.",
+    "answers": [
+      "fern",
+      "cedar",
+      "ivy",
+      "basil",
+      "meadow",
+      "seedling",
+      "trellis",
+      "mint",
+      "clover",
+      "willow",
+      "root",
+      "stem",
+      "greenhouse",
+      "rosemary",
+      "arborist",
+      "vinework",
+      "seedpod",
+      "grove",
+      "evergreen",
+      "herbarium",
+      "pollinator",
+      "glasshouse",
+      "understory"
+    ]
   },
   {
-    id: "weather",
-    label: "Weather",
-    mood: "Pressure shifts, cloud theaters, and bright fronts.",
-    scene: ["storm glass", "silver cloud", "rain static"],
-    icons: ["cloud", "rain", "sun", "wind"],
-    easy: "breeze thunder drizzle rainbow frost cyclone hailstorm mist sunset monsoon gust forecast lightning shadow winter summer".split(" "),
-    medium: "daybreak overcast moonstorm rainfall windward stormfront heatwave cloudbank".split(" "),
-    hard: "barometric atmospheric thunderhead torrential luminescent nocturnal solarwind".split(" "),
+    "id": "city-transit",
+    "topicId": "city",
+    "label": "Transit Grid",
+    "summary": "Subways, stations, and routes through the city.",
+    "answers": [
+      "avenue",
+      "subway",
+      "bridge",
+      "signal",
+      "plaza",
+      "station",
+      "tunnel",
+      "courier",
+      "traffic",
+      "boulevard",
+      "sidewalk",
+      "overpass",
+      "timetable",
+      "underpass",
+      "metroline"
+    ]
   },
   {
-    id: "desert",
-    label: "Desert",
-    mood: "Heat shimmer, dune silence, and bright mineral light.",
-    scene: ["mirage line", "sunstone dust", "dune shadow"],
-    icons: ["dune", "sun", "cactus", "stone"],
-    easy: "dune cactus oasis amber mesa canyon lizard sandstone mirage lantern trail nomad caravan saddle drywind sundial jackal campfire".split(" "),
-    medium: "sandstorm windcarved moonbasin saltplain dusttrail waystation sunbaked torchline ridgeglass caravanserai".split(" "),
-    hard: "horizonless argentine sunscorched echoing glasssand aridlands weatherstone sandstonekeep".split(" "),
+    "id": "city-night",
+    "topicId": "city",
+    "label": "Night Lights",
+    "summary": "Rooftops, storefronts, and after-hours glow.",
+    "answers": [
+      "market",
+      "skyline",
+      "lantern",
+      "cafe",
+      "mural",
+      "alley",
+      "rooftop",
+      "district",
+      "balcony",
+      "headlight",
+      "afterhours",
+      "storefront",
+      "highrise",
+      "warehouse",
+      "cityscape",
+      "courtyard",
+      "brickwork"
+    ]
   },
   {
-    id: "festival",
-    label: "Festival",
-    mood: "Lantern glow, moving color, and crowded midnight joy.",
-    scene: ["lantern parade", "confetti drift", "midnight square"],
-    icons: ["lantern", "ribbon", "mask", "drum"],
-    easy: "parade lantern ribbon confetti banner costume drummer ticket stage sparkle carnival chorus firework market dancer trumpet".split(" "),
-    medium: "procession moonstage celebratory afterglow paperlight headliner streamers spotlight fairground".split(" "),
-    hard: "pageantry masquerade illuminations soundscape wonderlight revelatory".split(" "),
+    "id": "music-stage",
+    "topicId": "music",
+    "label": "Stage Energy",
+    "summary": "Performance, rhythm, and live-show momentum.",
+    "answers": [
+      "melody",
+      "chorus",
+      "rhythm",
+      "ballad",
+      "tempo",
+      "lyric",
+      "cadence",
+      "drummer",
+      "echo",
+      "stanza",
+      "refrain",
+      "bridgework",
+      "riffing",
+      "setlist",
+      "downbeat",
+      "headliner",
+      "resonance",
+      "backbeat",
+      "soundcheck",
+      "tunecraft"
+    ]
   },
   {
-    id: "winter",
-    label: "Winterlight",
-    mood: "Cold air, silver quiet, and windows full of warmth.",
-    scene: ["snowglass pane", "frost lantern", "midnight snowfall"],
-    icons: ["snow", "frost", "pines", "hearth"],
-    easy: "winter frost icicle snowfall pinewood blanket firelight cocoa mitten sled lantern chimney snowfall moonfrost scarf".split(" "),
-    medium: "snowdrift hearthlight northwind moonsnow silverpine windowglow fireside weatherglass".split(" "),
-    hard: "crystalline everfrost glimmersnow hushlight wintertide frostbound".split(" "),
+    "id": "music-instruments",
+    "topicId": "music",
+    "label": "Instruments & Sound",
+    "summary": "Objects and structures that make the music happen.",
+    "answers": [
+      "piano",
+      "violin",
+      "trumpet",
+      "harmony",
+      "record",
+      "microphone",
+      "crescendo",
+      "overture",
+      "songbook",
+      "symphonic",
+      "counterpoint",
+      "soundboard",
+      "orchestral",
+      "interlude",
+      "syncopation"
+    ]
   },
   {
-    id: "invent",
-    label: "Invention",
-    mood: "Workshop sparks and ideas with moving parts.",
-    scene: ["copper spark", "draft table", "gear hum"],
-    icons: ["gear", "spark", "blueprint", "switch"],
-    easy: "engine circuit piston magnet lever pulley copper gadget blueprint signal battery workshop engine spark rotor".split(" "),
-    medium: "prototype workshop torque lanternwork pressure valve motioncraft gearbox voltage mechanism".split(" "),
-    hard: "calibration architecture oscillation microcircuit steamdriven instrumentation".split(" "),
+    "id": "kitchen-pantry",
+    "topicId": "kitchen",
+    "label": "Pantry Staples",
+    "summary": "Core ingredients, tools, and everyday prep.",
+    "answers": [
+      "skillet",
+      "pepper",
+      "butter",
+      "whisk",
+      "kettle",
+      "pantry",
+      "noodle",
+      "recipe",
+      "garlic",
+      "honey",
+      "rosemary",
+      "marinade",
+      "teacup",
+      "saucepan",
+      "fermentation",
+      "buttermilk"
+    ]
   },
   {
-    id: "story",
-    label: "Storybook",
-    mood: "Pages, voices, and moonlit turns of plot.",
-    scene: ["paper lantern", "ink river", "quiet chapter"],
-    icons: ["book", "quill", "candle", "mask"],
-    easy: "chapter lantern author whisper library paper fable riddle ending villain secret witness letter journal prologue chapterplay".split(" "),
-    medium: "narrator moonlight bookmark passage plotline folktale mystery chapterhouse".split(" "),
-    hard: "epilogue allegorical manuscript storytelling dreamscape cliffhanger".split(" "),
+    "id": "kitchen-bakes",
+    "topicId": "kitchen",
+    "label": "Bakes & Sweets",
+    "summary": "Warm ovens, cocoa, pastry, and dessert craft.",
+    "answers": [
+      "biscuit",
+      "simmer",
+      "berry",
+      "pastry",
+      "cocoa",
+      "supper",
+      "feast",
+      "sourdough",
+      "caramel",
+      "bakehouse",
+      "cinnamon",
+      "confection",
+      "hearthstone",
+      "crystallized",
+      "aromatic",
+      "charbroiled"
+    ]
   },
   {
-    id: "greek",
-    label: "Greek Letters",
-    mood: "Glyphs, symbols, and a playful coded layer.",
-    scene: ["glyph spiral", "scholar glow", "cipher trace"],
-    icons: ["alpha", "sigma", "omega", "delta"],
-    easy: "alpha beta gamma delta sigma omega theta lambda kappa mu pi rho tau phi psi zeta eta iota".split(" "),
-    medium: "epsilon omicron upsilon digamma glyphic symbolist theorem notation lexicon codex".split(" "),
-    hard: "philosophic harmonics mnemonic semiotic etymology iconography".split(" "),
+    "id": "wild-creatures",
+    "topicId": "wild",
+    "label": "Wild Creatures",
+    "summary": "Animals, feathers, and motion in the open wild.",
+    "answers": [
+      "falcon",
+      "otter",
+      "wolf",
+      "feather",
+      "trail",
+      "campfire",
+      "ridgeback",
+      "wanderer"
+    ]
   },
+  {
+    "id": "wild-landforms",
+    "topicId": "wild",
+    "label": "Peaks & Rivers",
+    "summary": "Ground, stone, and the shape of the landscape.",
+    "answers": [
+      "forest",
+      "canyon",
+      "summit",
+      "river",
+      "boulder",
+      "pine",
+      "timber",
+      "meadow",
+      "granite",
+      "valley",
+      "sunrise",
+      "moonrise",
+      "waterfall",
+      "hillside",
+      "stonepath",
+      "firelight",
+      "highland",
+      "backpack",
+      "wilderness",
+      "mountaintop",
+      "glacial",
+      "riverbend",
+      "overland"
+    ]
+  },
+  {
+    "id": "weather-storms",
+    "topicId": "weather",
+    "label": "Stormfront",
+    "summary": "Rain, wind, thunder, and hard-moving weather.",
+    "answers": [
+      "thunder",
+      "drizzle",
+      "cyclone",
+      "hailstorm",
+      "monsoon",
+      "gust",
+      "forecast",
+      "lightning",
+      "moonstorm",
+      "rainfall",
+      "windward",
+      "stormfront",
+      "heatwave",
+      "barometric",
+      "thunderhead",
+      "torrential",
+      "solarwind"
+    ]
+  },
+  {
+    "id": "weather-skies",
+    "topicId": "weather",
+    "label": "Sky Signs",
+    "summary": "Clouds, color, and changing light overhead.",
+    "answers": [
+      "breeze",
+      "rainbow",
+      "frost",
+      "mist",
+      "sunset",
+      "shadow",
+      "winter",
+      "summer",
+      "daybreak",
+      "overcast",
+      "cloudbank",
+      "atmospheric",
+      "luminescent",
+      "nocturnal"
+    ]
+  },
+  {
+    "id": "desert-survival",
+    "topicId": "desert",
+    "label": "Dunes & Survival",
+    "summary": "Travel, shelter, and motion across the dry open land.",
+    "answers": [
+      "dune",
+      "cactus",
+      "oasis",
+      "mesa",
+      "canyon",
+      "lizard",
+      "mirage",
+      "lantern",
+      "trail",
+      "nomad",
+      "caravan",
+      "saddle",
+      "drywind",
+      "sundial",
+      "jackal",
+      "campfire",
+      "sandstorm",
+      "waystation",
+      "caravanserai"
+    ]
+  },
+  {
+    "id": "desert-stones",
+    "topicId": "desert",
+    "label": "Stone & Heat",
+    "summary": "Mineral, sunlight, and arid formations.",
+    "answers": [
+      "amber",
+      "sandstone",
+      "windcarved",
+      "moonbasin",
+      "saltplain",
+      "dusttrail",
+      "sunbaked",
+      "torchline",
+      "ridgeglass",
+      "horizonless",
+      "sunscorched",
+      "glasssand",
+      "aridlands",
+      "weatherstone",
+      "sandstonekeep"
+    ]
+  },
+  {
+    "id": "festival-parade",
+    "topicId": "festival",
+    "label": "Parade Route",
+    "summary": "Lanterns, banners, and moving celebration.",
+    "answers": [
+      "parade",
+      "lantern",
+      "ribbon",
+      "confetti",
+      "banner",
+      "costume",
+      "drummer",
+      "ticket",
+      "sparkle",
+      "carnival",
+      "firework",
+      "market",
+      "dancer",
+      "procession",
+      "paperlight",
+      "streamers",
+      "fairground"
+    ]
+  },
+  {
+    "id": "festival-performance",
+    "topicId": "festival",
+    "label": "Stage & Sound",
+    "summary": "Performance energy, spotlight, and night-square spectacle.",
+    "answers": [
+      "stage",
+      "chorus",
+      "trumpet",
+      "moonstage",
+      "celebratory",
+      "afterglow",
+      "headliner",
+      "spotlight",
+      "pageantry",
+      "masquerade",
+      "illuminations",
+      "soundscape",
+      "wonderlight",
+      "revelatory"
+    ]
+  },
+  {
+    "id": "winter-weather",
+    "topicId": "winter",
+    "label": "Frost & Snow",
+    "summary": "Cold air, snowfall, and ice-bright weather.",
+    "answers": [
+      "winter",
+      "frost",
+      "icicle",
+      "snowfall",
+      "moonfrost",
+      "snowdrift",
+      "northwind",
+      "moonsnow",
+      "silverpine",
+      "crystalline",
+      "everfrost",
+      "glimmersnow",
+      "frostbound"
+    ]
+  },
+  {
+    "id": "winter-cozy",
+    "topicId": "winter",
+    "label": "Cozy Hearth",
+    "summary": "Warm shelter, fireside comfort, and winter calm.",
+    "answers": [
+      "pinewood",
+      "blanket",
+      "firelight",
+      "cocoa",
+      "mitten",
+      "sled",
+      "lantern",
+      "chimney",
+      "scarf",
+      "hearthlight",
+      "windowglow",
+      "fireside",
+      "weatherglass",
+      "wintertide"
+    ]
+  },
+  {
+    "id": "invent-workshop",
+    "topicId": "invent",
+    "label": "Workshop Mechanics",
+    "summary": "Tools, gears, and moving engineered parts.",
+    "answers": [
+      "engine",
+      "circuit",
+      "piston",
+      "magnet",
+      "lever",
+      "pulley",
+      "copper",
+      "gadget",
+      "blueprint",
+      "signal",
+      "battery",
+      "workshop",
+      "spark",
+      "rotor",
+      "prototype",
+      "torque",
+      "pressure",
+      "valve",
+      "motioncraft",
+      "gearbox",
+      "mechanism",
+      "calibration",
+      "microcircuit",
+      "instrumentation"
+    ]
+  },
+  {
+    "id": "invent-power",
+    "topicId": "invent",
+    "label": "Spark & Energy",
+    "summary": "Voltage, ignition, and powered invention language.",
+    "answers": [
+      "lanternwork",
+      "voltage",
+      "oscillation",
+      "steamdriven",
+      "architecture"
+    ]
+  },
+  {
+    "id": "story-books",
+    "topicId": "story",
+    "label": "Books & Pages",
+    "summary": "Authors, paper, journals, and the physical story world.",
+    "answers": [
+      "chapter",
+      "author",
+      "library",
+      "paper",
+      "letter",
+      "journal",
+      "prologue",
+      "bookmark",
+      "passage",
+      "chapterhouse",
+      "epilogue",
+      "manuscript"
+    ]
+  },
+  {
+    "id": "story-plot",
+    "topicId": "story",
+    "label": "Plot & Voices",
+    "summary": "Narration, mystery, endings, and turns of story.",
+    "answers": [
+      "lantern",
+      "whisper",
+      "fable",
+      "riddle",
+      "ending",
+      "villain",
+      "secret",
+      "witness",
+      "narrator",
+      "moonlight",
+      "plotline",
+      "folktale",
+      "mystery",
+      "allegorical",
+      "storytelling",
+      "dreamscape",
+      "cliffhanger"
+    ]
+  },
+  {
+    "id": "greek-symbols",
+    "topicId": "greek",
+    "label": "Letter Forms",
+    "summary": "Core Greek letters and symbol marks.",
+    "answers": [
+      "alpha",
+      "beta",
+      "gamma",
+      "delta",
+      "sigma",
+      "omega",
+      "theta",
+      "lambda",
+      "kappa",
+      "mu",
+      "pi",
+      "rho",
+      "tau",
+      "phi",
+      "psi",
+      "zeta",
+      "eta",
+      "iota"
+    ]
+  },
+  {
+    "id": "greek-scholar",
+    "topicId": "greek",
+    "label": "Scholar Signs",
+    "summary": "Notation, codex, and language around symbol study.",
+    "answers": [
+      "epsilon",
+      "omicron",
+      "upsilon",
+      "digamma",
+      "glyphic",
+      "symbolist",
+      "theorem",
+      "notation",
+      "lexicon",
+      "codex",
+      "philosophic",
+      "harmonics",
+      "mnemonic",
+      "semiotic",
+      "etymology",
+      "iconography"
+    ]
+  }
 ];
 
-const contentPacks: ContentPack[] = [
+export const wordBank: PuzzleWord[] = [
   {
-    id: "myth-beings",
-    topicId: "myth",
-    label: "Mythic Beings",
-    summary: "Gods, monsters, and legendary figures.",
-    answers: ["titan", "hero", "nymph", "pegasus", "siren", "chimera", "hydra", "centaur", "gorgon", "atlas", "immortal", "titaness"],
+    "id": "myth-breeze-1",
+    "answer": "titan",
+    "normalized": "titan",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A primordial giant from Greek mythology.",
+    "topicId": "myth",
+    "topicLabel": "Myth & Legend",
+    "contentPackIds": [
+      "myth-beings"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 5,
+    "prompt": "A primordial giant from Greek mythology.",
+    "microHint": "Starts with T, runs 5 letters, and leans toward ancient voices, heroic paths, and temple dust..",
+    "teaser": "Myth & Legend energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Myth & Legend language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a legend or old-story idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: ti-ta-n",
+    "usageExample": "Example: \"In the old tale, the titan appeared near the temple steps.\"",
+    "translationAid": "Translation aid: if you do not know titan yet, first picture laurel fire, then connect it to myth & legend vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "torch",
+      "laurel fire",
+      "myth  legend"
+    ],
+    "visuals": [
+      "torch",
+      "laurel fire",
+      "5 letters"
+    ],
+    "greekMark": "beta",
+    "weight": 2
   },
   {
-    id: "myth-relics",
-    topicId: "myth",
-    label: "Sacred Relics",
-    summary: "Temples, omens, and old ceremonial artifacts.",
-    answers: ["oracle", "temple", "olive", "shield", "laurel", "trident", "labyrinth", "prophecy", "ambrosia", "relic", "citadel", "amphora", "omen", "ritual", "talisman", "pantheon", "aegis"],
+    "id": "myth-breeze-2",
+    "answer": "hero",
+    "normalized": "hero",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A central figure admired for courageous deeds.",
+    "topicId": "myth",
+    "topicLabel": "Myth & Legend",
+    "contentPackIds": [
+      "myth-beings"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 4,
+    "prompt": "A central figure admired for courageous deeds.",
+    "microHint": "Starts with H, runs 4 letters, and leans toward ancient voices, heroic paths, and temple dust..",
+    "teaser": "Myth & Legend energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Myth & Legend language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a legend or old-story idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: he-ro",
+    "usageExample": "Example: \"In the old tale, the hero appeared near the temple steps.\"",
+    "translationAid": "Translation aid: if you do not know hero yet, first picture laurel fire, then connect it to myth & legend vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "owl",
+      "laurel fire",
+      "myth  legend"
+    ],
+    "visuals": [
+      "lyre",
+      "laurel fire",
+      "4 letters"
+    ],
+    "greekMark": "gamma",
+    "weight": 2
   },
   {
-    id: "cosmos-flight",
-    topicId: "cosmos",
-    label: "Orbital Flight",
-    summary: "Craft, launches, and machines that cross the sky.",
-    answers: ["rocket", "orbit", "signal", "shuttle", "rover", "satellite", "module", "capsule", "trajectory", "observatory", "antenna", "launchpad"],
+    "id": "myth-breeze-3",
+    "answer": "nymph",
+    "normalized": "nymph",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A nature spirit in Greek and Roman mythology.",
+    "topicId": "myth",
+    "topicLabel": "Myth & Legend",
+    "contentPackIds": [
+      "myth-beings"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 5,
+    "prompt": "A nature spirit in Greek and Roman mythology.",
+    "microHint": "Starts with N, runs 5 letters, and leans toward ancient voices, heroic paths, and temple dust..",
+    "teaser": "Myth & Legend energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Myth & Legend language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a legend or old-story idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: ny-mph",
+    "usageExample": "Example: \"In the old tale, the nymph appeared near the temple steps.\"",
+    "translationAid": "Translation aid: if you do not know nymph yet, first picture laurel fire, then connect it to myth & legend vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "torch",
+      "laurel fire",
+      "myth  legend"
+    ],
+    "visuals": [
+      "column",
+      "laurel fire",
+      "5 letters"
+    ],
+    "greekMark": "delta",
+    "weight": 2
   },
   {
-    id: "cosmos-phenomena",
-    topicId: "cosmos",
-    label: "Stellar Phenomena",
-    summary: "The sky itself: light, dust, and celestial events.",
-    answers: ["planet", "comet", "meteor", "galaxy", "nebula", "lunar", "solar", "crater", "aurora", "asteroid", "stardust", "eclipse", "photon", "zenith", "pulsar", "stellar", "spectrum", "fusion", "quantum", "celestial"],
+    "id": "myth-breeze-12",
+    "answer": "pegasus",
+    "normalized": "pegasus",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "The winged horse of Greek mythology.",
+    "topicId": "myth",
+    "topicLabel": "Myth & Legend",
+    "contentPackIds": [
+      "myth-beings"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 7,
+    "prompt": "The winged horse of Greek mythology.",
+    "microHint": "Starts with P, runs 7 letters, and leans toward ancient voices, heroic paths, and temple dust..",
+    "teaser": "Myth & Legend energy with a steady build. This one should read cleanly once it clicks.",
+    "learningNote": "Myth & Legend language cue: this answer behaves like mid-length descriptive vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a legend or old-story idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: pe-ga-su-s",
+    "usageExample": "Example: \"In the old tale, the pegasus appeared near the temple steps.\"",
+    "translationAid": "Translation aid: if you do not know pegasus yet, first picture laurel fire, then connect it to myth & legend vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "column",
+      "laurel fire",
+      "myth  legend"
+    ],
+    "visuals": [
+      "owl",
+      "laurel fire",
+      "7 letters"
+    ],
+    "greekMark": "alpha",
+    "weight": 2
   },
   {
-    id: "ocean-life",
-    topicId: "ocean",
-    label: "Sea Life",
-    summary: "Creatures and living detail beneath the tide.",
-    answers: ["coral", "shell", "reef", "dolphin", "kelp", "seagull", "seabed", "barnacle", "lanternfish", "tidepool", "brackish", "undertow"],
+    "id": "myth-breeze-15",
+    "answer": "siren",
+    "normalized": "siren",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A mythical singer whose voice lured sailors toward danger.",
+    "topicId": "myth",
+    "topicLabel": "Myth & Legend",
+    "contentPackIds": [
+      "myth-beings"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 5,
+    "prompt": "A mythical singer whose voice lured sailors toward danger.",
+    "microHint": "Starts with S, runs 5 letters, and leans toward ancient voices, heroic paths, and temple dust..",
+    "teaser": "Myth & Legend energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Myth & Legend language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a legend or old-story idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: si-re-n",
+    "usageExample": "Example: \"In the old tale, the siren appeared near the temple steps.\"",
+    "translationAid": "Translation aid: if you do not know siren yet, first picture laurel fire, then connect it to myth & legend vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "torch",
+      "laurel fire",
+      "myth  legend"
+    ],
+    "visuals": [
+      "column",
+      "laurel fire",
+      "5 letters"
+    ],
+    "greekMark": "delta",
+    "weight": 2
   },
   {
-    id: "ocean-sailing",
-    topicId: "ocean",
-    label: "Sailing & Shore",
-    summary: "Harbors, navigation, craft, and coastlines.",
-    answers: ["harbor", "tide", "anchor", "marina", "current", "sailor", "vessel", "beacon", "compass", "trawler", "ferry", "estuary", "captaincy", "shoreline", "seaworthy", "semaphore"],
+    "id": "myth-breeze-16",
+    "answer": "chimera",
+    "normalized": "chimera",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A fire-breathing hybrid monster from Greek mythology.",
+    "topicId": "myth",
+    "topicLabel": "Myth & Legend",
+    "contentPackIds": [
+      "myth-beings"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 7,
+    "prompt": "A fire-breathing hybrid monster from Greek mythology.",
+    "microHint": "Starts with C, runs 7 letters, and leans toward ancient voices, heroic paths, and temple dust..",
+    "teaser": "Myth & Legend energy with a steady build. This one should read cleanly once it clicks.",
+    "learningNote": "Myth & Legend language cue: this answer behaves like mid-length descriptive vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a legend or old-story idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: chi-me-ra",
+    "usageExample": "Example: \"In the old tale, the chimera appeared near the temple steps.\"",
+    "translationAid": "Translation aid: if you do not know chimera yet, first picture laurel fire, then connect it to myth & legend vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "column",
+      "laurel fire",
+      "myth  legend"
+    ],
+    "visuals": [
+      "owl",
+      "laurel fire",
+      "7 letters"
+    ],
+    "greekMark": "epsilon",
+    "weight": 2
   },
   {
-    id: "garden-blooms",
-    topicId: "garden",
-    label: "Petals & Blooms",
-    summary: "Flowers, petals, pollen, and bright color.",
-    answers: ["rose", "tulip", "orchard", "blossom", "pollen", "nectar", "sunflower", "lavender", "petal", "marigold", "moonflower", "wildflower", "chrysanthemum"],
+    "id": "myth-breeze-17",
+    "answer": "hydra",
+    "normalized": "hydra",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "The many-headed serpent defeated by Heracles.",
+    "topicId": "myth",
+    "topicLabel": "Myth & Legend",
+    "contentPackIds": [
+      "myth-beings"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 5,
+    "prompt": "The many-headed serpent defeated by Heracles.",
+    "microHint": "Starts with H, runs 5 letters, and leans toward ancient voices, heroic paths, and temple dust..",
+    "teaser": "Myth & Legend energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Myth & Legend language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a legend or old-story idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: hy-dra",
+    "usageExample": "Example: \"In the old tale, the hydra appeared near the temple steps.\"",
+    "translationAid": "Translation aid: if you do not know hydra yet, first picture laurel fire, then connect it to myth & legend vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "torch",
+      "laurel fire",
+      "myth  legend"
+    ],
+    "visuals": [
+      "torch",
+      "laurel fire",
+      "5 letters"
+    ],
+    "greekMark": "zeta",
+    "weight": 2
   },
   {
-    id: "garden-growers",
-    topicId: "garden",
-    label: "Roots & Growers",
-    summary: "Leaves, herbs, vines, and the work of growing.",
-    answers: ["fern", "cedar", "ivy", "basil", "meadow", "seedling", "trellis", "mint", "clover", "willow", "root", "stem", "greenhouse", "rosemary", "arborist", "vinework", "seedpod", "grove", "evergreen", "herbarium", "pollinator", "glasshouse", "understory"],
+    "id": "myth-breeze-18",
+    "answer": "atlas",
+    "normalized": "atlas",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "The Titan condemned to hold up the heavens.",
+    "topicId": "myth",
+    "topicLabel": "Myth & Legend",
+    "contentPackIds": [
+      "myth-beings"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 5,
+    "prompt": "The Titan condemned to hold up the heavens.",
+    "microHint": "Starts with A, runs 5 letters, and leans toward ancient voices, heroic paths, and temple dust..",
+    "teaser": "Myth & Legend energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Myth & Legend language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a legend or old-story idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: a-tla-s",
+    "usageExample": "Example: \"In the old tale, the atlas appeared near the temple steps.\"",
+    "translationAid": "Translation aid: if you do not know atlas yet, first picture laurel fire, then connect it to myth & legend vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "torch",
+      "laurel fire",
+      "myth  legend"
+    ],
+    "visuals": [
+      "lyre",
+      "laurel fire",
+      "5 letters"
+    ],
+    "greekMark": "eta",
+    "weight": 2
   },
   {
-    id: "city-transit",
-    topicId: "city",
-    label: "Transit Grid",
-    summary: "Subways, stations, and routes through the city.",
-    answers: ["avenue", "subway", "bridge", "signal", "plaza", "station", "tunnel", "courier", "traffic", "boulevard", "sidewalk", "overpass", "timetable", "underpass", "metroline"],
+    "id": "myth-quest-2",
+    "answer": "immortal",
+    "normalized": "immortal",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A being that lives forever and cannot die.",
+    "topicId": "myth",
+    "topicLabel": "Myth & Legend",
+    "contentPackIds": [
+      "myth-beings"
+    ],
+    "difficulty": "quest",
+    "frequencyBand": "uncommon",
+    "length": 8,
+    "prompt": "A being that lives forever and cannot die.",
+    "microHint": "Starts with I, runs 8 letters, and leans toward ancient voices, heroic paths, and temple dust. with a little extra texture.",
+    "teaser": "Myth & Legend energy with a steady build. There is a little extra texture here.",
+    "learningNote": "Myth & Legend language cue: this answer behaves like mid-length descriptive vocabulary. It is not the first word every learner reaches for, so lean on the mood.",
+    "plainMeaning": "Plain meaning: think of a legend or old-story idea, but with a slightly richer word than the first beginner option.",
+    "pronunciationHint": "Pronunciation: i-mmo-rta-l",
+    "usageExample": "Example: \"In the old tale, the immortal appeared near the temple steps.\"",
+    "translationAid": "Translation aid: if you do not know immortal yet, first picture laurel fire, then connect it to myth & legend vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "owl",
+      "laurel fire",
+      "myth  legend"
+    ],
+    "visuals": [
+      "lyre",
+      "marble echo",
+      "8 letters"
+    ],
+    "greekMark": "delta",
+    "weight": 3
   },
   {
-    id: "city-night",
-    topicId: "city",
-    label: "Night Lights",
-    summary: "Rooftops, storefronts, and after-hours glow.",
-    answers: ["market", "skyline", "lantern", "cafe", "mural", "alley", "rooftop", "district", "balcony", "headlight", "afterhours", "storefront", "highrise", "warehouse", "cityscape", "courtyard", "brickwork"],
+    "id": "myth-quest-4",
+    "answer": "centaur",
+    "normalized": "centaur",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A mythical being with a human torso and a horse’s body.",
+    "topicId": "myth",
+    "topicLabel": "Myth & Legend",
+    "contentPackIds": [
+      "myth-beings"
+    ],
+    "difficulty": "quest",
+    "frequencyBand": "uncommon",
+    "length": 7,
+    "prompt": "A mythical being with a human torso and a horse’s body.",
+    "microHint": "Starts with C, runs 7 letters, and leans toward ancient voices, heroic paths, and temple dust. with a little extra texture.",
+    "teaser": "Myth & Legend energy with a steady build. There is a little extra texture here.",
+    "learningNote": "Myth & Legend language cue: this answer behaves like mid-length descriptive vocabulary. It is not the first word every learner reaches for, so lean on the mood.",
+    "plainMeaning": "Plain meaning: think of a legend or old-story idea, but with a slightly richer word than the first beginner option.",
+    "pronunciationHint": "Pronunciation: ce-ntau-r",
+    "usageExample": "Example: \"In the old tale, the centaur appeared near the temple steps.\"",
+    "translationAid": "Translation aid: if you do not know centaur yet, first picture laurel fire, then connect it to myth & legend vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "column",
+      "laurel fire",
+      "myth  legend"
+    ],
+    "visuals": [
+      "owl",
+      "marble echo",
+      "7 letters"
+    ],
+    "greekMark": "zeta",
+    "weight": 3
   },
   {
-    id: "music-stage",
-    topicId: "music",
-    label: "Stage Energy",
-    summary: "Performance, rhythm, and live-show momentum.",
-    answers: ["melody", "chorus", "rhythm", "ballad", "tempo", "lyric", "cadence", "drummer", "echo", "stanza", "refrain", "bridgework", "riffing", "setlist", "downbeat", "headliner", "resonance", "backbeat", "soundcheck", "tunecraft"],
+    "id": "myth-quest-5",
+    "answer": "gorgon",
+    "normalized": "gorgon",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A snake-haired monster whose gaze could turn people to stone.",
+    "topicId": "myth",
+    "topicLabel": "Myth & Legend",
+    "contentPackIds": [
+      "myth-beings"
+    ],
+    "difficulty": "quest",
+    "frequencyBand": "uncommon",
+    "length": 6,
+    "prompt": "A snake-haired monster whose gaze could turn people to stone.",
+    "microHint": "Starts with G, runs 6 letters, and leans toward ancient voices, heroic paths, and temple dust. with a little extra texture.",
+    "teaser": "Myth & Legend energy with a quick strike. There is a little extra texture here.",
+    "learningNote": "Myth & Legend language cue: this answer behaves like mid-length descriptive vocabulary. It is not the first word every learner reaches for, so lean on the mood.",
+    "plainMeaning": "Plain meaning: think of a legend or old-story idea, but with a slightly richer word than the first beginner option.",
+    "pronunciationHint": "Pronunciation: go-rgo-n",
+    "usageExample": "Example: \"In the old tale, the gorgon appeared near the temple steps.\"",
+    "translationAid": "Translation aid: if you do not know gorgon yet, first picture laurel fire, then connect it to myth & legend vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "lyre",
+      "laurel fire",
+      "myth  legend"
+    ],
+    "visuals": [
+      "torch",
+      "marble echo",
+      "6 letters"
+    ],
+    "greekMark": "eta",
+    "weight": 3
   },
   {
-    id: "music-instruments",
-    topicId: "music",
-    label: "Instruments & Sound",
-    summary: "Objects and structures that make the music happen.",
-    answers: ["piano", "violin", "trumpet", "harmony", "record", "microphone", "crescendo", "overture", "songbook", "symphonic", "counterpoint", "soundboard", "orchestral", "interlude", "syncopation"],
+    "id": "myth-quest-14",
+    "answer": "titaness",
+    "normalized": "titaness",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A female member of the Titans in Greek mythology.",
+    "topicId": "myth",
+    "topicLabel": "Myth & Legend",
+    "contentPackIds": [
+      "myth-beings"
+    ],
+    "difficulty": "quest",
+    "frequencyBand": "uncommon",
+    "length": 8,
+    "prompt": "A female member of the Titans in Greek mythology.",
+    "microHint": "Starts with T, runs 8 letters, and leans toward ancient voices, heroic paths, and temple dust. with a little extra texture.",
+    "teaser": "Myth & Legend energy with a steady build. There is a little extra texture here.",
+    "learningNote": "Myth & Legend language cue: this answer behaves like mid-length descriptive vocabulary. It is not the first word every learner reaches for, so lean on the mood.",
+    "plainMeaning": "Plain meaning: think of a legend or old-story idea, but with a slightly richer word than the first beginner option.",
+    "pronunciationHint": "Pronunciation: ti-ta-ne-ss",
+    "usageExample": "Example: \"In the old tale, the titaness appeared near the temple steps.\"",
+    "translationAid": "Translation aid: if you do not know titaness yet, first picture laurel fire, then connect it to myth & legend vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "owl",
+      "laurel fire",
+      "myth  legend"
+    ],
+    "visuals": [
+      "lyre",
+      "marble echo",
+      "8 letters"
+    ],
+    "greekMark": "delta",
+    "weight": 3
   },
   {
-    id: "kitchen-pantry",
-    topicId: "kitchen",
-    label: "Pantry Staples",
-    summary: "Core ingredients, tools, and everyday prep.",
-    answers: ["skillet", "pepper", "butter", "whisk", "kettle", "pantry", "noodle", "recipe", "garlic", "honey", "rosemary", "marinade", "teacup", "saucepan", "fermentation", "buttermilk"],
+    "id": "cosmos-breeze-2",
+    "answer": "rocket",
+    "normalized": "rocket",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A vehicle propelled upward by engines that expel hot gas.",
+    "topicId": "cosmos",
+    "topicLabel": "Cosmos",
+    "contentPackIds": [
+      "cosmos-flight"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 6,
+    "prompt": "A vehicle propelled upward by engines that expel hot gas.",
+    "microHint": "Starts with R, runs 6 letters, and leans toward orbital drift, radiant dust, and patient signals..",
+    "teaser": "Cosmos energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Cosmos language cue: this answer behaves like mid-length descriptive vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a space or sky idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: ro-cke-t",
+    "usageExample": "Example: \"The crew watched the rocket drift across the dark sky.\"",
+    "translationAid": "Translation aid: if you do not know rocket yet, first picture signal haze, then connect it to cosmos vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "comet",
+      "signal haze",
+      "cosmos"
+    ],
+    "visuals": [
+      "comet",
+      "signal haze",
+      "6 letters"
+    ],
+    "greekMark": "gamma",
+    "weight": 2
   },
   {
-    id: "kitchen-bakes",
-    topicId: "kitchen",
-    label: "Bakes & Sweets",
-    summary: "Warm ovens, cocoa, pastry, and dessert craft.",
-    answers: ["biscuit", "simmer", "berry", "pastry", "cocoa", "supper", "feast", "sourdough", "caramel", "bakehouse", "cinnamon", "confection", "hearthstone", "crystallized", "aromatic", "charbroiled"],
+    "id": "cosmos-breeze-5",
+    "answer": "orbit",
+    "normalized": "orbit",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "The curved path one object follows around another in space.",
+    "topicId": "cosmos",
+    "topicLabel": "Cosmos",
+    "contentPackIds": [
+      "cosmos-flight"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 5,
+    "prompt": "The curved path one object follows around another in space.",
+    "microHint": "Starts with O, runs 5 letters, and leans toward orbital drift, radiant dust, and patient signals..",
+    "teaser": "Cosmos energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Cosmos language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a space or sky idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: o-rbi-t",
+    "usageExample": "Example: \"The crew watched the orbit drift across the dark sky.\"",
+    "translationAid": "Translation aid: if you do not know orbit yet, first picture signal haze, then connect it to cosmos vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "ring",
+      "signal haze",
+      "cosmos"
+    ],
+    "visuals": [
+      "ring",
+      "signal haze",
+      "5 letters"
+    ],
+    "greekMark": "zeta",
+    "weight": 2
   },
   {
-    id: "wild-creatures",
-    topicId: "wild",
-    label: "Wild Creatures",
-    summary: "Animals, feathers, and motion in the open wild.",
-    answers: ["falcon", "otter", "wolf", "feather", "trail", "campfire", "ridgeback", "wanderer"],
+    "id": "cosmos-breeze-10",
+    "answer": "signal",
+    "normalized": "signal",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A transmitted message used to communicate across a distance.",
+    "topicId": "cosmos",
+    "topicLabel": "Cosmos",
+    "contentPackIds": [
+      "cosmos-flight"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 6,
+    "prompt": "A transmitted message used to communicate across a distance.",
+    "microHint": "Starts with S, runs 6 letters, and leans toward orbital drift, radiant dust, and patient signals..",
+    "teaser": "Cosmos energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Cosmos language cue: this answer behaves like mid-length descriptive vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a space or sky idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: si-gna-l",
+    "usageExample": "Example: \"The crew watched the signal drift across the dark sky.\"",
+    "translationAid": "Translation aid: if you do not know signal yet, first picture signal haze, then connect it to cosmos vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "comet",
+      "signal haze",
+      "cosmos"
+    ],
+    "visuals": [
+      "comet",
+      "signal haze",
+      "6 letters"
+    ],
+    "greekMark": "lambda",
+    "weight": 2
   },
   {
-    id: "wild-landforms",
-    topicId: "wild",
-    label: "Peaks & Rivers",
-    summary: "Ground, stone, and the shape of the landscape.",
-    answers: ["forest", "canyon", "summit", "river", "boulder", "pine", "timber", "meadow", "granite", "valley", "sunrise", "moonrise", "waterfall", "hillside", "stonepath", "firelight", "highland", "backpack", "wilderness", "mountaintop", "glacial", "riverbend", "overland"],
+    "id": "cosmos-breeze-13",
+    "answer": "shuttle",
+    "normalized": "shuttle",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A reusable craft designed to travel between Earth and space.",
+    "topicId": "cosmos",
+    "topicLabel": "Cosmos",
+    "contentPackIds": [
+      "cosmos-flight"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 7,
+    "prompt": "A reusable craft designed to travel between Earth and space.",
+    "microHint": "Starts with S, runs 7 letters, and leans toward orbital drift, radiant dust, and patient signals..",
+    "teaser": "Cosmos energy with a steady build. This one should read cleanly once it clicks.",
+    "learningNote": "Cosmos language cue: this answer behaves like mid-length descriptive vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a space or sky idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: shu-ttle",
+    "usageExample": "Example: \"The crew watched the shuttle drift across the dark sky.\"",
+    "translationAid": "Translation aid: if you do not know shuttle yet, first picture signal haze, then connect it to cosmos vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "planet",
+      "signal haze",
+      "cosmos"
+    ],
+    "visuals": [
+      "ring",
+      "signal haze",
+      "7 letters"
+    ],
+    "greekMark": "beta",
+    "weight": 2
   },
   {
-    id: "weather-storms",
-    topicId: "weather",
-    label: "Stormfront",
-    summary: "Rain, wind, thunder, and hard-moving weather.",
-    answers: ["thunder", "drizzle", "cyclone", "hailstorm", "monsoon", "gust", "forecast", "lightning", "moonstorm", "rainfall", "windward", "stormfront", "heatwave", "barometric", "thunderhead", "torrential", "solarwind"],
+    "id": "cosmos-breeze-14",
+    "answer": "rover",
+    "normalized": "rover",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A robotic vehicle built to explore another world’s surface.",
+    "topicId": "cosmos",
+    "topicLabel": "Cosmos",
+    "contentPackIds": [
+      "cosmos-flight"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 5,
+    "prompt": "A robotic vehicle built to explore another world’s surface.",
+    "microHint": "Starts with R, runs 5 letters, and leans toward orbital drift, radiant dust, and patient signals..",
+    "teaser": "Cosmos energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Cosmos language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a space or sky idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: ro-ve-r",
+    "usageExample": "Example: \"The crew watched the rover drift across the dark sky.\"",
+    "translationAid": "Translation aid: if you do not know rover yet, first picture signal haze, then connect it to cosmos vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "ring",
+      "signal haze",
+      "cosmos"
+    ],
+    "visuals": [
+      "comet",
+      "signal haze",
+      "5 letters"
+    ],
+    "greekMark": "gamma",
+    "weight": 2
   },
   {
-    id: "weather-skies",
-    topicId: "weather",
-    label: "Sky Signs",
-    summary: "Clouds, color, and changing light overhead.",
-    answers: ["breeze", "rainbow", "frost", "mist", "sunset", "shadow", "winter", "summer", "daybreak", "overcast", "cloudbank", "atmospheric", "luminescent", "nocturnal"],
+    "id": "cosmos-breeze-16",
+    "answer": "satellite",
+    "normalized": "satellite",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "An object that travels around a planet or other body.",
+    "topicId": "cosmos",
+    "topicLabel": "Cosmos",
+    "contentPackIds": [
+      "cosmos-flight"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 9,
+    "prompt": "An object that travels around a planet or other body.",
+    "microHint": "Starts with S, runs 9 letters, and leans toward orbital drift, radiant dust, and patient signals..",
+    "teaser": "Cosmos energy with a steady build. This one should read cleanly once it clicks.",
+    "learningNote": "Cosmos language cue: this answer behaves like longer expressive vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a space or sky idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: sa-te-lli-te",
+    "usageExample": "Example: \"The crew watched the satellite drift across the dark sky.\"",
+    "translationAid": "Translation aid: if you do not know satellite yet, first picture signal haze, then connect it to cosmos vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "ring",
+      "signal haze",
+      "cosmos"
+    ],
+    "visuals": [
+      "star",
+      "signal haze",
+      "9 letters"
+    ],
+    "greekMark": "epsilon",
+    "weight": 2
   },
   {
-    id: "desert-survival",
-    topicId: "desert",
-    label: "Dunes & Survival",
-    summary: "Travel, shelter, and motion across the dry open land.",
-    answers: ["dune", "cactus", "oasis", "mesa", "canyon", "lizard", "mirage", "lantern", "trail", "nomad", "caravan", "saddle", "drywind", "sundial", "jackal", "campfire", "sandstorm", "waystation", "caravanserai"],
+    "id": "cosmos-breeze-19",
+    "answer": "module",
+    "normalized": "module",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A self-contained section of a spacecraft or station.",
+    "topicId": "cosmos",
+    "topicLabel": "Cosmos",
+    "contentPackIds": [
+      "cosmos-flight"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 6,
+    "prompt": "A self-contained section of a spacecraft or station.",
+    "microHint": "Starts with M, runs 6 letters, and leans toward orbital drift, radiant dust, and patient signals..",
+    "teaser": "Cosmos energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Cosmos language cue: this answer behaves like mid-length descriptive vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a space or sky idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: mo-du-le",
+    "usageExample": "Example: \"The crew watched the module drift across the dark sky.\"",
+    "translationAid": "Translation aid: if you do not know module yet, first picture signal haze, then connect it to cosmos vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "comet",
+      "signal haze",
+      "cosmos"
+    ],
+    "visuals": [
+      "planet",
+      "signal haze",
+      "6 letters"
+    ],
+    "greekMark": "theta",
+    "weight": 2
   },
   {
-    id: "desert-stones",
-    topicId: "desert",
-    label: "Stone & Heat",
-    summary: "Mineral, sunlight, and arid formations.",
-    answers: ["amber", "sandstone", "windcarved", "moonbasin", "saltplain", "dusttrail", "sunbaked", "torchline", "ridgeglass", "horizonless", "sunscorched", "glasssand", "aridlands", "weatherstone", "sandstonekeep"],
+    "id": "cosmos-breeze-20",
+    "answer": "capsule",
+    "normalized": "capsule",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A compact crew compartment designed for spaceflight and return.",
+    "topicId": "cosmos",
+    "topicLabel": "Cosmos",
+    "contentPackIds": [
+      "cosmos-flight"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 7,
+    "prompt": "A compact crew compartment designed for spaceflight and return.",
+    "microHint": "Starts with C, runs 7 letters, and leans toward orbital drift, radiant dust, and patient signals..",
+    "teaser": "Cosmos energy with a steady build. This one should read cleanly once it clicks.",
+    "learningNote": "Cosmos language cue: this answer behaves like mid-length descriptive vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a space or sky idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: ca-psu-le",
+    "usageExample": "Example: \"The crew watched the capsule drift across the dark sky.\"",
+    "translationAid": "Translation aid: if you do not know capsule yet, first picture signal haze, then connect it to cosmos vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "planet",
+      "signal haze",
+      "cosmos"
+    ],
+    "visuals": [
+      "star",
+      "signal haze",
+      "7 letters"
+    ],
+    "greekMark": "iota",
+    "weight": 2
   },
   {
-    id: "festival-parade",
-    topicId: "festival",
-    label: "Parade Route",
-    summary: "Lanterns, banners, and moving celebration.",
-    answers: ["parade", "lantern", "ribbon", "confetti", "banner", "costume", "drummer", "ticket", "sparkle", "carnival", "firework", "market", "dancer", "procession", "paperlight", "streamers", "fairground"],
+    "id": "cosmos-quest-8",
+    "answer": "trajectory",
+    "normalized": "trajectory",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "The calculated path of a moving object through space.",
+    "topicId": "cosmos",
+    "topicLabel": "Cosmos",
+    "contentPackIds": [
+      "cosmos-flight"
+    ],
+    "difficulty": "quest",
+    "frequencyBand": "uncommon",
+    "length": 10,
+    "prompt": "The calculated path of a moving object through space.",
+    "microHint": "Starts with T, runs 10 letters, and leans toward orbital drift, radiant dust, and patient signals. with a little extra texture.",
+    "teaser": "Cosmos energy with a longer reveal. There is a little extra texture here.",
+    "learningNote": "Cosmos language cue: this answer behaves like longer expressive vocabulary. It is not the first word every learner reaches for, so lean on the mood.",
+    "plainMeaning": "Plain meaning: think of a space or sky idea, but with a slightly richer word than the first beginner option.",
+    "pronunciationHint": "Pronunciation: tra-je-cto-ry",
+    "usageExample": "Example: \"The crew watched the trajectory drift across the dark sky.\"",
+    "translationAid": "Translation aid: if you do not know trajectory yet, first picture signal haze, then connect it to cosmos vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "comet",
+      "signal haze",
+      "cosmos"
+    ],
+    "visuals": [
+      "star",
+      "planet glow",
+      "10 letters"
+    ],
+    "greekMark": "kappa",
+    "weight": 3
   },
   {
-    id: "festival-performance",
-    topicId: "festival",
-    label: "Stage & Sound",
-    summary: "Performance energy, spotlight, and night-square spectacle.",
-    answers: ["stage", "chorus", "trumpet", "moonstage", "celebratory", "afterglow", "headliner", "spotlight", "pageantry", "masquerade", "illuminations", "soundscape", "wonderlight", "revelatory"],
+    "id": "cosmos-quest-9",
+    "answer": "observatory",
+    "normalized": "observatory",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A facility equipped to study the sky and celestial objects.",
+    "topicId": "cosmos",
+    "topicLabel": "Cosmos",
+    "contentPackIds": [
+      "cosmos-flight"
+    ],
+    "difficulty": "quest",
+    "frequencyBand": "uncommon",
+    "length": 11,
+    "prompt": "A facility equipped to study the sky and celestial objects.",
+    "microHint": "Starts with O, runs 11 letters, and leans toward orbital drift, radiant dust, and patient signals. with a little extra texture.",
+    "teaser": "Cosmos energy with a longer reveal. There is a little extra texture here.",
+    "learningNote": "Cosmos language cue: this answer behaves like longer expressive vocabulary. It is not the first word every learner reaches for, so lean on the mood.",
+    "plainMeaning": "Plain meaning: think of a space or sky idea, but with a slightly richer word than the first beginner option.",
+    "pronunciationHint": "Pronunciation: o-bse-rva-to-ry",
+    "usageExample": "Example: \"The crew watched the observatory drift across the dark sky.\"",
+    "translationAid": "Translation aid: if you do not know observatory yet, first picture signal haze, then connect it to cosmos vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "planet",
+      "signal haze",
+      "cosmos"
+    ],
+    "visuals": [
+      "ring",
+      "planet glow",
+      "11 letters"
+    ],
+    "greekMark": "lambda",
+    "weight": 3
   },
   {
-    id: "winter-weather",
-    topicId: "winter",
-    label: "Frost & Snow",
-    summary: "Cold air, snowfall, and ice-bright weather.",
-    answers: ["winter", "frost", "icicle", "snowfall", "moonfrost", "snowdrift", "northwind", "moonsnow", "silverpine", "crystalline", "everfrost", "glimmersnow", "frostbound"],
+    "id": "cosmos-quest-13",
+    "answer": "antenna",
+    "normalized": "antenna",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A device that sends or receives radio waves.",
+    "topicId": "cosmos",
+    "topicLabel": "Cosmos",
+    "contentPackIds": [
+      "cosmos-flight"
+    ],
+    "difficulty": "quest",
+    "frequencyBand": "uncommon",
+    "length": 7,
+    "prompt": "A device that sends or receives radio waves.",
+    "microHint": "Starts with A, runs 7 letters, and leans toward orbital drift, radiant dust, and patient signals. with a little extra texture.",
+    "teaser": "Cosmos energy with a steady build. There is a little extra texture here.",
+    "learningNote": "Cosmos language cue: this answer behaves like mid-length descriptive vocabulary. It is not the first word every learner reaches for, so lean on the mood.",
+    "plainMeaning": "Plain meaning: think of a space or sky idea, but with a slightly richer word than the first beginner option.",
+    "pronunciationHint": "Pronunciation: a-nte-nna",
+    "usageExample": "Example: \"The crew watched the antenna drift across the dark sky.\"",
+    "translationAid": "Translation aid: if you do not know antenna yet, first picture signal haze, then connect it to cosmos vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "planet",
+      "signal haze",
+      "cosmos"
+    ],
+    "visuals": [
+      "ring",
+      "planet glow",
+      "7 letters"
+    ],
+    "greekMark": "gamma",
+    "weight": 3
   },
   {
-    id: "winter-cozy",
-    topicId: "winter",
-    label: "Cozy Hearth",
-    summary: "Warm shelter, fireside comfort, and winter calm.",
-    answers: ["pinewood", "blanket", "firelight", "cocoa", "mitten", "sled", "lantern", "chimney", "scarf", "hearthlight", "windowglow", "fireside", "weatherglass", "wintertide"],
+    "id": "cosmos-quest-20",
+    "answer": "launchpad",
+    "normalized": "launchpad",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "The prepared platform from which a spacecraft takes off.",
+    "topicId": "cosmos",
+    "topicLabel": "Cosmos",
+    "contentPackIds": [
+      "cosmos-flight"
+    ],
+    "difficulty": "quest",
+    "frequencyBand": "uncommon",
+    "length": 9,
+    "prompt": "The prepared platform from which a spacecraft takes off.",
+    "microHint": "Starts with L, runs 9 letters, and leans toward orbital drift, radiant dust, and patient signals. with a little extra texture.",
+    "teaser": "Cosmos energy with a steady build. There is a little extra texture here.",
+    "learningNote": "Cosmos language cue: this answer behaves like longer expressive vocabulary. It is not the first word every learner reaches for, so lean on the mood.",
+    "plainMeaning": "Plain meaning: think of a space or sky idea, but with a slightly richer word than the first beginner option.",
+    "pronunciationHint": "Pronunciation: lau-nchpa-d",
+    "usageExample": "Example: \"The crew watched the launchpad drift across the dark sky.\"",
+    "translationAid": "Translation aid: if you do not know launchpad yet, first picture signal haze, then connect it to cosmos vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "ring",
+      "signal haze",
+      "cosmos"
+    ],
+    "visuals": [
+      "star",
+      "planet glow",
+      "9 letters"
+    ],
+    "greekMark": "kappa",
+    "weight": 3
   },
   {
-    id: "invent-workshop",
-    topicId: "invent",
-    label: "Workshop Mechanics",
-    summary: "Tools, gears, and moving engineered parts.",
-    answers: ["engine", "circuit", "piston", "magnet", "lever", "pulley", "copper", "gadget", "blueprint", "signal", "battery", "workshop", "spark", "rotor", "prototype", "torque", "pressure", "valve", "motioncraft", "gearbox", "mechanism", "calibration", "microcircuit", "instrumentation"],
+    "id": "cosmos-mythic-17",
+    "answer": "observatory",
+    "normalized": "observatory",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A facility equipped to study the sky and celestial objects.",
+    "topicId": "cosmos",
+    "topicLabel": "Cosmos",
+    "contentPackIds": [
+      "cosmos-flight"
+    ],
+    "difficulty": "mythic",
+    "frequencyBand": "rare",
+    "length": 11,
+    "prompt": "A facility equipped to study the sky and celestial objects.",
+    "microHint": "Starts with O, runs 11 letters, leans toward orbital drift, radiant dust, and patient signals., and sits in the sharper end of the lexicon.",
+    "teaser": "Cosmos energy with a longer reveal. Expect a less obvious finish.",
+    "learningNote": "Cosmos language cue: this answer behaves like longer expressive vocabulary. It is less frequent, so use the scene and tone together.",
+    "plainMeaning": "Plain meaning: think of a space or sky idea, but in a less common or more literary way.",
+    "pronunciationHint": "Pronunciation: o-bse-rva-to-ry",
+    "usageExample": "Example: \"The crew watched the observatory drift across the dark sky.\"",
+    "translationAid": "Translation aid: if you do not know observatory yet, first picture signal haze, then connect it to cosmos vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "planet",
+      "signal haze",
+      "cosmos"
+    ],
+    "visuals": [
+      "ring",
+      "midnight orbit",
+      "11 letters"
+    ],
+    "greekMark": "theta",
+    "weight": 4
   },
   {
-    id: "invent-power",
-    topicId: "invent",
-    label: "Spark & Energy",
-    summary: "Voltage, ignition, and powered invention language.",
-    answers: ["lanternwork", "voltage", "oscillation", "steamdriven", "architecture"],
+    "id": "ocean-breeze-0",
+    "answer": "coral",
+    "normalized": "coral",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A marine animal whose colonies can build vast reefs.",
+    "topicId": "ocean",
+    "topicLabel": "Ocean",
+    "contentPackIds": [
+      "ocean-life"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 5,
+    "prompt": "A marine animal whose colonies can build vast reefs.",
+    "microHint": "Starts with C, runs 5 letters, and leans toward salt air, deep water, and bright things under the tide..",
+    "teaser": "Ocean energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Ocean language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a sea, shore, or water idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: co-ra-l",
+    "usageExample": "Example: \"From the harbor wall, the coral stood out above the tide.\"",
+    "translationAid": "Translation aid: if you do not know coral yet, first picture foam trail, then connect it to ocean vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "shell",
+      "foam trail",
+      "ocean"
+    ],
+    "visuals": [
+      "wave",
+      "foam trail",
+      "5 letters"
+    ],
+    "greekMark": "alpha",
+    "weight": 2
   },
   {
-    id: "story-books",
-    topicId: "story",
-    label: "Books & Pages",
-    summary: "Authors, paper, journals, and the physical story world.",
-    answers: ["chapter", "author", "library", "paper", "letter", "journal", "prologue", "bookmark", "passage", "chapterhouse", "epilogue", "manuscript"],
+    "id": "ocean-breeze-5",
+    "answer": "shell",
+    "normalized": "shell",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A hard outer covering made by many sea creatures.",
+    "topicId": "ocean",
+    "topicLabel": "Ocean",
+    "contentPackIds": [
+      "ocean-life"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 5,
+    "prompt": "A hard outer covering made by many sea creatures.",
+    "microHint": "Starts with S, runs 5 letters, and leans toward salt air, deep water, and bright things under the tide..",
+    "teaser": "Ocean energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Ocean language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a sea, shore, or water idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: she-ll",
+    "usageExample": "Example: \"From the harbor wall, the shell stood out above the tide.\"",
+    "translationAid": "Translation aid: if you do not know shell yet, first picture foam trail, then connect it to ocean vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "shell",
+      "foam trail",
+      "ocean"
+    ],
+    "visuals": [
+      "shell",
+      "foam trail",
+      "5 letters"
+    ],
+    "greekMark": "zeta",
+    "weight": 2
   },
   {
-    id: "story-plot",
-    topicId: "story",
-    label: "Plot & Voices",
-    summary: "Narration, mystery, endings, and turns of story.",
-    answers: ["lantern", "whisper", "fable", "riddle", "ending", "villain", "secret", "witness", "narrator", "moonlight", "plotline", "folktale", "mystery", "allegorical", "storytelling", "dreamscape", "cliffhanger"],
+    "id": "ocean-breeze-6",
+    "answer": "reef",
+    "normalized": "reef",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A ridge of rock or living material near the sea’s surface.",
+    "topicId": "ocean",
+    "topicLabel": "Ocean",
+    "contentPackIds": [
+      "ocean-life"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 4,
+    "prompt": "A ridge of rock or living material near the sea’s surface.",
+    "microHint": "Starts with R, runs 4 letters, and leans toward salt air, deep water, and bright things under the tide..",
+    "teaser": "Ocean energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Ocean language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a sea, shore, or water idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: ree-f",
+    "usageExample": "Example: \"From the harbor wall, the reef stood out above the tide.\"",
+    "translationAid": "Translation aid: if you do not know reef yet, first picture foam trail, then connect it to ocean vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "wave",
+      "foam trail",
+      "ocean"
+    ],
+    "visuals": [
+      "anchor",
+      "foam trail",
+      "4 letters"
+    ],
+    "greekMark": "eta",
+    "weight": 2
   },
   {
-    id: "greek-symbols",
-    topicId: "greek",
-    label: "Letter Forms",
-    summary: "Core Greek letters and symbol marks.",
-    answers: ["alpha", "beta", "gamma", "delta", "sigma", "omega", "theta", "lambda", "kappa", "mu", "pi", "rho", "tau", "phi", "psi", "zeta", "eta", "iota"],
+    "id": "ocean-breeze-8",
+    "answer": "dolphin",
+    "normalized": "dolphin",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "An intelligent marine mammal known for clicks and whistles.",
+    "topicId": "ocean",
+    "topicLabel": "Ocean",
+    "contentPackIds": [
+      "ocean-life"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 7,
+    "prompt": "An intelligent marine mammal known for clicks and whistles.",
+    "microHint": "Starts with D, runs 7 letters, and leans toward salt air, deep water, and bright things under the tide..",
+    "teaser": "Ocean energy with a steady build. This one should read cleanly once it clicks.",
+    "learningNote": "Ocean language cue: this answer behaves like mid-length descriptive vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a sea, shore, or water idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: do-lphi-n",
+    "usageExample": "Example: \"From the harbor wall, the dolphin stood out above the tide.\"",
+    "translationAid": "Translation aid: if you do not know dolphin yet, first picture foam trail, then connect it to ocean vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "coral",
+      "foam trail",
+      "ocean"
+    ],
+    "visuals": [
+      "wave",
+      "foam trail",
+      "7 letters"
+    ],
+    "greekMark": "iota",
+    "weight": 2
   },
   {
-    id: "greek-scholar",
-    topicId: "greek",
-    label: "Scholar Signs",
-    summary: "Notation, codex, and language around symbol study.",
-    answers: ["epsilon", "omicron", "upsilon", "digamma", "glyphic", "symbolist", "theorem", "notation", "lexicon", "codex", "philosophic", "harmonics", "mnemonic", "semiotic", "etymology", "iconography"],
+    "id": "ocean-breeze-16",
+    "answer": "kelp",
+    "normalized": "kelp",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A large brown seaweed that can form underwater forests.",
+    "topicId": "ocean",
+    "topicLabel": "Ocean",
+    "contentPackIds": [
+      "ocean-life"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 4,
+    "prompt": "A large brown seaweed that can form underwater forests.",
+    "microHint": "Starts with K, runs 4 letters, and leans toward salt air, deep water, and bright things under the tide..",
+    "teaser": "Ocean energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Ocean language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a sea, shore, or water idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: ke-lp",
+    "usageExample": "Example: \"From the harbor wall, the kelp stood out above the tide.\"",
+    "translationAid": "Translation aid: if you do not know kelp yet, first picture foam trail, then connect it to ocean vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "wave",
+      "foam trail",
+      "ocean"
+    ],
+    "visuals": [
+      "wave",
+      "foam trail",
+      "4 letters"
+    ],
+    "greekMark": "epsilon",
+    "weight": 2
   },
+  {
+    "id": "ocean-breeze-17",
+    "answer": "seagull",
+    "normalized": "seagull",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A coastal bird often seen circling beaches and harbors.",
+    "topicId": "ocean",
+    "topicLabel": "Ocean",
+    "contentPackIds": [
+      "ocean-life"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 7,
+    "prompt": "A coastal bird often seen circling beaches and harbors.",
+    "microHint": "Starts with S, runs 7 letters, and leans toward salt air, deep water, and bright things under the tide..",
+    "teaser": "Ocean energy with a steady build. This one should read cleanly once it clicks.",
+    "learningNote": "Ocean language cue: this answer behaves like mid-length descriptive vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a sea, shore, or water idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: sea-gu-ll",
+    "usageExample": "Example: \"From the harbor wall, the seagull stood out above the tide.\"",
+    "translationAid": "Translation aid: if you do not know seagull yet, first picture foam trail, then connect it to ocean vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "coral",
+      "foam trail",
+      "ocean"
+    ],
+    "visuals": [
+      "shell",
+      "foam trail",
+      "7 letters"
+    ],
+    "greekMark": "zeta",
+    "weight": 2
+  },
+  {
+    "id": "ocean-breeze-18",
+    "answer": "seabed",
+    "normalized": "seabed",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "The ground at the bottom of a sea or ocean.",
+    "topicId": "ocean",
+    "topicLabel": "Ocean",
+    "contentPackIds": [
+      "ocean-life"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 6,
+    "prompt": "The ground at the bottom of a sea or ocean.",
+    "microHint": "Starts with S, runs 6 letters, and leans toward salt air, deep water, and bright things under the tide..",
+    "teaser": "Ocean energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Ocean language cue: this answer behaves like mid-length descriptive vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a sea, shore, or water idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: sea-be-d",
+    "usageExample": "Example: \"From the harbor wall, the seabed stood out above the tide.\"",
+    "translationAid": "Translation aid: if you do not know seabed yet, first picture foam trail, then connect it to ocean vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "anchor",
+      "foam trail",
+      "ocean"
+    ],
+    "visuals": [
+      "anchor",
+      "foam trail",
+      "6 letters"
+    ],
+    "greekMark": "eta",
+    "weight": 2
+  },
+  {
+    "id": "ocean-quest-0",
+    "answer": "brackish",
+    "normalized": "brackish",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "Describing water that is partly fresh and partly salty.",
+    "topicId": "ocean",
+    "topicLabel": "Ocean",
+    "contentPackIds": [
+      "ocean-life"
+    ],
+    "difficulty": "quest",
+    "frequencyBand": "uncommon",
+    "length": 8,
+    "prompt": "Describing water that is partly fresh and partly salty.",
+    "microHint": "Starts with B, runs 8 letters, and leans toward salt air, deep water, and bright things under the tide. with a little extra texture.",
+    "teaser": "Ocean energy with a steady build. There is a little extra texture here.",
+    "learningNote": "Ocean language cue: this answer behaves like mid-length descriptive vocabulary. It is not the first word every learner reaches for, so lean on the mood.",
+    "plainMeaning": "Plain meaning: think of a sea, shore, or water idea, but with a slightly richer word than the first beginner option.",
+    "pronunciationHint": "Pronunciation: bra-cki-sh",
+    "usageExample": "Example: \"From the harbor wall, the brackish stood out above the tide.\"",
+    "translationAid": "Translation aid: if you do not know brackish yet, first picture foam trail, then connect it to ocean vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "wave",
+      "foam trail",
+      "ocean"
+    ],
+    "visuals": [
+      "wave",
+      "tidal shimmer",
+      "8 letters"
+    ],
+    "greekMark": "beta",
+    "weight": 3
+  },
+  {
+    "id": "ocean-quest-1",
+    "answer": "lanternfish",
+    "normalized": "lanternfish",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A small deep-sea fish with light-producing organs.",
+    "topicId": "ocean",
+    "topicLabel": "Ocean",
+    "contentPackIds": [
+      "ocean-life"
+    ],
+    "difficulty": "quest",
+    "frequencyBand": "uncommon",
+    "length": 11,
+    "prompt": "A small deep-sea fish with light-producing organs.",
+    "microHint": "Starts with L, runs 11 letters, and leans toward salt air, deep water, and bright things under the tide. with a little extra texture.",
+    "teaser": "Ocean energy with a longer reveal. There is a little extra texture here.",
+    "learningNote": "Ocean language cue: this answer behaves like longer expressive vocabulary. It is not the first word every learner reaches for, so lean on the mood.",
+    "plainMeaning": "Plain meaning: think of a sea, shore, or water idea, but with a slightly richer word than the first beginner option.",
+    "pronunciationHint": "Pronunciation: la-nte-rnfi-sh",
+    "usageExample": "Example: \"From the harbor wall, the lanternfish stood out above the tide.\"",
+    "translationAid": "Translation aid: if you do not know lanternfish yet, first picture foam trail, then connect it to ocean vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "coral",
+      "foam trail",
+      "ocean"
+    ],
+    "visuals": [
+      "shell",
+      "tidal shimmer",
+      "11 letters"
+    ],
+    "greekMark": "gamma",
+    "weight": 3
+  },
+  {
+    "id": "ocean-quest-3",
+    "answer": "tidepool",
+    "normalized": "tidepool",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A rocky hollow that holds seawater after the tide retreats.",
+    "topicId": "ocean",
+    "topicLabel": "Ocean",
+    "contentPackIds": [
+      "ocean-life"
+    ],
+    "difficulty": "quest",
+    "frequencyBand": "uncommon",
+    "length": 8,
+    "prompt": "A rocky hollow that holds seawater after the tide retreats.",
+    "microHint": "Starts with T, runs 8 letters, and leans toward salt air, deep water, and bright things under the tide. with a little extra texture.",
+    "teaser": "Ocean energy with a steady build. There is a little extra texture here.",
+    "learningNote": "Ocean language cue: this answer behaves like mid-length descriptive vocabulary. It is not the first word every learner reaches for, so lean on the mood.",
+    "plainMeaning": "Plain meaning: think of a sea, shore, or water idea, but with a slightly richer word than the first beginner option.",
+    "pronunciationHint": "Pronunciation: ti-de-poo-l",
+    "usageExample": "Example: \"From the harbor wall, the tidepool stood out above the tide.\"",
+    "translationAid": "Translation aid: if you do not know tidepool yet, first picture foam trail, then connect it to ocean vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "wave",
+      "foam trail",
+      "ocean"
+    ],
+    "visuals": [
+      "coral",
+      "tidal shimmer",
+      "8 letters"
+    ],
+    "greekMark": "epsilon",
+    "weight": 3
+  },
+  {
+    "id": "ocean-quest-4",
+    "answer": "barnacle",
+    "normalized": "barnacle",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A small crustacean that fixes itself to rocks, boats, or whales.",
+    "topicId": "ocean",
+    "topicLabel": "Ocean",
+    "contentPackIds": [
+      "ocean-life"
+    ],
+    "difficulty": "quest",
+    "frequencyBand": "uncommon",
+    "length": 8,
+    "prompt": "A small crustacean that fixes itself to rocks, boats, or whales.",
+    "microHint": "Starts with B, runs 8 letters, and leans toward salt air, deep water, and bright things under the tide. with a little extra texture.",
+    "teaser": "Ocean energy with a steady build. There is a little extra texture here.",
+    "learningNote": "Ocean language cue: this answer behaves like mid-length descriptive vocabulary. It is not the first word every learner reaches for, so lean on the mood.",
+    "plainMeaning": "Plain meaning: think of a sea, shore, or water idea, but with a slightly richer word than the first beginner option.",
+    "pronunciationHint": "Pronunciation: ba-rna-cle",
+    "usageExample": "Example: \"From the harbor wall, the barnacle stood out above the tide.\"",
+    "translationAid": "Translation aid: if you do not know barnacle yet, first picture foam trail, then connect it to ocean vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "wave",
+      "foam trail",
+      "ocean"
+    ],
+    "visuals": [
+      "wave",
+      "tidal shimmer",
+      "8 letters"
+    ],
+    "greekMark": "zeta",
+    "weight": 3
+  },
+  {
+    "id": "ocean-quest-6",
+    "answer": "undertow",
+    "normalized": "undertow",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "A current beneath the surface that flows away from shore.",
+    "topicId": "ocean",
+    "topicLabel": "Ocean",
+    "contentPackIds": [
+      "ocean-life"
+    ],
+    "difficulty": "quest",
+    "frequencyBand": "uncommon",
+    "length": 8,
+    "prompt": "A current beneath the surface that flows away from shore.",
+    "microHint": "Starts with U, runs 8 letters, and leans toward salt air, deep water, and bright things under the tide. with a little extra texture.",
+    "teaser": "Ocean energy with a steady build. There is a little extra texture here.",
+    "learningNote": "Ocean language cue: this answer behaves like mid-length descriptive vocabulary. It is not the first word every learner reaches for, so lean on the mood.",
+    "plainMeaning": "Plain meaning: think of a sea, shore, or water idea, but with a slightly richer word than the first beginner option.",
+    "pronunciationHint": "Pronunciation: u-nde-rto-w",
+    "usageExample": "Example: \"From the harbor wall, the undertow stood out above the tide.\"",
+    "translationAid": "Translation aid: if you do not know undertow yet, first picture foam trail, then connect it to ocean vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "wave",
+      "foam trail",
+      "ocean"
+    ],
+    "visuals": [
+      "anchor",
+      "tidal shimmer",
+      "8 letters"
+    ],
+    "greekMark": "theta",
+    "weight": 3
+  },
+  {
+    "id": "greek-breeze-0",
+    "answer": "alpha",
+    "normalized": "alpha",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "The first letter of the Greek alphabet.",
+    "topicId": "greek",
+    "topicLabel": "Greek Letters",
+    "contentPackIds": [
+      "greek-symbols"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 5,
+    "prompt": "The first letter of the Greek alphabet.",
+    "microHint": "Starts with A, runs 5 letters, and leans toward glyphs, symbols, and a playful coded layer..",
+    "teaser": "Greek Letters energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Greek Letters language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a symbol, letter, or coded idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: a-lpha",
+    "usageExample": "Example: \"In the notes, the alpha made the symbol easier to remember.\"",
+    "translationAid": "Translation aid: if you do not know alpha yet, first picture glyph spiral, then connect it to greek letters vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "sigma",
+      "glyph spiral",
+      "greek letters"
+    ],
+    "visuals": [
+      "alpha",
+      "glyph spiral",
+      "5 letters"
+    ],
+    "greekMark": "alpha",
+    "weight": 2
+  },
+  {
+    "id": "greek-breeze-1",
+    "answer": "beta",
+    "normalized": "beta",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "The second letter of the Greek alphabet.",
+    "topicId": "greek",
+    "topicLabel": "Greek Letters",
+    "contentPackIds": [
+      "greek-symbols"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 4,
+    "prompt": "The second letter of the Greek alphabet.",
+    "microHint": "Starts with B, runs 4 letters, and leans toward glyphs, symbols, and a playful coded layer..",
+    "teaser": "Greek Letters energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Greek Letters language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a symbol, letter, or coded idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: be-ta",
+    "usageExample": "Example: \"In the notes, the beta made the symbol easier to remember.\"",
+    "translationAid": "Translation aid: if you do not know beta yet, first picture glyph spiral, then connect it to greek letters vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "alpha",
+      "glyph spiral",
+      "greek letters"
+    ],
+    "visuals": [
+      "sigma",
+      "glyph spiral",
+      "4 letters"
+    ],
+    "greekMark": "beta",
+    "weight": 2
+  },
+  {
+    "id": "greek-breeze-2",
+    "answer": "gamma",
+    "normalized": "gamma",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "The third letter of the Greek alphabet.",
+    "topicId": "greek",
+    "topicLabel": "Greek Letters",
+    "contentPackIds": [
+      "greek-symbols"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 5,
+    "prompt": "The third letter of the Greek alphabet.",
+    "microHint": "Starts with G, runs 5 letters, and leans toward glyphs, symbols, and a playful coded layer..",
+    "teaser": "Greek Letters energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Greek Letters language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a symbol, letter, or coded idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: ga-mma",
+    "usageExample": "Example: \"In the notes, the gamma made the symbol easier to remember.\"",
+    "translationAid": "Translation aid: if you do not know gamma yet, first picture glyph spiral, then connect it to greek letters vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "sigma",
+      "glyph spiral",
+      "greek letters"
+    ],
+    "visuals": [
+      "omega",
+      "glyph spiral",
+      "5 letters"
+    ],
+    "greekMark": "gamma",
+    "weight": 2
+  },
+  {
+    "id": "greek-breeze-3",
+    "answer": "delta",
+    "normalized": "delta",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "The fourth letter of the Greek alphabet.",
+    "topicId": "greek",
+    "topicLabel": "Greek Letters",
+    "contentPackIds": [
+      "greek-symbols"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 5,
+    "prompt": "The fourth letter of the Greek alphabet.",
+    "microHint": "Starts with D, runs 5 letters, and leans toward glyphs, symbols, and a playful coded layer..",
+    "teaser": "Greek Letters energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Greek Letters language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a symbol, letter, or coded idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: de-lta",
+    "usageExample": "Example: \"In the notes, the delta made the symbol easier to remember.\"",
+    "translationAid": "Translation aid: if you do not know delta yet, first picture glyph spiral, then connect it to greek letters vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "sigma",
+      "glyph spiral",
+      "greek letters"
+    ],
+    "visuals": [
+      "delta",
+      "glyph spiral",
+      "5 letters"
+    ],
+    "greekMark": "delta",
+    "weight": 2
+  },
+  {
+    "id": "greek-breeze-4",
+    "answer": "sigma",
+    "normalized": "sigma",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "The eighteenth letter of the Greek alphabet.",
+    "topicId": "greek",
+    "topicLabel": "Greek Letters",
+    "contentPackIds": [
+      "greek-symbols"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 5,
+    "prompt": "The eighteenth letter of the Greek alphabet.",
+    "microHint": "Starts with S, runs 5 letters, and leans toward glyphs, symbols, and a playful coded layer..",
+    "teaser": "Greek Letters energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Greek Letters language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a symbol, letter, or coded idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: si-gma",
+    "usageExample": "Example: \"In the notes, the sigma made the symbol easier to remember.\"",
+    "translationAid": "Translation aid: if you do not know sigma yet, first picture glyph spiral, then connect it to greek letters vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "sigma",
+      "glyph spiral",
+      "greek letters"
+    ],
+    "visuals": [
+      "alpha",
+      "glyph spiral",
+      "5 letters"
+    ],
+    "greekMark": "epsilon",
+    "weight": 2
+  },
+  {
+    "id": "greek-breeze-5",
+    "answer": "omega",
+    "normalized": "omega",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "The twenty-fourth and final letter of the Greek alphabet.",
+    "topicId": "greek",
+    "topicLabel": "Greek Letters",
+    "contentPackIds": [
+      "greek-symbols"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 5,
+    "prompt": "The twenty-fourth and final letter of the Greek alphabet.",
+    "microHint": "Starts with O, runs 5 letters, and leans toward glyphs, symbols, and a playful coded layer..",
+    "teaser": "Greek Letters energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Greek Letters language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a symbol, letter, or coded idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: o-me-ga",
+    "usageExample": "Example: \"In the notes, the omega made the symbol easier to remember.\"",
+    "translationAid": "Translation aid: if you do not know omega yet, first picture glyph spiral, then connect it to greek letters vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "sigma",
+      "glyph spiral",
+      "greek letters"
+    ],
+    "visuals": [
+      "sigma",
+      "glyph spiral",
+      "5 letters"
+    ],
+    "greekMark": "zeta",
+    "weight": 2
+  },
+  {
+    "id": "greek-breeze-6",
+    "answer": "theta",
+    "normalized": "theta",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "The eighth letter of the Greek alphabet.",
+    "topicId": "greek",
+    "topicLabel": "Greek Letters",
+    "contentPackIds": [
+      "greek-symbols"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 5,
+    "prompt": "The eighth letter of the Greek alphabet.",
+    "microHint": "Starts with T, runs 5 letters, and leans toward glyphs, symbols, and a playful coded layer..",
+    "teaser": "Greek Letters energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Greek Letters language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a symbol, letter, or coded idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: the-ta",
+    "usageExample": "Example: \"In the notes, the theta made the symbol easier to remember.\"",
+    "translationAid": "Translation aid: if you do not know theta yet, first picture glyph spiral, then connect it to greek letters vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "sigma",
+      "glyph spiral",
+      "greek letters"
+    ],
+    "visuals": [
+      "omega",
+      "glyph spiral",
+      "5 letters"
+    ],
+    "greekMark": "eta",
+    "weight": 2
+  },
+  {
+    "id": "greek-breeze-7",
+    "answer": "lambda",
+    "normalized": "lambda",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "The eleventh letter of the Greek alphabet.",
+    "topicId": "greek",
+    "topicLabel": "Greek Letters",
+    "contentPackIds": [
+      "greek-symbols"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 6,
+    "prompt": "The eleventh letter of the Greek alphabet.",
+    "microHint": "Starts with L, runs 6 letters, and leans toward glyphs, symbols, and a playful coded layer..",
+    "teaser": "Greek Letters energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Greek Letters language cue: this answer behaves like mid-length descriptive vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a symbol, letter, or coded idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: la-mbda",
+    "usageExample": "Example: \"In the notes, the lambda made the symbol easier to remember.\"",
+    "translationAid": "Translation aid: if you do not know lambda yet, first picture glyph spiral, then connect it to greek letters vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "omega",
+      "glyph spiral",
+      "greek letters"
+    ],
+    "visuals": [
+      "delta",
+      "glyph spiral",
+      "6 letters"
+    ],
+    "greekMark": "theta",
+    "weight": 2
+  },
+  {
+    "id": "greek-breeze-8",
+    "answer": "kappa",
+    "normalized": "kappa",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "The tenth letter of the Greek alphabet.",
+    "topicId": "greek",
+    "topicLabel": "Greek Letters",
+    "contentPackIds": [
+      "greek-symbols"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 5,
+    "prompt": "The tenth letter of the Greek alphabet.",
+    "microHint": "Starts with K, runs 5 letters, and leans toward glyphs, symbols, and a playful coded layer..",
+    "teaser": "Greek Letters energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Greek Letters language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a symbol, letter, or coded idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: ka-ppa",
+    "usageExample": "Example: \"In the notes, the kappa made the symbol easier to remember.\"",
+    "translationAid": "Translation aid: if you do not know kappa yet, first picture glyph spiral, then connect it to greek letters vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "sigma",
+      "glyph spiral",
+      "greek letters"
+    ],
+    "visuals": [
+      "alpha",
+      "glyph spiral",
+      "5 letters"
+    ],
+    "greekMark": "iota",
+    "weight": 2
+  },
+  {
+    "id": "greek-breeze-9",
+    "answer": "rho",
+    "normalized": "rho",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "The seventeenth letter of the Greek alphabet.",
+    "topicId": "greek",
+    "topicLabel": "Greek Letters",
+    "contentPackIds": [
+      "greek-symbols"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 3,
+    "prompt": "The seventeenth letter of the Greek alphabet.",
+    "microHint": "Starts with R, runs 3 letters, and leans toward glyphs, symbols, and a playful coded layer..",
+    "teaser": "Greek Letters energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Greek Letters language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a symbol, letter, or coded idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: rho",
+    "usageExample": "Example: \"In the notes, the rho made the symbol easier to remember.\"",
+    "translationAid": "Translation aid: if you do not know rho yet, first picture glyph spiral, then connect it to greek letters vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "delta",
+      "glyph spiral",
+      "greek letters"
+    ],
+    "visuals": [
+      "sigma",
+      "glyph spiral",
+      "3 letters"
+    ],
+    "greekMark": "kappa",
+    "weight": 2
+  },
+  {
+    "id": "greek-breeze-10",
+    "answer": "tau",
+    "normalized": "tau",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "The nineteenth letter of the Greek alphabet.",
+    "topicId": "greek",
+    "topicLabel": "Greek Letters",
+    "contentPackIds": [
+      "greek-symbols"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 3,
+    "prompt": "The nineteenth letter of the Greek alphabet.",
+    "microHint": "Starts with T, runs 3 letters, and leans toward glyphs, symbols, and a playful coded layer..",
+    "teaser": "Greek Letters energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Greek Letters language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a symbol, letter, or coded idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: tau",
+    "usageExample": "Example: \"In the notes, the tau made the symbol easier to remember.\"",
+    "translationAid": "Translation aid: if you do not know tau yet, first picture glyph spiral, then connect it to greek letters vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "delta",
+      "glyph spiral",
+      "greek letters"
+    ],
+    "visuals": [
+      "omega",
+      "glyph spiral",
+      "3 letters"
+    ],
+    "greekMark": "lambda",
+    "weight": 2
+  },
+  {
+    "id": "greek-breeze-11",
+    "answer": "phi",
+    "normalized": "phi",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "The twenty-first letter of the Greek alphabet.",
+    "topicId": "greek",
+    "topicLabel": "Greek Letters",
+    "contentPackIds": [
+      "greek-symbols"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 3,
+    "prompt": "The twenty-first letter of the Greek alphabet.",
+    "microHint": "Starts with P, runs 3 letters, and leans toward glyphs, symbols, and a playful coded layer..",
+    "teaser": "Greek Letters energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Greek Letters language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a symbol, letter, or coded idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: phi",
+    "usageExample": "Example: \"In the notes, the phi made the symbol easier to remember.\"",
+    "translationAid": "Translation aid: if you do not know phi yet, first picture glyph spiral, then connect it to greek letters vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "delta",
+      "glyph spiral",
+      "greek letters"
+    ],
+    "visuals": [
+      "delta",
+      "glyph spiral",
+      "3 letters"
+    ],
+    "greekMark": "mu",
+    "weight": 2
+  },
+  {
+    "id": "greek-breeze-12",
+    "answer": "psi",
+    "normalized": "psi",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "The twenty-third letter of the Greek alphabet.",
+    "topicId": "greek",
+    "topicLabel": "Greek Letters",
+    "contentPackIds": [
+      "greek-symbols"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 3,
+    "prompt": "The twenty-third letter of the Greek alphabet.",
+    "microHint": "Starts with P, runs 3 letters, and leans toward glyphs, symbols, and a playful coded layer..",
+    "teaser": "Greek Letters energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Greek Letters language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a symbol, letter, or coded idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: psi",
+    "usageExample": "Example: \"In the notes, the psi made the symbol easier to remember.\"",
+    "translationAid": "Translation aid: if you do not know psi yet, first picture glyph spiral, then connect it to greek letters vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "delta",
+      "glyph spiral",
+      "greek letters"
+    ],
+    "visuals": [
+      "alpha",
+      "glyph spiral",
+      "3 letters"
+    ],
+    "greekMark": "alpha",
+    "weight": 2
+  },
+  {
+    "id": "greek-breeze-13",
+    "answer": "zeta",
+    "normalized": "zeta",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "The sixth letter of the Greek alphabet.",
+    "topicId": "greek",
+    "topicLabel": "Greek Letters",
+    "contentPackIds": [
+      "greek-symbols"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 4,
+    "prompt": "The sixth letter of the Greek alphabet.",
+    "microHint": "Starts with Z, runs 4 letters, and leans toward glyphs, symbols, and a playful coded layer..",
+    "teaser": "Greek Letters energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Greek Letters language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a symbol, letter, or coded idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: ze-ta",
+    "usageExample": "Example: \"In the notes, the zeta made the symbol easier to remember.\"",
+    "translationAid": "Translation aid: if you do not know zeta yet, first picture glyph spiral, then connect it to greek letters vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "alpha",
+      "glyph spiral",
+      "greek letters"
+    ],
+    "visuals": [
+      "sigma",
+      "glyph spiral",
+      "4 letters"
+    ],
+    "greekMark": "beta",
+    "weight": 2
+  },
+  {
+    "id": "greek-breeze-14",
+    "answer": "eta",
+    "normalized": "eta",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "The seventh letter of the Greek alphabet.",
+    "topicId": "greek",
+    "topicLabel": "Greek Letters",
+    "contentPackIds": [
+      "greek-symbols"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 3,
+    "prompt": "The seventh letter of the Greek alphabet.",
+    "microHint": "Starts with E, runs 3 letters, and leans toward glyphs, symbols, and a playful coded layer..",
+    "teaser": "Greek Letters energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Greek Letters language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a symbol, letter, or coded idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: e-ta",
+    "usageExample": "Example: \"In the notes, the eta made the symbol easier to remember.\"",
+    "translationAid": "Translation aid: if you do not know eta yet, first picture glyph spiral, then connect it to greek letters vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "delta",
+      "glyph spiral",
+      "greek letters"
+    ],
+    "visuals": [
+      "omega",
+      "glyph spiral",
+      "3 letters"
+    ],
+    "greekMark": "gamma",
+    "weight": 2
+  },
+  {
+    "id": "greek-breeze-15",
+    "answer": "iota",
+    "normalized": "iota",
+    "source": "topic",
+    "qualityStatus": "approved",
+    "clue": "The ninth letter of the Greek alphabet.",
+    "topicId": "greek",
+    "topicLabel": "Greek Letters",
+    "contentPackIds": [
+      "greek-symbols"
+    ],
+    "difficulty": "breeze",
+    "frequencyBand": "common",
+    "length": 4,
+    "prompt": "The ninth letter of the Greek alphabet.",
+    "microHint": "Starts with I, runs 4 letters, and leans toward glyphs, symbols, and a playful coded layer..",
+    "teaser": "Greek Letters energy with a quick strike. This one should read cleanly once it clicks.",
+    "learningNote": "Greek Letters language cue: this answer behaves like short everyday vocabulary. It is fairly common, so connect it to the scene first.",
+    "plainMeaning": "Plain meaning: think of a symbol, letter, or coded idea in a clear everyday way.",
+    "pronunciationHint": "Pronunciation: io-ta",
+    "usageExample": "Example: \"In the notes, the iota made the symbol easier to remember.\"",
+    "translationAid": "Translation aid: if you do not know iota yet, first picture glyph spiral, then connect it to greek letters vocabulary instead of translating word by word.",
+    "relatedWords": [
+      "alpha",
+      "glyph spiral",
+      "greek letters"
+    ],
+    "visuals": [
+      "delta",
+      "glyph spiral",
+      "4 letters"
+    ],
+    "greekMark": "delta",
+    "weight": 2
+  }
 ];
-
-const contentPackAnswerMap = new Map<string, ContentPackId[]>();
-
-for (const pack of contentPacks) {
-  for (const answer of pack.answers) {
-    const normalized = normalizeWord(answer);
-    const key = `${pack.topicId}:${normalized}`;
-    contentPackAnswerMap.set(key, [...(contentPackAnswerMap.get(key) ?? []), pack.id]);
-  }
-}
-
-function getContentPackIds(topicId: TopicId, answer: string) {
-  return contentPackAnswerMap.get(`${topicId}:${answer}`) ?? [];
-}
-
-const topicCompoundSpecs: Record<TopicId, { prefixes: string[]; suffixes: string[] }> = {
-  myth: {
-    prefixes: ["amber", "atlas", "bronze", "crown", "ember", "hero", "laurel", "moon", "oracle", "siren", "temple", "thunder"],
-    suffixes: ["bound", "crown", "flame", "forge", "gate", "keeper", "light", "mark", "path", "scroll", "song", "stone"],
-  },
-  cosmos: {
-    prefixes: ["aster", "comet", "cosmo", "lunar", "meteor", "moon", "nebula", "nova", "orbit", "photon", "solar", "star"],
-    suffixes: ["beam", "bound", "chart", "craft", "drift", "field", "flare", "glow", "line", "path", "trail", "watch"],
-  },
-  ocean: {
-    prefixes: ["anchor", "brine", "coral", "harbor", "kelp", "lagoon", "marina", "reef", "salt", "sea", "shell", "tide"],
-    suffixes: ["bloom", "bound", "craft", "drift", "foam", "glow", "line", "path", "song", "spray", "stone", "watch"],
-  },
-  garden: {
-    prefixes: ["basil", "blossom", "cedar", "clover", "fern", "garden", "ivy", "lavender", "meadow", "moss", "petal", "willow"],
-    suffixes: ["arch", "bloom", "branch", "field", "gate", "glow", "house", "light", "path", "root", "song", "trail"],
-  },
-  city: {
-    prefixes: ["alley", "avenue", "brick", "cinder", "glass", "market", "metro", "neon", "plaza", "rooftop", "sky", "subway"],
-    suffixes: ["bridge", "drift", "field", "glow", "grid", "line", "mark", "night", "path", "signal", "side", "watch"],
-  },
-  music: {
-    prefixes: ["ballad", "cadence", "chorus", "echo", "lyric", "melody", "rhythm", "song", "sound", "stanza", "tempo", "vinyl"],
-    suffixes: ["bound", "bridge", "craft", "drift", "flame", "glow", "house", "line", "note", "pulse", "song", "wave"],
-  },
-  kitchen: {
-    prefixes: ["baker", "butter", "candle", "cinnamon", "copper", "garlic", "honey", "kettle", "pantry", "pepper", "simmer", "sugar"],
-    suffixes: ["bloom", "bound", "crumb", "craft", "flame", "glow", "house", "mark", "mix", "plate", "stone", "whisk"],
-  },
-  wild: {
-    prefixes: ["canyon", "falcon", "forest", "granite", "meadow", "otter", "pine", "ridge", "river", "stone", "summit", "timber"],
-    suffixes: ["bound", "crest", "drift", "field", "glow", "mark", "path", "ridge", "run", "song", "trail", "watch"],
-  },
-  weather: {
-    prefixes: ["aurora", "breeze", "cloud", "frost", "gust", "hail", "lightning", "mist", "moon", "rain", "storm", "sun"],
-    suffixes: ["bank", "bound", "break", "drift", "fall", "glow", "line", "mark", "path", "rise", "song", "watch"],
-  },
-  desert: {
-    prefixes: ["amber", "cactus", "desert", "dune", "mesa", "mirage", "nomad", "oasis", "sand", "stone", "sun", "torch"],
-    suffixes: ["bloom", "bound", "drift", "glass", "line", "mark", "path", "ridge", "song", "spark", "stone", "trail"],
-  },
-  festival: {
-    prefixes: ["banner", "carnival", "chorus", "confetti", "drum", "fair", "festival", "lantern", "mask", "parade", "ribbon", "spark"],
-    suffixes: ["beam", "bound", "dance", "drift", "glow", "light", "line", "march", "song", "spark", "stage", "wave"],
-  },
-  winter: {
-    prefixes: ["blanket", "frost", "glacier", "hearth", "icicle", "midnight", "moon", "pine", "silver", "snow", "winter", "wool"],
-    suffixes: ["bound", "drift", "fall", "fire", "glow", "glass", "light", "mark", "song", "spark", "trail", "watch"],
-  },
-  invent: {
-    prefixes: ["battery", "blueprint", "circuit", "copper", "engine", "gear", "lantern", "lever", "magnet", "piston", "rotor", "signal"],
-    suffixes: ["array", "bound", "craft", "drive", "forge", "frame", "grid", "light", "mark", "spark", "switch", "work"],
-  },
-  story: {
-    prefixes: ["chapter", "candle", "fable", "ink", "journal", "lantern", "letter", "library", "moon", "paper", "riddle", "whisper"],
-    suffixes: ["book", "bound", "draft", "glow", "house", "line", "mark", "page", "path", "song", "tale", "thread"],
-  },
-  greek: {
-    prefixes: ["alpha", "beta", "delta", "gamma", "kappa", "lambda", "omega", "omicron", "phi", "sigma", "theta", "zeta"],
-    suffixes: ["bound", "code", "glyph", "line", "mark", "path", "pulse", "script", "sign", "spark", "trace", "wave"],
-  },
-};
-
-const generalWordPools: Record<ChallengeLevel, string> = {
-  breeze:
-    "acorn amber apple apron arrow artist attic autumn bakery bamboo basket beacon berry blanket blossom border breeze brook button cabin candle carpet castle cherry circle cloud coffee comet copper cottage cricket crystal curtain daisy dancer dawn desert dream ember engine feather fiddle firefly forest fountain garden giggle glacier harbor hazel hearth island jacket jasmine jewel kettle lantern lemon library lilac market meadow mirror moonlight morning mountain orchard paper pebble pepper pillow planet pocket postcard puddle rabbit raindrop river robin saddle sailor scarlet secret shadow silver sketch skyline snowflake songbird sparkle spring starfish stone story sunrise teacup ticket timber violet wagon waterfall whisper window winter woodland" +
-    " anchor animal answer badge balloon barrel basketry beach bell bicycle biscuit bonnet bottle branch buttonhole camera canvas captain carnival carpeted carrot cellar chimney clover coast coral cottagecore creek cricketing crocus daffodil daylight doorway dragonfly earring evening family festival fireplace flannel folklore freckles friendship ginger glimmer hammock harborview harvest heartbeat honeycomb icicle inkwell lanternlight laughter lemonade lighthouse linen lockbox lullaby mailbox mariner moonbeam northwind notebook oakwood oatmeal pastry pebblework pinecone postcarding rainbow riverbank rosewood sailboat sandbar seashore shoelace shoreline songbook songline starlight steamship sugar sunset thimble tidepool trailhead umbrella velvet wagoner washline windmill woodlander"
-  ,
-  quest:
-    "adventure alcove alloy anthem archive artisan ascent avenue balance banner brisket canyon caravan charcoal charm circuit coastal compass current daylight driftwood emberglow emerald festival firelight foothill freeway frontier garnet gateway harvest hush lanternlit marble midnight mosaic nomad northbound outpost overlook passage pebbled riverbed sailcloth saltwind sandstone seafarer shoreline sidepath skyline skylight songcraft southbound spindle starboard stonework sunward tapestry thunderbird townscape trailside undertone wayfinder westward windward wonderland" +
-    " afterimage airfield amphitheater backdrop bandstand bellflower bookseller breakpoint campfire cedarwood chambered clockwork cloudline courtyard crossroads daystar dockside earthbound eastward evergreen fieldstone firebrand foldaway framework guidepost halflight hilltop houseplant lakeshore landmark lamplight larksong lifeline moonrise nightfall northstar orchardgate pathway ridgeway roadstead sandglass seedhouse shorelineview stairwell stonepath threadwork tidewater torchlight trailmark undertow vantage waystation wheatfield whispering wildflower windchime"
-  ,
-  mythic:
-    "afterglow alchemy altitude ambergris architect atlasbound avalanche brilliance catapult cathedral celestial chrysalis citrine clockmaker constellation craftwork daydreamer downriver elsewhere emberstone evermore firebrand glassmaker glistening handwoven headwater homecoming luminance moonstone nightgarden northlight opaline outlander parable pilgrimage radiance riverstone rosewater sanctuary sapphire skybound spellcraft stargazer storyweaver sunstone tidewalker trailblazer turnstile velvetine wanderlight wayfarer windborne wondercraft" +
-    " aerialist argentum astronomer auroral bewitching borderless brilliance candlemark cartwheel charmedness citadel cloudbreaker copperleaf dreamtide earthsong eventide featherlight fieldguide goldthread harmonics hillshade lampblack lighthousekeeper moonriver nightbloom overstory pathfinder riverglow silvered skyglass songsmith starborn stonegarden sunlit thornfield tidebound trailsong watchtower wayfaring weatherstone whisperwind wildfire"
-};
-
-function normalizeWord(word: string) {
-  return word.toLowerCase().replace(/[^a-z]/g, "");
-}
-
-function getDifficultyScore(level: ChallengeLevel) {
-  switch (level) {
-    case "breeze":
-      return 1;
-    case "quest":
-      return 2;
-    case "mythic":
-      return 3;
-  }
-}
-
-function createPrompt(pack: TopicPack, answer: string, frequencyBand: PuzzleWord["frequencyBand"]) {
-  const scene = pack.scene[answer.length % pack.scene.length];
-
-  const topicPromptTone: Record<TopicPack["id"], { common: string; uncommon: string; rare: string }> = {
-    myth: {
-      common: `Myth clue: picture ${scene} and choose a familiar storybook or legend word.`,
-      uncommon: `Myth clue: picture ${scene} and choose a richer legend word with older flavor.`,
-      rare: `Myth clue: picture ${scene} and reach for a more evocative or ceremonial word from legend.`,
-    },
-    cosmos: {
-      common: `Cosmos clue: picture ${scene} and choose a clear space or sky word.`,
-      uncommon: `Cosmos clue: picture ${scene} and choose a richer space word with more science flavor.`,
-      rare: `Cosmos clue: picture ${scene} and reach for a more technical or poetic space word.`,
-    },
-    ocean: {
-      common: `Ocean clue: picture ${scene} and choose a familiar sea or shore word.`,
-      uncommon: `Ocean clue: picture ${scene} and choose a more textured coastal or sailing word.`,
-      rare: `Ocean clue: picture ${scene} and reach for a sharper maritime or deep-water word.`,
-    },
-    garden: {
-      common: `Garden clue: picture ${scene} and choose a familiar green or growing word.`,
-      uncommon: `Garden clue: picture ${scene} and choose a richer plant or courtyard word.`,
-      rare: `Garden clue: picture ${scene} and reach for a more delicate botanical word.`,
-    },
-    city: {
-      common: `City clue: picture ${scene} and choose a familiar street, building, or travel word.`,
-      uncommon: `City clue: picture ${scene} and choose a more textured urban word.`,
-      rare: `City clue: picture ${scene} and reach for a more atmospheric city-night word.`,
-    },
-    music: {
-      common: `Music clue: think of ${scene} and choose a familiar song or instrument word.`,
-      uncommon: `Music clue: think of ${scene} and choose a richer performance or rhythm word.`,
-      rare: `Music clue: think of ${scene} and reach for a more expressive music word.`,
-    },
-    kitchen: {
-      common: `Kitchen clue: picture ${scene} and choose a familiar food or cooking word.`,
-      uncommon: `Kitchen clue: picture ${scene} and choose a richer kitchen or flavor word.`,
-      rare: `Kitchen clue: picture ${scene} and reach for a more specific culinary word.`,
-    },
-    wild: {
-      common: `Wild clue: picture ${scene} and choose a familiar trail, forest, or mountain word.`,
-      uncommon: `Wild clue: picture ${scene} and choose a more textured landscape word.`,
-      rare: `Wild clue: picture ${scene} and reach for a more atmospheric wilderness word.`,
-    },
-    weather: {
-      common: `Weather clue: picture ${scene} and choose a familiar sky or storm word.`,
-      uncommon: `Weather clue: picture ${scene} and choose a richer weather word with more texture.`,
-      rare: `Weather clue: picture ${scene} and reach for a sharper atmospheric word.`,
-    },
-    desert: {
-      common: `Desert clue: picture ${scene} and choose a clear everyday word from that landscape.`,
-      uncommon: `Desert clue: picture ${scene} and choose a richer word that still feels dry, bright, or windworn.`,
-      rare: `Desert clue: picture ${scene} and reach for a more literary or evocative word from that landscape.`,
-    },
-    festival: {
-      common: `Festival clue: think of ${scene} and pick a familiar word you would expect around a celebration.`,
-      uncommon: `Festival clue: think of ${scene} and find a brighter, slightly richer celebration word.`,
-      rare: `Festival clue: think of ${scene} and reach for a more vivid celebratory word.`,
-    },
-    winter: {
-      common: `Winterlight clue: picture ${scene} and choose a familiar winter word that fits cleanly.`,
-      uncommon: `Winterlight clue: picture ${scene} and choose a textured winter word with a softer mood.`,
-      rare: `Winterlight clue: picture ${scene} and reach for a colder, more poetic English word.`,
-    },
-    invent: {
-      common: `Invention clue: picture ${scene} and choose a familiar machine or workshop word.`,
-      uncommon: `Invention clue: picture ${scene} and choose a more technical making word.`,
-      rare: `Invention clue: picture ${scene} and reach for a sharper engineering or instrument word.`,
-    },
-    story: {
-      common: `Story clue: picture ${scene} and choose a familiar book or tale word.`,
-      uncommon: `Story clue: picture ${scene} and choose a richer narrative word.`,
-      rare: `Story clue: picture ${scene} and reach for a more literary story word.`,
-    },
-    greek: {
-      common: `Greek clue: picture ${scene} and choose a familiar letter or symbol word.`,
-      uncommon: `Greek clue: picture ${scene} and choose a richer notation or symbol word.`,
-      rare: `Greek clue: picture ${scene} and reach for a more academic or symbolic word.`,
-    },
-  };
-
-  const tier = frequencyBand === "rare" ? "rare" : frequencyBand === "uncommon" ? "uncommon" : "common";
-  return topicPromptTone[pack.id][tier];
-}
-
-function createMicroHint(pack: TopicPack, answer: string, frequencyBand: PuzzleWord["frequencyBand"]) {
-  const opening = answer[0]?.toUpperCase() ?? "?";
-
-  if (frequencyBand === "rare") {
-    return `Starts with ${opening}, runs ${answer.length} letters, leans toward ${pack.mood.toLowerCase()}, and sits in the sharper end of the lexicon.`;
-  }
-
-  if (frequencyBand === "uncommon") {
-    return `Starts with ${opening}, runs ${answer.length} letters, and leans toward ${pack.mood.toLowerCase()} with a little extra texture.`;
-  }
-
-  return `Starts with ${opening}, runs ${answer.length} letters, and leans toward ${pack.mood.toLowerCase()}.`;
-}
-
-function createTeaser(pack: TopicPack, answer: string, frequencyBand: PuzzleWord["frequencyBand"]) {
-  const pace = answer.length <= 6 ? "a quick strike" : answer.length <= 9 ? "a steady build" : "a longer reveal";
-  const tone = frequencyBand === "rare" ? "Expect a less obvious finish." : frequencyBand === "uncommon" ? "There is a little extra texture here." : "This one should read cleanly once it clicks.";
-  return `${pack.label} energy with ${pace}. ${tone}`;
-}
-
-function createLearningNote(pack: TopicPack, answer: string, frequencyBand: PuzzleWord["frequencyBand"]) {
-  const part = answer.length <= 5 ? "short everyday vocabulary" : answer.length <= 8 ? "mid-length descriptive vocabulary" : "longer expressive vocabulary";
-  const difficultyTone = frequencyBand === "rare" ? "It is less frequent, so use the scene and tone together." : frequencyBand === "uncommon" ? "It is not the first word every learner reaches for, so lean on the mood." : "It is fairly common, so connect it to the scene first.";
-  return `${pack.label} language cue: this answer behaves like ${part}. ${difficultyTone}`;
-}
-
-function createPlainMeaning(pack: TopicPack, frequencyBand: PuzzleWord["frequencyBand"]) {
-  const base =
-    pack.id === "myth" ? "a legend or old-story idea" :
-    pack.id === "cosmos" ? "a space or sky idea" :
-    pack.id === "ocean" ? "a sea, shore, or water idea" :
-    pack.id === "garden" ? "a plant, flower, or growing idea" :
-    pack.id === "city" ? "a street, building, or urban idea" :
-    pack.id === "music" ? "a sound, song, or instrument idea" :
-    pack.id === "kitchen" ? "a food, flavor, or cooking idea" :
-    pack.id === "wild" ? "a trail, animal, or landscape idea" :
-    pack.id === "weather" ? "a sky, wind, rain, or storm idea" :
-    pack.id === "desert" ? "a dry, sandy, sunlit landscape idea" :
-    pack.id === "festival" ? "a celebration, parade, or bright-crowd idea" :
-    pack.id === "winter" ? "a cold, snowy, or hearthside idea" :
-    pack.id === "invent" ? "a machine, tool, or workshop idea" :
-    pack.id === "story" ? "a book, tale, or narrative idea" :
-    "a symbol, letter, or coded idea";
-
-  return frequencyBand === "rare"
-    ? `Plain meaning: think of ${base}, but in a less common or more literary way.`
-    : frequencyBand === "uncommon"
-      ? `Plain meaning: think of ${base}, but with a slightly richer word than the first beginner option.`
-      : `Plain meaning: think of ${base} in a clear everyday way.`;
-}
-
-function createTranslationAid(pack: TopicPack, answer: string) {
-  return `Translation aid: if you do not know ${answer} yet, first picture ${pack.scene[0]}, then connect it to ${pack.label.toLowerCase()} vocabulary instead of translating word by word.`;
-}
-
-function createPronunciationHint(answer: string) {
-  const lower = answer.toLowerCase();
-  const syllables = lower
-    .replace(/tion/g, "-tion")
-    .replace(/ing/g, "-ing")
-    .replace(/ous/g, "-ous")
-    .replace(/([aeiouy]{1,2})([^aeiouy]|$)/g, "$1-$2")
-    .replace(/--+/g, "-")
-    .replace(/^-|-$/g, "")
-    .split("-")
-    .filter(Boolean)
-    .join("-");
-
-  return `Pronunciation: ${syllables || lower}`;
-}
-
-function createUsageExample(pack: TopicPack, answer: string) {
-  const sentenceStem =
-    pack.id === "myth" ? `In the old tale, the ${answer} appeared near the temple steps.` :
-    pack.id === "cosmos" ? `The crew watched the ${answer} drift across the dark sky.` :
-    pack.id === "ocean" ? `From the harbor wall, the ${answer} stood out above the tide.` :
-    pack.id === "garden" ? `By the gate, the ${answer} added color to the quiet garden.` :
-    pack.id === "city" ? `At the corner, the ${answer} gave the street its evening rhythm.` :
-    pack.id === "music" ? `When the lights dimmed, the ${answer} carried the song forward.` :
-    pack.id === "kitchen" ? `In the warm kitchen, the ${answer} changed the whole flavor.` :
-    pack.id === "wild" ? `Along the ridge, the ${answer} made the landscape feel alive.` :
-    pack.id === "weather" ? `By afternoon, the ${answer} had changed the air completely.` :
-    pack.id === "desert" ? `Across the dunes, the ${answer} broke the long line of sand.` :
-    pack.id === "festival" ? `At midnight, the ${answer} gave the square even more energy.` :
-    pack.id === "winter" ? `Outside the window, the ${answer} made the night feel quieter.` :
-    pack.id === "invent" ? `In the workshop, the ${answer} made the design finally work.` :
-    pack.id === "story" ? `By the last page, the ${answer} changed how the reader saw the scene.` :
-    `In the notes, the ${answer} made the symbol easier to remember.`;
-
-  return `Example: "${sentenceStem}"`;
-}
-
-function createRelatedWords(pack: TopicPack, answer: string) {
-  const related = [pack.icons[answer.length % pack.icons.length], pack.scene[0], pack.label.toLowerCase()]
-    .map((item) => item.replace(/[^a-z ]/gi, "").trim())
-    .filter(Boolean);
-
-  return [...new Set(related)].slice(0, 3);
-}
-
-function createGeneralWords(level: ChallengeLevel, existingCount: number): PuzzleWord[] {
-  const words = generalWordPools[level]
-    .split(/\s+/)
-    .map((word) => normalizeWord(word))
-    .filter((word) => word.length >= 4);
-
-  return words.map((word, index) => {
-    const frequencyBand: PuzzleWord["frequencyBand"] = level === "breeze" ? "common" : level === "quest" ? "uncommon" : "rare";
-
-    return {
-      id: `general-${level}-${index}`,
-      answer: word,
-      normalized: word,
-      source: "general",
-      qualityStatus: "unreviewed",
-      clue: null,
-      topicId: "story",
-      topicLabel: "General English",
-      contentPackIds: [],
-      difficulty: level,
-      frequencyBand,
-      length: word.length,
-      prompt: `Think in English wordplay rather than a single subject lane.`,
-      microHint: `A flexible common-word clue. ${word.length} letters long.`,
-      teaser: `A bridge word that keeps the round flowing.`,
-      learningNote: `General English cue: try to connect the letters to a broad everyday meaning before chasing a niche topic word.`,
-      plainMeaning: `Plain meaning: think of a common everyday English idea rather than a niche topic term.`,
-      pronunciationHint: createPronunciationHint(word),
-      usageExample: `Example: "The word ${word} can appear in many simple English situations."`,
-      translationAid: `Translation aid: connect ${word} to a simple daily situation first, then map it into your own language if needed.`,
-      relatedWords: ["general", `${word.length} letters`, frequencyBand],
-      visuals: [greekMarks[(existingCount + index) % greekMarks.length], `${word.length} letters`, index % 2 === 0 ? "common" : "nimble"],
-      greekMark: greekMarks[(existingCount + index) % greekMarks.length],
-      weight: 1,
-    };
-  });
-}
-
-function getCuratedDifficulty(word: string, band: PuzzleWord["frequencyBand"]): ChallengeLevel {
-  if (band === "rare" || word.length >= 11) {
-    return "mythic";
-  }
-
-  if (band === "uncommon" || word.length >= 8) {
-    return "quest";
-  }
-
-  return "breeze";
-}
-
-function createCuratedLexiconWords(startIndex: number): PuzzleWord[] {
-  const groups = [
-    { band: "common" as const, words: curatedEnglishLexicon.common },
-    { band: "uncommon" as const, words: curatedEnglishLexicon.uncommon },
-    { band: "rare" as const, words: curatedEnglishLexicon.rare },
-  ];
-
-  return groups.flatMap(({ band, words }, bandIndex) =>
-    words.map((rawWord, index) => {
-      const answer = normalizeWord(rawWord);
-      const difficulty = getCuratedDifficulty(answer, band);
-
-      return {
-        id: `curated-${band}-${startIndex + bandIndex * 1000 + index}`,
-        answer,
-        normalized: answer,
-        source: "lexicon",
-        qualityStatus: "unreviewed",
-        clue: null,
-        topicId: "story",
-        topicLabel: "General English",
-        contentPackIds: [],
-        difficulty,
-        frequencyBand: band,
-        length: answer.length,
-        prompt: band === "rare" ? "A rarer English term. Think a little wider than the first obvious answer." : band === "uncommon" ? "A richer English term with more texture than the easiest lane." : "A familiar English clue lane with cleaner surface meaning.",
-        microHint: `${band} lexicon clue. ${answer.length} letters long.`,
-        teaser: band === "rare" ? "A rarer lexicon pick that sharpens the board." : "A curated English entry that balances the run.",
-        learningNote: band === "rare" ? "Vocabulary cue: this is a lower-frequency English word, so use length, first letter, and theme together." : band === "uncommon" ? "Vocabulary cue: this word is useful intermediate vocabulary with a stronger flavor than the most common option." : "Vocabulary cue: this is common English vocabulary that should become easier with repetition.",
-        plainMeaning: band === "rare" ? "Plain meaning: look for a less common English word that still matches the clue idea." : band === "uncommon" ? "Plain meaning: look for an intermediate English word with a bit more flavor." : "Plain meaning: look for a simple everyday English word.",
-        pronunciationHint: createPronunciationHint(answer),
-        usageExample: `Example: "The word ${answer} can fit a clear English sentence once you know its tone."`,
-        translationAid: `Translation aid: connect ${answer} to the clue idea first, then translate the idea, not each separate word.`,
-        relatedWords: [band, `${answer.length} letters`, "english"],
-        visuals: [greekMarks[(startIndex + bandIndex + index) % greekMarks.length], band, `${answer.length} letters`],
-        greekMark: greekMarks[(startIndex + bandIndex + index) % greekMarks.length],
-        weight: band === "common" ? 1 : band === "uncommon" ? 2 : 3,
-      } satisfies PuzzleWord;
-    })
-  );
-}
-
-function getGeneratedDifficulty(word: string): ChallengeLevel {
-  if (word.length <= 7) {
-    return "breeze";
-  }
-
-  if (word.length <= 10) {
-    return "quest";
-  }
-
-  return "mythic";
-}
-
-function createGeneratedCompoundWords(): PuzzleWord[] {
-  return topicPacks.flatMap((pack) => {
-    const spec = topicCompoundSpecs[pack.id];
-
-    return spec.prefixes.flatMap((prefix, prefixIndex) =>
-      spec.suffixes
-        .map((suffix, suffixIndex) => ({ suffixIndex, answer: `${prefix}${suffix}` }))
-        .filter(({ answer }) => {
-          const length = answer.length;
-          return length >= 5 && length <= 14;
-        })
-        .map(({ answer, suffixIndex }, index) => {
-          const difficulty = getGeneratedDifficulty(answer);
-
-          return {
-            id: `${pack.id}-generated-${prefixIndex}-${suffixIndex}-${index}`,
-            answer,
-            normalized: answer,
-            source: "synthetic",
-            qualityStatus: "unreviewed",
-            clue: null,
-            topicId: pack.id,
-            topicLabel: pack.label,
-            contentPackIds: getContentPackIds(pack.id, answer),
-            difficulty,
-            frequencyBand: difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare",
-            length: answer.length,
-            prompt: createPrompt(pack, answer, difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare"),
-            microHint: createMicroHint(pack, answer, difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare"),
-            teaser: createTeaser(pack, answer, difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare"),
-            learningNote: createLearningNote(pack, answer, difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare"),
-            plainMeaning: createPlainMeaning(pack, difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare"),
-            pronunciationHint: createPronunciationHint(answer),
-            usageExample: createUsageExample(pack, answer),
-            translationAid: createTranslationAid(pack, answer),
-            relatedWords: createRelatedWords(pack, answer),
-            visuals: [pack.icons[(prefixIndex + index) % pack.icons.length], pack.scene[suffixIndex % pack.scene.length], `${answer.length} letters`],
-            greekMark: greekMarks[(prefixIndex + suffixIndex) % greekMarks.length],
-            weight: difficulty === "breeze" ? 5 : difficulty === "quest" ? 6 : 7,
-          } satisfies PuzzleWord;
-        })
-    );
-  });
-}
-
-export const topicCatalog = topicPacks;
-
-export const contentCatalog = contentPacks;
-
-export const wordBank: PuzzleWord[] = (() => {
-  const themed = topicPacks.flatMap((pack) => {
-    const source = [
-      { difficulty: "breeze" as const, words: pack.easy },
-      { difficulty: "quest" as const, words: pack.medium },
-      { difficulty: "mythic" as const, words: pack.hard },
-    ];
-
-    return source.flatMap(({ difficulty, words }, groupIndex) =>
-      words
-        .map((rawWord, index) => normalizeWord(rawWord))
-        .filter((word) => word.length >= 3)
-        .map((answer, index) => {
-          const frequencyBand: PuzzleWord["frequencyBand"] = difficulty === "breeze" ? "common" : difficulty === "quest" ? "uncommon" : "rare";
-          const clue = getEditorialClue(pack.id, answer);
-
-          return {
-            id: `${pack.id}-${difficulty}-${index}`,
-            answer,
-            normalized: answer,
-            source: "topic",
-            qualityStatus: clue ? "approved" : "unreviewed",
-            clue,
-            topicId: pack.id,
-            topicLabel: pack.label,
-            contentPackIds: getContentPackIds(pack.id, answer),
-            difficulty,
-            frequencyBand,
-            length: answer.length,
-            prompt: clue ?? createPrompt(pack, answer, frequencyBand),
-            microHint: createMicroHint(pack, answer, frequencyBand),
-            teaser: createTeaser(pack, answer, frequencyBand),
-            learningNote: createLearningNote(pack, answer, frequencyBand),
-            plainMeaning: createPlainMeaning(pack, frequencyBand),
-            pronunciationHint: createPronunciationHint(answer),
-            usageExample: createUsageExample(pack, answer),
-            translationAid: createTranslationAid(pack, answer),
-            relatedWords: createRelatedWords(pack, answer),
-            visuals: [pack.icons[index % pack.icons.length], pack.scene[groupIndex % pack.scene.length], `${answer.length} letters`],
-            greekMark: greekMarks[(index + groupIndex) % greekMarks.length],
-            weight: difficulty === "breeze" ? 2 : difficulty === "quest" ? 3 : 4,
-          } satisfies PuzzleWord;
-        })
-    );
-  });
-
-  const general = [
-    ...createGeneralWords("breeze", themed.length),
-    ...createGeneralWords("quest", themed.length + 200),
-    ...createGeneralWords("mythic", themed.length + 400),
-  ];
-
-  const generated = createGeneratedCompoundWords();
-  const curated = createCuratedLexiconWords(themed.length + general.length + generated.length);
-
-  const seen = new Set<string>();
-
-  return [...themed, ...general, ...generated, ...curated].filter((entry) => {
-    const key = `${entry.topicId}:${entry.normalized}:${entry.difficulty}`;
-
-    if (seen.has(key)) {
-      return false;
-    }
-
-    seen.add(key);
-    return true;
-  });
-})();
-
-export function getWordsForTopics(topics: TopicId[]) {
-  const topicSet = new Set(topics);
-  return wordBank.filter((entry) => topicSet.has(entry.topicId));
-}
-
-export function getContentPacksForTopics(topics: TopicId[]) {
-  const topicSet = new Set(topics);
-  return contentCatalog.filter((pack) => topicSet.has(pack.topicId));
-}
-
-export function getRelatedWords(topicId: TopicId, challenge: ChallengeLevel) {
-  const targetDifficulty = getDifficultyScore(challenge);
-  return wordBank.filter((entry) => {
-    if (entry.topicId !== topicId) {
-      return false;
-    }
-
-    return Math.abs(getDifficultyScore(entry.difficulty) - targetDifficulty) <= 1;
-  });
-}

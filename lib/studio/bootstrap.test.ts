@@ -4,7 +4,7 @@ import { buildPuzzleRun } from "@/lib/puzzle-generator";
 import { parseSharedOptions } from "@/lib/puzzle-options";
 import { createEmptyProgress } from "@/lib/progress";
 import { createAttemptFromRun, isStartedAttempt } from "@/lib/run-state";
-import { refreshPreparedDaily, resolveStudioBootstrap } from "@/lib/studio/bootstrap";
+import { refreshPreparedDaily, resolveStudioBootstrap, resolveStudioBootstrapAsync } from "@/lib/studio/bootstrap";
 import type { StoredGameResult } from "@/lib/session-storage";
 
 const nowMs = Date.parse("2026-07-29T12:00:00.000Z");
@@ -59,6 +59,20 @@ test("a valid shared puzzle is prepared only when there is no restorable save", 
   assert.equal(result.source, "shared");
   assert.equal(result.current.run.seed, "shared-bootstrap");
   assert.equal(result.current.attemptId, null);
+});
+
+test("a shared Quest is loaded lazily only after stored-attempt precedence is resolved", async () => {
+  const shared = parseSharedOptions("?generatorVersion=3&mode=custom&seed=shared-quest&topics=story&challenge=mythic&puzzleFamily=classic&contentPackId=auto&boardView=quest&style=alpha&puzzleSize=6&timerEnabled=true&learningMode=false", nowMs);
+  assert.equal(shared.kind, "valid");
+
+  const restored = await resolveStudioBootstrapAsync({ stored: storedAttempt(), shared, nowMs });
+  assert.equal(restored.source, "stored");
+  assert.equal(restored.current.attemptId, "attempt-saved");
+
+  const opened = await resolveStudioBootstrapAsync({ stored: none, shared, nowMs });
+  assert.equal(opened.source, "shared");
+  assert.equal(opened.current.run.generatorVersion, 3);
+  assert.equal(opened.current.run.options.boardView, "quest");
 });
 
 test("an unfinished saved attempt wins over valid or invalid shared intent", () => {
