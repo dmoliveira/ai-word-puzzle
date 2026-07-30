@@ -69,7 +69,7 @@ async function openSetup(page: Page) {
 }
 
 async function openWordReview(page: Page) {
-  await page.getByRole("button", { name: "Review Word" }).click();
+  await page.getByRole("button", { name: "Reveal active word" }).click();
   await page.getByRole("button", { name: "Reveal word" }).click();
   await expect(page.getByTestId("review-word-answer")).toBeVisible();
 }
@@ -192,7 +192,7 @@ test("crossword answers stay out of the rendered page until deliberate review", 
   const answers = await readStoredAnswers(page);
 
   await expect(page.getByRole("heading", { name: "Clue progress" })).toBeVisible();
-  await expect(page.getByText(/Vocabulary examples, pronunciation, and translation notes unlock/i)).toBeVisible();
+  await expect(page.getByText(/Factual word details unlock/i)).toBeVisible();
   const visibleText = (await page.locator("body").innerText()).toLowerCase();
   const ariaSnapshot = (await page.locator("body").ariaSnapshot()).toLowerCase();
   for (const answer of answers) {
@@ -351,7 +351,8 @@ test("full wrong and solved entries expose visible and spoken status", async ({ 
 
 test("review confirmation contains focus and restores or advances it safely", async ({ page }) => {
   await openPuzzle(page);
-  const trigger = page.getByRole("button", { name: "Review Word", exact: true });
+  const trigger = page.getByTestId("word-review-action");
+  await expect(trigger).toHaveAccessibleName("Reveal active word");
   await trigger.click();
   const dialog = page.getByRole("dialog");
   const cancel = dialog.getByRole("button", { name: "Cancel" });
@@ -373,7 +374,7 @@ test("review confirmation contains focus and restores or advances it safely", as
 
 test("canceling review on a prepared puzzle does not start or save an attempt", async ({ page }) => {
   await openPreparedPuzzle(page);
-  await page.getByRole("button", { name: "Review Word" }).click();
+  await page.getByRole("button", { name: "Reveal active word" }).click();
   await expect(page.getByRole("heading", { name: "Reveal this word?" })).toBeVisible();
   await page.getByRole("button", { name: "Cancel" }).click();
   await expect(page.locator('main#puzzle-studio[data-run-state="prepared"]')).toBeVisible();
@@ -385,7 +386,8 @@ test("closing compact review restores its originating panel and control", async 
   await page.setViewportSize({ width: 390, height: 844 });
   await openPuzzle(page);
   const cluesTab = page.getByRole("tab", { name: "Clues", exact: true });
-  const trigger = page.getByRole("button", { name: "Review Word", exact: true });
+  const trigger = page.getByTestId("word-review-action");
+  await expect(trigger).toHaveAccessibleName("Reveal active word");
   await expect(cluesTab).toHaveAttribute("aria-selected", "true");
 
   await trigger.click();
@@ -409,7 +411,7 @@ test("word review remains bound to its authorized attempt and word", async ({ pa
   await page.getByRole("button").filter({ hasText: secondWord.prompt }).first().click();
   await expect(page.getByTestId("review-word-answer")).toHaveText(firstWord.answer);
   await expect(page.getByText(secondWord.answer, { exact: true })).toHaveCount(0);
-  await expect(page.getByText(/Vocabulary examples, pronunciation, and translation notes unlock/i)).toBeVisible();
+  await expect(page.getByText(/Factual word details unlock/i)).toBeVisible();
 });
 
 test("short-word scramble never reveals the exact answer", async ({ page }) => {
@@ -620,7 +622,7 @@ test("paused gameplay actions cannot mutate persisted entries", async ({ page })
   await expect(page.getByText("Paused", { exact: true })).toBeVisible();
   const before = await readStoredAttempt(page);
 
-  await expect(page.getByRole("button", { name: "Review Word", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Reveal active word", exact: true })).toBeDisabled();
   const attempt = await readStoredAttempt(page);
   const startCell = attempt.run.board.cells.find((cell) => attempt.run.board.cells.some((candidate) => candidate.row === cell.row && candidate.col > cell.col))!;
   const boardCell = page.getByTestId(`board-cell-${startCell.row}-${startCell.col}`);
@@ -639,7 +641,7 @@ test("completion freezes its timestamp and elapsed time", async ({ page }) => {
   await openPuzzle(page, { timerEnabled: "true" });
   await solveRunFromPersistedFixture(page);
   await expect(page.getByTestId("completion-card")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Puzzle cleared." })).toBeFocused();
+  await expect(page.getByRole("heading", { name: "Puzzle complete" })).toBeFocused();
   await expect.poll(async () => (await readStoredAttempt(page)).completedAt).not.toBeNull();
   const completed = await readStoredAttempt(page);
   expect(completed.completedAt).not.toBeNull();
@@ -865,12 +867,50 @@ test("player sees completion and share actions after solving every word", async 
   await solveRunFromPersistedFixture(page);
 
   await expect(page.getByTestId("completion-card")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Puzzle complete" })).toBeVisible();
+  await expect(page.getByTestId("assist-recap-empty")).toHaveText("No assists used.");
+  await expect(page.getByTestId("assist-recap")).toHaveCount(0);
+  await expect(page.getByTestId("completion-card")).not.toContainText(/Word mix|common|uncommon|rare/i);
   await expect(page.getByRole("button", { name: "Share run link" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Copy result text" })).toBeVisible();
   await page.getByRole("button", { name: "Restart", exact: true }).first().click();
   await expect(page.getByTestId("run-replacement-dialog")).toBeHidden();
   await expect.poll(async () => (await readStoredAttempt(page)).attemptId).not.toBe(completedAttemptId);
   expect((await readStoredAttempt(page)).cellEntries).toEqual({});
+});
+
+test("completion recap attributes persisted assists once and survives daily reload", async ({ page }) => {
+  const today = await page.evaluate(() => new Date().toISOString().slice(0, 10));
+  await openPuzzle(page, { mode: "daily", seed: today });
+  const initial = await readStoredAttempt(page);
+  const assistedWord = initial.run.words.find((word) => word.id === initial.activeWordId)!;
+  await page.getByRole("button", { name: "Get tip" }).click();
+  await solveRunFromPersistedFixture(page);
+
+  await expect(page.getByRole("heading", { name: "Puzzle complete with recorded assists" })).toBeVisible();
+  await expect(page.getByTestId("assist-recap-word")).toHaveCount(1);
+  const reviewAssist = page.getByRole("button", { name: new RegExp(`Review ${assistedWord.answer}.*1 hint step`, "i") });
+  await expect(reviewAssist).toBeVisible();
+  await reviewAssist.click();
+  await expect(page.getByText(/1 of 3 hint steps were recorded for this word/)).toBeVisible();
+  await page.getByRole("button", { name: "Close" }).click();
+
+  await page.reload();
+  await expect(page.locator('main#puzzle-studio[data-bootstrap-state="ready"]')).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Puzzle complete with recorded assists" })).toBeVisible();
+  await expect(page.getByRole("button", { name: new RegExp(`Review ${assistedWord.answer}.*1 hint step`, "i") })).toBeVisible();
+});
+
+test("completion after a full reveal uses the persisted factual outcome", async ({ page }) => {
+  await openPuzzle(page);
+  await page.getByRole("button", { name: "Reveal full puzzle" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Reveal puzzle" }).click();
+  await page.getByRole("button", { name: "Close" }).click();
+  await solveRunFromPersistedFixture(page);
+  await expect(page.getByRole("heading", { name: "Puzzle complete after full-puzzle reveal" })).toBeVisible();
+  await expect(page.getByTestId("assist-recap-word")).toHaveCount(7);
+  await expect(page.getByTestId("completion-assists")).toContainText("1");
+  await expect(page.getByTestId("completion-assists")).toContainText(/full puzzle revealed/i);
 });
 
 test("daily completion exposes the daily share action", async ({ page }) => {
@@ -1243,10 +1283,29 @@ test("learning mode exposes vocabulary support after deliberate review", async (
   await openWordReview(page);
 
   const support = page.getByTestId("review-vocabulary-support");
-  await expect(support).toContainText(/Example:/);
-  await expect(support).toContainText(/Plain meaning:/);
-  await expect(support).toContainText(/Pronunciation:/);
-  await expect(support.getByRole("button", { name: "Speak" })).toBeVisible();
+  await expect(support).toContainText(/Factual word details/i);
+  await expect(support).toContainText(/Puzzle clue/i);
+  await expect(support).not.toContainText(/Plain meaning|Example|Pronunciation/i);
+  await expect(support.getByRole("button", { name: /^Hear .* pronounced$/i })).toBeVisible();
+});
+
+test("unreviewed Quest words never present generated learning fields as facts", async ({ page }) => {
+  await openPuzzle(page, { generatorVersion: "4", boardView: "quest", seed: "trace-myth", topics: "myth", puzzleSize: "6", learningMode: "true" });
+  await readStoredAttempt(page);
+  const generatedFields = await page.evaluate((key) => {
+    const envelope = JSON.parse(window.localStorage.getItem(key)!);
+    const word = envelope.branches.attempt.value.run.words[0];
+    return [word.learningNote, word.plainMeaning, word.pronunciationHint, word.usageExample, word.translationAid] as string[];
+  }, sessionStorageKey);
+  const beforeReview = await page.locator("body").innerText();
+  for (const generated of generatedFields) expect(beforeReview).not.toContain(generated);
+
+  await page.getByRole("button", { name: "Reveal active word" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Reveal word" }).click();
+  await expect(page.getByTestId("review-vocabulary-support")).toContainText(/No approved editorial puzzle clue/i);
+  const afterReview = await page.locator("body").innerText();
+  for (const generated of generatedFields) expect(afterReview).not.toContain(generated);
+  await expect(page.locator("body")).not.toContainText(/Plain meaning|Meaning cue|Use it like this|Nearby words/i);
 });
 
 test("quest grid is semantic and solves a target with keyboard endpoints", async ({ page }) => {
@@ -1424,7 +1483,7 @@ test("paused and completed quest grids navigate without mutating results", async
   expect(completedAfter.solvedIds).toEqual(completedBefore.solvedIds);
   expect(completedAfter.cellEntries).toEqual(completedBefore.cellEntries);
   expect(completedAfter.completedAt).toBe(completedBefore.completedAt);
-  await expect(page.getByTestId("quest-status")).toContainText(/cleared/i);
+  await expect(page.getByTestId("quest-status")).toContainText(/complete/i);
 });
 
 test("responsive workspace keeps panels and board overflow contained", async ({ page }) => {

@@ -277,6 +277,41 @@ export function summarizeAssists(state: PersistedRunState): AssistSummary {
   };
 }
 
+export type WordAssistAttribution = {
+  wordId: string;
+  hintSteps: number;
+  revealedLetters: number;
+  anagramUsed: boolean;
+  wordRevealed: boolean;
+  puzzleRevealed: boolean;
+};
+
+export function buildAssistRecap(state: PersistedRunState) {
+  const revealedCells = new Set(state.assists.revealedCellKeys);
+  const anagramWords = new Set(state.assists.anagramWordIds);
+  const revealedWords = new Set(state.assists.revealedWordIds);
+  const targetCells = getRunTargetCells(state.run);
+  const words: WordAssistAttribution[] = state.run.words.map((word) => {
+    const revealedLetters = targetCells.filter((cell) => revealedCells.has(`${cell.row}:${cell.col}`) && cell.wordIds.includes(word.id)).length;
+    return {
+      wordId: word.id,
+      hintSteps: state.assists.hintStepsByWord[word.id] ?? 0,
+      revealedLetters,
+      anagramUsed: anagramWords.has(word.id),
+      wordRevealed: revealedWords.has(word.id),
+      puzzleRevealed: state.assists.puzzleRevealed,
+    };
+  });
+  const affectedWords = words.filter((word) => word.hintSteps > 0 || word.revealedLetters > 0 || word.anagramUsed || word.wordRevealed || word.puzzleRevealed);
+  return {
+    global: summarizeAssists(state),
+    words,
+    affectedWords,
+    affectedWordCount: affectedWords.length,
+    unaffectedWordCount: words.length - affectedWords.length,
+  };
+}
+
 export function getAssistCount(state: PersistedRunState) {
   return summarizeAssists(state).total;
 }

@@ -3,7 +3,8 @@ import test from "node:test";
 import type { ProgressSnapshot } from "@/lib/game-types";
 import { createEmptyProgress, recordRunProgress } from "@/lib/progress";
 import { buildPuzzleRun } from "@/lib/puzzle-generator";
-import { createAttemptFromRun, finalizeAttempt, snapshotAttempt } from "@/lib/run-state";
+import { getRunTargetCells } from "@/lib/puzzle-board";
+import { buildAssistRecap, createAttemptFromRun, finalizeAttempt, recordHintStep, recordRevealedCell, snapshotAttempt } from "@/lib/run-state";
 import {
   createPortableBackup,
   decodePersistedGame,
@@ -80,7 +81,11 @@ function createQuestV4State(nowMs = 1_000, seed = "trace-myth", attemptId = "att
 }
 
 test("Quest v4 writes attempt schema 4 and restores only a certified native board", () => {
-  const state = createQuestV4State();
+  const initial = createQuestV4State();
+  const targetCell = getRunTargetCells(initial.run)[0];
+  const targetCellKey = `${targetCell.row}:${targetCell.col}`;
+  const assisted = recordRevealedCell(recordHintStep(initial, initial.run.words[0].id), targetCellKey);
+  const state = { ...assisted, cellEntries: { ...assisted.cellEntries, [targetCellKey]: targetCell.solution } };
   const raw = serializeStoredGame(state, createEmptyProgress(), 2_000, "save-quest-v4");
   const envelope = JSON.parse(raw) as Record<string, any>;
   assert.equal(envelope.branches.attempt.stateSchemaVersion, 4);
@@ -90,6 +95,7 @@ test("Quest v4 writes attempt schema 4 and restores only a certified native boar
   assert.ok(decoded.currentAttempt, JSON.stringify({ source: decoded.source, issues: decoded.issues }));
   assert.equal(decoded.currentAttempt.run.generatorVersion, 4);
   assert.equal(decoded.currentAttempt.run.puzzleId.startsWith("q4-"), true);
+  assert.deepEqual(buildAssistRecap(decoded.currentAttempt), buildAssistRecap(state));
   const backup = createPortableBackup(state, createEmptyProgress(), 2_000);
   assert.equal(backup.ok, true);
   if (backup.ok) assert.equal(previewPortableBackup(backup.raw, 2_000).ok, true);

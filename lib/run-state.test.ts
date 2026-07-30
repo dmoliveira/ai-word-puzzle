@@ -5,6 +5,7 @@ import { buildPuzzleRun } from "@/lib/puzzle-generator";
 import {
   canAcceptPlayIntent,
   canMutateAttempt,
+  buildAssistRecap,
   createAttemptFromRun,
   createPreparedRunState,
   finalizeAttempt,
@@ -126,6 +127,26 @@ test("assist ledger is bounded, deduplicated, and blocked while paused", () => {
   const paused = setAttemptPaused(assisted, true, 2_000);
   assert.equal(recordHintStep(paused, initial.run.words[1].id), paused);
   assert.equal(canMutateAttempt(paused), false);
+});
+
+test("assist recap keeps global events separate from deterministic per-word attribution", () => {
+  const initial = createState();
+  const crossing = getRunTargetCells(initial.run).find((cell) => cell.wordIds.length === 2)!;
+  const crossingKey = `${crossing.row}:${crossing.col}`;
+  const hintedWord = initial.run.words[0].id;
+  const assisted = recordRevealedCell(recordHintStep(initial, hintedWord), crossingKey);
+  const recap = buildAssistRecap(assisted);
+
+  assert.equal(recap.global.total, 2, "one hint step and one revealed cell are two global assists");
+  assert.deepEqual(recap.words.map((word) => word.wordId), initial.run.words.map((word) => word.id));
+  assert.equal(recap.words.reduce((total, word) => total + word.hintSteps + word.revealedLetters, 0), 3, "one crossing reveal is attributed to both affected words");
+  assert.equal(recap.affectedWordCount, new Set([hintedWord, ...crossing.wordIds]).size);
+  assert.equal(recap.unaffectedWordCount, initial.run.words.length - recap.affectedWordCount);
+
+  const fullyRevealed = buildAssistRecap(recordPuzzleReveal(assisted));
+  assert.equal(fullyRevealed.global.total, 3, "full-puzzle reveal remains one global assist");
+  assert.equal(fullyRevealed.affectedWordCount, initial.run.words.length);
+  assert.ok(fullyRevealed.words.every((word) => word.puzzleRevealed));
 });
 
 test("completion timestamp and elapsed time are immutable", () => {

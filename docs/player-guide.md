@@ -44,16 +44,18 @@ A fully filled incorrect word shows “Not correct yet.” Solved, paused, and c
 
 ## Assists and review
 
-Hints, revealed letters, scrambles, word reveals, and a full-puzzle reveal are recorded in a bounded assist ledger. A reveal confirmation is an accessible modal. Word review remains bound to the exact attempt and word that was authorized, so changing clues cannot expose another answer.
+Hints, revealed letters, scrambles, word reveals, and a full-puzzle reveal are recorded in a bounded assist ledger. Before authorization, controls say **Reveal active word** or **Reveal full puzzle** and an accessible confirmation explains that the action records an assist. After solving or revealing, the same controls become focused review actions. Word review remains bound to the exact attempt and word that was authorized, so changing clues cannot expose another answer.
+
+Word review presents only structural facts—answer, topic, and length—plus an approved editorial puzzle clue when one exists. Generated placeholder meanings, examples, pronunciation spellings, translations, related-word claims, and frequency labels are not presented as factual learning content. The assist recap reports the persisted number of hint steps used; the save does not preserve or reconstruct their exact wording as history.
 
 ## Resume, replay, and share
 
-- Returning to the app resumes only the current unfinished saved attempt.
+- Returning to the app resumes the current unfinished attempt or a completed current canonical daily. A completed custom run yields to the current daily without deleting its history card.
 - Restart keeps the exact recorded generator and puzzle identity but creates a distinct empty attempt. An unfinished run asks before replacement; an untouched prepared or completed run restarts directly.
 - A shared or malformed link never replaces an unfinished saved attempt during page load; the saved attempt resumes with a visible explanation.
 - History cards always start a fresh attempt; they do not resume old partial entries. **Replay exact puzzle** appears only when generator, corpus, puzzle ID, and fingerprint still reproduce. Otherwise the honest action is **Use settings/current rules**.
 - New shared links carry generator, corpus, seed/options, and an expected puzzle fingerprint. They do not carry your entries, score, streak, or history. Explicit Quest-v4 links regenerate v4; older and unversioned generator-v3 links remain pinned to v3. A fingerprint mismatch fails visibly.
-- Completion text reports elapsed time and the persisted assist breakdown.
+- Completion reports words completed, elapsed play time, and the exact persisted assist breakdown. With no assists it says so directly. Otherwise **Review your assists** lists each affected word once in puzzle order; crossing letters may be attributed to both words even though the global ledger counts the reveal once. Run seed and provenance remain under **Run details**.
 
 ## Local data and privacy
 

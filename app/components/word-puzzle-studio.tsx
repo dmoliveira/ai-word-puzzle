@@ -8,6 +8,7 @@ import { isCrosswordContentPack, isCrosswordTopic } from "@/lib/clue-catalog";
 import { getCanonicalDailyOptions, getPuzzleSizeRange, getUtcDay, isCanonicalDailyOptions, normalizePuzzleOptions, parseSharedOptions, type SharedPuzzleProvenance } from "@/lib/puzzle-options";
 import { buildDailyArchive, createEmptyProgress, recordRunProgress } from "@/lib/progress";
 import {
+  buildAssistRecap,
   canMutateAttempt,
   canAcceptPlayIntent,
   createPreparedRunState,
@@ -23,6 +24,7 @@ import {
   setAttemptVisibility,
   startPreparedAttempt,
   summarizeAssists,
+  type WordAssistAttribution,
 } from "@/lib/run-state";
 import {
   createPortableBackup,
@@ -223,6 +225,16 @@ function formatAssistBreakdown(assists: AssistSummary) {
   return parts.join(" · ");
 }
 
+function getWordAssistReasons(attribution: WordAssistAttribution) {
+  return [
+    attribution.hintSteps > 0 ? `${attribution.hintSteps} hint ${attribution.hintSteps === 1 ? "step" : "steps"}` : null,
+    attribution.revealedLetters > 0 ? `${attribution.revealedLetters} revealed ${attribution.revealedLetters === 1 ? "letter" : "letters"}` : null,
+    attribution.anagramUsed ? "scramble shown" : null,
+    attribution.wordRevealed ? "word revealed" : null,
+    attribution.puzzleRevealed ? "full puzzle revealed" : null,
+  ].filter((reason): reason is string => Boolean(reason));
+}
+
 function getCellKey(row: number, col: number) {
   return `${row}:${col}`;
 }
@@ -403,17 +415,6 @@ function buildLinearQuestPath(start: { row: number; col: number }, end: { row: n
   }));
 }
 
-function getFrequencyLabel(frequencyBand: PuzzleWord["frequencyBand"]) {
-  switch (frequencyBand) {
-    case "common":
-      return "familiar";
-    case "uncommon":
-      return "stretch";
-    case "rare":
-      return "advanced";
-  }
-}
-
 function getActiveClueSummary(word: PuzzleWord, challenge: PuzzleOptions["challenge"]) {
   if (challenge === "breeze") {
     return `${word.topicLabel} · ${word.length} letters · starts with ${word.answer[0]?.toUpperCase() ?? "?"}`;
@@ -421,7 +422,7 @@ function getActiveClueSummary(word: PuzzleWord, challenge: PuzzleOptions["challe
   if (challenge === "quest") {
     return `${word.topicLabel} · ${word.length} letters`;
   }
-  return `${word.topicLabel} · clue only`;
+  return `${word.topicLabel} · ${word.length} letters · puzzle clue`;
 }
 
 function getClueCardValue(word: PuzzleWord, index: number, challenge: PuzzleOptions["challenge"]) {
@@ -430,10 +431,10 @@ function getClueCardValue(word: PuzzleWord, index: number, challenge: PuzzleOpti
   }
 
   if (index === 1) {
-    return getFrequencyLabel(word.frequencyBand);
+    return `${word.length} letters`;
   }
 
-  return challenge === "breeze" ? `${word.length} letters` : challenge === "quest" ? "Length in clue header" : "No free letter hint";
+  return challenge === "breeze" ? "First-letter hint available" : challenge === "quest" ? "Length shown in clue header" : "Editorial puzzle clue";
 }
 
 function buildAnagram(answer: string) {
@@ -862,11 +863,14 @@ export function WordPuzzleStudio() {
   const assistSummary = started
     ? summarizeAssists(state)
     : { total: 0, hintSteps: 0, revealedLetters: 0, anagrams: 0, revealedWords: 0, puzzleRevealed: false };
+  const assistRecap = started ? buildAssistRecap(state) : null;
   const assistsUsed = assistSummary.total;
+  const completionTitle = assistSummary.puzzleRevealed
+    ? "Puzzle complete after full-puzzle reveal"
+    : assistsUsed > 0
+      ? "Puzzle complete with recorded assists"
+      : "Puzzle complete";
   const displayedElapsedMs = started ? getDisplayedElapsedMs(state, clockNow, typeof document === "undefined" || !document.hidden) : 0;
-  const rareSolvedCount = state.run.words.filter((word) => word.frequencyBand === "rare").length;
-  const uncommonSolvedCount = state.run.words.filter((word) => word.frequencyBand === "uncommon").length;
-  const commonSolvedCount = state.run.words.filter((word) => word.frequencyBand === "common").length;
   const finishedHistoryCount = progress.history.filter((entry) => entry.finished).length;
   const dailyClearCount = Object.values(progress.dailyLedger).filter((outcome) => outcome === "credited" || outcome === "late-clear").length;
   const historicalAssistCount = progress.history.reduce((total, entry) => total + entry.assists.total, 0);
@@ -923,8 +927,11 @@ export function WordPuzzleStudio() {
   const reviewedWord = reviewTarget.kind === "word" && isWordReviewAuthorized(state, reviewTarget)
     ? getWordById(state, reviewTarget.wordId)
     : null;
+  const reviewedAttribution = reviewedWord ? assistRecap?.words.find((word) => word.wordId === reviewedWord.id) ?? null : null;
   const puzzleReviewAuthorized = reviewTarget.kind === "puzzle" && isPuzzleReviewAuthorized(state, reviewTarget);
   const visibleReviewKind = reviewedWord ? "word" : puzzleReviewAuthorized ? "puzzle" : null;
+  const activeWordReviewAvailable = Boolean(activeWord && isStartedAttempt(state) && isWordReviewAuthorized(state, { kind: "word", attemptId: state.attemptId, wordId: activeWord.id }));
+  const allAnswersReviewAvailable = isStartedAttempt(state) && isPuzzleReviewAuthorized(state, { kind: "puzzle", attemptId: state.attemptId });
   const activeVocabularyUnlocked = isQuestView || Boolean(activeWord && (
     state.solvedIds.includes(activeWord.id)
     || state.assists.revealedWordIds.includes(activeWord.id)
@@ -938,7 +945,7 @@ export function WordPuzzleStudio() {
   const activeCluePromptId = activeWord ? `clue-prompt-${activeWord.id}` : undefined;
   const activeClueFeedbackId = activeWord ? `clue-feedback-${activeWord.id}` : undefined;
   const liveMessage = finished
-    ? `Puzzle cleared. ${solvedCount} of ${state.run.words.length} words solved.`
+    ? `${completionTitle}. ${solvedCount} of ${state.run.words.length} words completed.`
     : !started
       ? "Puzzle ready. Start or enter your first answer to begin."
     : state.paused
@@ -1447,8 +1454,7 @@ export function WordPuzzleStudio() {
       `Astra Lexa Daily ${dailySeed}`,
       `${state.run.words.length} words`,
       `${formatElapsed(displayedElapsedMs)}`,
-      `${assistsUsed} assists`,
-      `${commonSolvedCount}/${uncommonSolvedCount}/${rareSolvedCount} mix`,
+      assistsUsed === 0 ? "No assists used" : `${assistsUsed} assists (${formatAssistBreakdown(assistSummary)})`,
     ].join(" | ");
   }
 
@@ -1597,6 +1603,15 @@ export function WordPuzzleStudio() {
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => reviewHeadingRef.current?.focus());
     });
+  }
+
+  function openFocusedWordReview(wordId: string) {
+    const current = stateRef.current;
+    if (!isStartedAttempt(current)) return;
+    const target = { kind: "word" as const, attemptId: current.attemptId, wordId };
+    if (!isWordReviewAuthorized(current, target)) return;
+    reviewOriginRef.current = { element: document.activeElement instanceof HTMLElement ? document.activeElement : null, panel: mobilePanel };
+    openAuthorizedReview(target);
   }
 
   function closeReview() {
@@ -2544,8 +2559,8 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
                   </div>
                   <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Review tools</div>
                   <div className="flex flex-wrap gap-2 lg:justify-end">
-                    <button type="button" onClick={confirmRevealWord} disabled={state.paused && !Boolean(activeWord && (state.solvedIds.includes(activeWord.id) || state.assists.revealedWordIds.includes(activeWord.id) || state.assists.puzzleRevealed))} className={`${secondaryPillClass} disabled:cursor-not-allowed disabled:opacity-40`}>Review Word</button>
-                    <button type="button" onClick={confirmRevealPuzzle} disabled={state.paused && !state.assists.puzzleRevealed} className={`${secondaryPillClass} disabled:cursor-not-allowed disabled:opacity-40`}>Review Puzzle</button>
+                    <button data-testid="word-review-action" type="button" aria-label={activeWordReviewAvailable && activeWord ? `Review ${activeWord.answer.toUpperCase()}` : "Reveal active word"} onClick={confirmRevealWord} disabled={state.paused && !Boolean(activeWord && (state.solvedIds.includes(activeWord.id) || state.assists.revealedWordIds.includes(activeWord.id) || state.assists.puzzleRevealed))} className={`${secondaryPillClass} disabled:cursor-not-allowed disabled:opacity-40`}>{activeWordReviewAvailable ? "Review Word" : "Reveal Word"}</button>
+                    <button data-testid="puzzle-review-action" type="button" aria-label={allAnswersReviewAvailable ? "Review all answers" : "Reveal full puzzle"} onClick={confirmRevealPuzzle} disabled={state.paused && !state.assists.puzzleRevealed} className={`${secondaryPillClass} disabled:cursor-not-allowed disabled:opacity-40`}>{allAnswersReviewAvailable ? "Review Puzzle" : "Reveal Puzzle"}</button>
                   </div>
                 </div>
               </div>
@@ -2612,7 +2627,7 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
                         <div className="mt-1 text-lg font-semibold text-white">{activeClueName} · {activeWord.length} letters</div>
                         <p id={activeCluePromptId} className="mt-2 text-sm text-slate-300">{activeWord.prompt}</p>
                       </div>
-                      <div className={`rounded-full border px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] ${getClueTone(activeWord)}`}>{getFrequencyLabel(activeWord.frequencyBand)}</div>
+                      <div className={`rounded-full border px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] ${getClueTone(activeWord)}`}>{activeWord.topicLabel}</div>
                     </div>
                     <label htmlFor="active-answer-input" className="mt-4 block text-[11px] uppercase tracking-[0.22em] text-slate-400">Answer for {activeClueName}</label>
                     <input
@@ -2768,7 +2783,7 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
                         <div className="mt-2 text-sm text-slate-300">{activeWord.prompt}</div>
                         <div className="mt-2 text-xs uppercase tracking-[0.2em] text-slate-400">{isQuestView ? `${questPath.cells.length || 1}/${activeWord.length} trail cells` : `${activeFilledCount}/${activeWord.length} letters filled`}</div>
                       </div>
-                      <div className={`rounded-full border px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] ${getClueTone(activeWord)}`}>{getFrequencyLabel(activeWord.frequencyBand)}</div>
+                      <div className={`rounded-full border px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] ${getClueTone(activeWord)}`}>{activeWord.topicLabel}</div>
                     </div>
 
                     {isQuestView ? (
@@ -2789,48 +2804,25 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
                     </div>
 
                     {state.run.options.learningMode ? activeVocabularyUnlocked ? (
-                      <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_16rem]">
-                        <div className="rounded-2xl border border-white/10 bg-slate-950/45 p-4">
-                          <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Vocabulary help</div>
-                          <div className="mt-3 space-y-4 text-sm text-slate-200">
-                            <div>
-                              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Meaning cue</div>
-                              <p className="mt-1 text-slate-200">{activeWord.learningNote}</p>
-                            </div>
-                            <div className="rounded-2xl border border-white/10 bg-white/4 p-3">
-                              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Plain meaning</div>
-                              <p className="mt-1 text-slate-200">{activeWord.plainMeaning}</p>
-                              <div className="mt-3 text-[11px] uppercase tracking-[0.22em] text-slate-400">Use it like this</div>
-                              <p className="mt-1 text-slate-200">{activeWord.usageExample}</p>
-                            </div>
-                            <div className="rounded-2xl border border-white/10 bg-white/4 p-3">
-                              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Pronunciation</div>
-                              <div className="mt-2 flex items-center gap-2">
-                                <p className="text-slate-200">{activeWord.pronunciationHint}</p>
-                                <button type="button" onClick={() => speakWord(activeWord.answer)} className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] text-slate-100">
-                                  Speak
-                                </button>
-                              </div>
-                              <div className="mt-3 text-[11px] uppercase tracking-[0.22em] text-slate-400">Extra cue</div>
-                              <p className="mt-1 text-slate-300">{activeWord.microHint}</p>
-                            </div>
+                      <div data-testid="active-factual-word-details" className="mt-4 rounded-2xl border border-white/10 bg-slate-950/45 p-4">
+                        <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Factual word details</div>
+                        <div className="mt-3 text-lg font-semibold uppercase tracking-[0.18em] text-white">{activeWord.answer}</div>
+                        <div className="mt-2 text-sm text-slate-300">{activeWord.topicLabel} · {activeWord.length} letters</div>
+                        {activeWord.qualityStatus === "approved" && activeWord.clue ? (
+                          <div className="mt-4 rounded-2xl border border-white/10 bg-white/4 p-3">
+                            <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Puzzle clue</div>
+                            <p className="mt-1 text-sm text-slate-200">{activeWord.clue}</p>
                           </div>
-                        </div>
-                        <div className="rounded-2xl border border-white/10 bg-slate-950/45 p-4">
-                          <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Nearby words</div>
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {activeWord.relatedWords.map((related) => (
-                              <span key={related} className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] capitalize text-slate-200">
-                                {related}
-                              </span>
-                            ))}
-                          </div>
-                          <p className="mt-3 text-xs leading-5 text-slate-400">{activeWord.translationAid}</p>
-                        </div>
+                        ) : (
+                          <p className="mt-4 text-sm leading-6 text-slate-300">No approved editorial puzzle clue is available for this local topic entry.</p>
+                        )}
+                        <button type="button" aria-label={`Hear ${activeWord.answer.toUpperCase()} pronounced`} onClick={() => speakWord(activeWord.answer)} className="mt-4 rounded-full border border-white/35 px-3 py-1.5 text-xs text-slate-100">
+                          Hear word
+                        </button>
                       </div>
                     ) : (
                       <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/45 p-4 text-sm text-slate-300">
-                        Vocabulary examples, pronunciation, and translation notes unlock after you solve this answer or deliberately open its review.
+                        Factual word details unlock after you solve this answer or deliberately reveal it.
                       </div>
                     ) : null}
 
@@ -2916,7 +2908,7 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
                                   <div className="text-xs uppercase tracking-[0.22em] text-slate-400">{placement.clueNumber} / {word.length} letters</div>
                                   <div className="mt-1 text-sm text-slate-100">{word.prompt}</div>
                                 </div>
-                                <span className={`rounded-full border px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] ${getClueTone(word)}`}>{getFrequencyLabel(word.frequencyBand)}</span>
+                                <span className={`rounded-full border px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] ${getClueTone(word)}`}>{word.length} letters</span>
                               </div>
                             </button>
                           );
@@ -2942,51 +2934,33 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
                   <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
                     <div className="rounded-3xl border border-white/10 bg-white/4 p-5">
                       <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Answer unlocked</div>
-                      <div className="mt-2 text-[11px] uppercase tracking-[0.18em] text-slate-400">{reviewedWord.topicLabel} · {getFrequencyLabel(reviewedWord.frequencyBand)}</div>
+                      <div className="mt-2 text-[11px] uppercase tracking-[0.18em] text-slate-400">{reviewedWord.topicLabel} · {reviewedWord.length} letters</div>
                       <div data-testid="review-word-answer" className="mt-2 text-3xl font-semibold uppercase tracking-[0.16em] text-white">{reviewedWord.answer}</div>
-                      <p className="mt-3 text-sm text-slate-300">{reviewedWord.prompt}</p>
-                      {state.run.options.learningMode ? (
-                        <div data-testid="review-vocabulary-support" className="mt-4 rounded-2xl border border-white/10 bg-slate-950/40 p-4 text-left">
-                          <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Vocabulary support</div>
-                          <div className="mt-2 text-[11px] uppercase tracking-[0.22em] text-slate-400">Meaning cue</div>
-                          <p className="mt-1 text-sm text-slate-200">{reviewedWord.learningNote}</p>
-                          <div className="mt-3 text-[11px] uppercase tracking-[0.22em] text-slate-400">Plain meaning</div>
-                          <p className="mt-1 text-sm text-slate-200">{reviewedWord.plainMeaning}</p>
-                          <div className="mt-3 text-[11px] uppercase tracking-[0.22em] text-slate-400">Example</div>
-                          <p className="mt-1 text-sm text-slate-300">{reviewedWord.usageExample}</p>
-                          <div className="mt-3 text-[11px] uppercase tracking-[0.22em] text-slate-400">Pronunciation</div>
-                          <div className="mt-3 flex items-center gap-2">
-                            <p className="text-sm text-slate-300">{reviewedWord.pronunciationHint}</p>
-                            <button type="button" onClick={() => speakWord(reviewedWord.answer)} className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] text-slate-100">
-                              Speak
-                            </button>
+                      <div data-testid="review-vocabulary-support" className="mt-4 rounded-2xl border border-white/10 bg-slate-950/40 p-4 text-left">
+                        <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Factual word details</div>
+                        {reviewedWord.qualityStatus === "approved" && reviewedWord.clue ? (
+                          <div className="mt-3">
+                            <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Puzzle clue</div>
+                            <p className="mt-1 text-sm text-slate-200">{reviewedWord.clue}</p>
                           </div>
-                          <div className="mt-3 text-[11px] uppercase tracking-[0.22em] text-slate-400">Extra cue</div>
-                          <p className="mt-1 text-sm text-slate-400">{reviewedWord.microHint}</p>
-                          <p className="mt-3 text-sm text-slate-400">{reviewedWord.translationAid}</p>
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {reviewedWord.relatedWords.map((related) => (
-                              <span key={related} className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] capitalize text-slate-200">
-                                {related}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                    <div className="rounded-3xl border border-white/10 bg-white/4 p-5">
-                      <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Hint ladder</div>
-                      <p className="mt-2 text-sm text-slate-300">A clean recap of the clue trail that led to this answer.</p>
-                      <div className="mt-3 space-y-2 text-sm text-slate-200">
-                        {createHintLadder(reviewedWord).map((hint, index) => <div key={hint} className="rounded-2xl border border-white/10 px-3 py-2">{index + 1}. {hint}</div>)}
+                        ) : (
+                          <p className="mt-3 text-sm leading-6 text-slate-300">No approved editorial puzzle clue is available; only topic and length are shown.</p>
+                        )}
+                        <button type="button" aria-label={`Hear ${reviewedWord.answer.toUpperCase()} pronounced`} onClick={() => speakWord(reviewedWord.answer)} className="mt-4 rounded-full border border-white/35 px-3 py-1.5 text-xs text-slate-100">Hear word</button>
                       </div>
                     </div>
+                    {reviewedAttribution && reviewedAttribution.hintSteps > 0 ? (
+                      <div className="rounded-3xl border border-white/10 bg-white/4 p-5">
+                        <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Hints used</div>
+                        <p className="mt-2 text-sm text-slate-300">{reviewedAttribution.hintSteps} of 3 hint steps were recorded for this word. The save stores the count, not a claim about remembered hint copy.</p>
+                      </div>
+                    ) : <div />}
                   </div>
                 ) : null}
 
                 {visibleReviewKind === "puzzle" ? (
                   <div>
-                    <p className="mb-4 text-sm text-slate-300">Every solved answer, clue reference, and direction in one quick scan.</p>
+                    <p className="mb-4 text-sm text-slate-300">All puzzle answers, with approved editorial puzzle clues when available.</p>
                     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                     {getRunWordPaths(state.run).map((placement) => {
                       const word = getWordById(state, placement.wordId);
@@ -2996,12 +2970,12 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
 
                       return (
                         <article key={word.id} className="rounded-3xl border border-white/10 bg-white/4 p-4">
-                          <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{word.topicLabel} · {getFrequencyLabel(word.frequencyBand)}</div>
+                          <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{word.topicLabel} · {word.length} letters</div>
                           <div className="flex items-center justify-between gap-3">
                             <div data-testid="review-puzzle-answer" className="text-lg font-semibold uppercase tracking-[0.14em] text-white">{word.answer}</div>
                             <span className="accent-chip rounded-full px-2.5 py-1 text-[11px] capitalize">{placement.clueNumber} {placement.direction}</span>
                           </div>
-                          <p className="mt-2 text-sm text-slate-300">{word.prompt}</p>
+                          {word.qualityStatus === "approved" && word.clue ? <p className="mt-2 text-sm text-slate-300">Puzzle clue: {word.clue}</p> : null}
                         </article>
                       );
                     })}
@@ -3020,31 +2994,60 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
                   <span className="h-2 w-2 rounded-full bg-amber-300 animate-pulse [animation-delay:360ms]" />
                 </div>
                 <div className="text-xs uppercase tracking-[0.28em] text-slate-400">Run complete</div>
-                <h3 ref={completionHeadingRef} tabIndex={-1} className="mt-2 text-3xl font-semibold text-white">Puzzle cleared.</h3>
+                <h3 ref={completionHeadingRef} tabIndex={-1} className="mt-2 text-3xl font-semibold text-white">{completionTitle}</h3>
                 <p className="mt-3 text-sm text-slate-300">{localSaveHealthy ? (isCanonicalDailyCompletion ? "This canonical clear is saved in your local archive and streak." : "This run is saved in your local history without changing the canonical daily streak.") : "This result is only in this tab until local saving recovers."} Replay the exact puzzle when its recorded provenance matches, review the board, or share the result.</p>
 
                 <div className="mt-5">
                   <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Run recap</div>
                   <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                   <div className="rounded-3xl border border-white/10 bg-white/4 p-4 text-left">
-                    <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Finish time</div>
+                    <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Elapsed play time</div>
                     <div className="mt-2 text-2xl font-semibold text-white">{formatElapsed(displayedElapsedMs)}</div>
                   </div>
                   <div className="rounded-3xl border border-white/10 bg-white/4 p-4 text-left">
+                    <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Words completed</div>
+                    <div className="mt-2 text-2xl font-semibold text-white">{solvedCount}/{state.run.words.length}</div>
+                  </div>
+                  <div data-testid="completion-assists" className="rounded-3xl border border-white/10 bg-white/4 p-4 text-left">
                     <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Assists used</div>
                     <div className="mt-2 text-2xl font-semibold text-white">{assistsUsed}</div>
                     <div className="mt-1 text-xs leading-5 text-slate-400">{formatAssistBreakdown(assistSummary)}</div>
                   </div>
                   <div className="rounded-3xl border border-white/10 bg-white/4 p-4 text-left">
-                    <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Word mix</div>
-                    <div className="mt-2 text-sm font-medium text-white">{commonSolvedCount} common / {uncommonSolvedCount} uncommon / {rareSolvedCount} rare</div>
-                  </div>
-                  <div className="rounded-3xl border border-white/10 bg-white/4 p-4 text-left">
-                    <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Seed</div>
-                    <div className="mt-2 text-sm font-medium text-white">{state.run.seed.replace(/^daily:/, "")}</div>
+                    <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Words with no recorded assist</div>
+                    <div className="mt-2 text-2xl font-semibold text-white">{assistRecap?.unaffectedWordCount ?? state.run.words.length}</div>
                   </div>
                   </div>
                 </div>
+
+                {assistRecap && assistRecap.affectedWordCount > 0 ? (
+                  <div data-testid="assist-recap" className="mt-5 rounded-3xl border border-amber-300/25 bg-amber-300/6 p-5 text-left">
+                    <div className="text-xs uppercase tracking-[0.22em] text-amber-100">Review your assists</div>
+                    <p className="mt-2 text-sm text-amber-50/85">Global totals count each assist event once. A revealed crossing can be attributed to both words below.</p>
+                    <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                      {assistRecap.affectedWords.map((attribution) => {
+                        const word = getWordById(state, attribution.wordId);
+                        if (!word) return null;
+                        const reasons = getWordAssistReasons(attribution);
+                        return (
+                          <button key={word.id} data-testid="assist-recap-word" type="button" aria-label={`Review ${word.answer.toUpperCase()} — ${reasons.join(", ")}`} onClick={() => openFocusedWordReview(word.id)} className="rounded-2xl border border-amber-200/25 bg-slate-950/35 px-4 py-3 text-left">
+                            <span className="font-semibold uppercase tracking-[0.12em] text-white">{word.answer}</span>
+                            <span className="mt-1 block text-xs text-amber-50/80">{reasons.join(" · ")}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : <p data-testid="assist-recap-empty" className="mt-5 text-sm font-medium text-emerald-200">No assists used.</p>}
+
+                <details className="mx-auto mt-5 max-w-xl rounded-2xl border border-white/10 bg-white/4 px-4 py-3 text-left text-sm text-slate-300">
+                  <summary className="cursor-pointer font-medium text-white">Run details</summary>
+                  <div className="mt-3 grid gap-1 text-xs">
+                    <span>Seed: {state.run.seed.replace(/^daily:/, "")}</span>
+                    <span>Generator: v{state.run.generatorVersion}</span>
+                    <span>Puzzle ID: {state.run.puzzleId}</span>
+                  </div>
+                </details>
 
                 <div className="mt-5">
                   <div className="text-xs uppercase tracking-[0.22em] text-slate-400">What next</div>
@@ -3053,7 +3056,7 @@ function getSolvedTrailClass(state: CurrentRunState, cell: PuzzleBoardCell) {
                     {getExpectedRunProvenance(state.run) ? "Replay exact puzzle" : "Use settings/current rules"}
                   </button>
                   <button type="button" onClick={(event) => { reviewOriginRef.current = { element: event.currentTarget, panel: mobilePanel }; openAuthorizedReview({ kind: "puzzle", attemptId: state.attemptId }); }} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">
-                    Review full puzzle
+                    Review all answers
                   </button>
                   <button type="button" onClick={startTodayDailyRun} className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-sm text-slate-100">
                     Play daily
