@@ -155,6 +155,16 @@ body::before {
   opacity: 0.9;
 }
 
+.quest-orientation-note {
+  display: none;
+}
+
+@media (max-width: 48rem) and (orientation: portrait) {
+  .quest-orientation-note {
+    display: block;
+  }
+}
+
 .quest-badge {
   clip-path: polygon(25% 6%, 75% 6%, 96% 50%, 75% 94%, 25% 94%, 4% 50%);
 }
@@ -203,5 +213,53 @@ body::before {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+@media (forced-colors: active) {
+  html,
+  body,
+  .glass-card,
+  dialog {
+    background: Canvas !important;
+    color: CanvasText !important;
+    border-color: CanvasText !important;
+    box-shadow: none !important;
+  }
+
+  body::before,
+  .quest-card-glow::before,
+  .completion-burst::before,
+  .completion-burst::after {
+    display: none !important;
+  }
+
+  :where(button, input, select, textarea, [role="tab"], [role="gridcell"]) {
+    border-color: ButtonText !important;
+    color: ButtonText !important;
+  }
+
+  :where(button, input, select, textarea, [role="tab"], [role="gridcell"]):focus-visible {
+    outline: 3px solid Highlight !important;
+    outline-offset: 3px;
+  }
+
+  :where(.accent-chip, [aria-selected="true"], [aria-pressed="true"]) {
+    background: Highlight !important;
+    color: HighlightText !important;
+    border-color: Highlight !important;
+  }
+
+  input:checked {
+    outline: 2px solid Highlight !important;
+    outline-offset: 2px;
+  }
+
+  [data-solved-cell="true"] {
+    border: 3px double LinkText !important;
+  }
+
+  [aria-invalid="true"] {
+    border: 3px solid Mark !important;
   }
 }

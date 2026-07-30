@@ -371,6 +371,16 @@ test("review confirmation contains focus and restores or advances it safely", as
   await expect(page.getByRole("heading", { name: "Word Review" })).toBeFocused();
 });
 
+test("canceling review on a prepared puzzle does not start or save an attempt", async ({ page }) => {
+  await openPreparedPuzzle(page);
+  await page.getByRole("button", { name: "Review Word" }).click();
+  await expect(page.getByRole("heading", { name: "Reveal this word?" })).toBeVisible();
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.locator('main#puzzle-studio[data-run-state="prepared"]')).toBeVisible();
+  expect(await page.evaluate((keys) => keys.map((key) => window.localStorage.getItem(key)), localStorageKeys)).toEqual(localStorageKeys.map(() => null));
+  await expect(page.getByTestId("recent-run-card")).toHaveCount(0);
+});
+
 test("closing compact review restores its originating panel and control", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openPuzzle(page);
@@ -440,6 +450,31 @@ test("setup advertises only certified crossword options and keeps trace topics b
   await expect(page.getByLabel("Target count")).toHaveAttribute("max", "12");
 });
 
+test("setup choice groups expose native state without starting or saving", async ({ page }) => {
+  await openPreparedPuzzle(page);
+  await openSetup(page);
+  const modeGroup = page.getByRole("group", { name: "Mode" });
+  const custom = modeGroup.getByRole("radio", { name: "custom" });
+  const daily = modeGroup.getByRole("radio", { name: "daily" });
+  await expect(custom).toBeChecked();
+  await custom.press("ArrowRight");
+  await expect(daily).toBeChecked();
+
+  const advanced = page.locator('button[aria-controls="advanced-setup-options"]');
+  await expect(advanced).toHaveAttribute("aria-expanded", "false");
+  await expect(advanced).toHaveAttribute("aria-controls", "advanced-setup-options");
+  await advanced.click();
+  await expect(advanced).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("group", { name: "Difficulty" }).getByRole("radio", { checked: true })).toHaveCount(1);
+  await expect(page.getByRole("group", { name: "Quest type" }).getByRole("radio", { checked: true })).toHaveCount(1);
+
+  const ocean = page.getByRole("button", { name: "Ocean", exact: true });
+  await expect(ocean).toHaveAttribute("aria-pressed", "false");
+  await ocean.click();
+  await expect(ocean).toHaveAttribute("aria-pressed", "true");
+  expect(await page.evaluate((keys) => keys.map((key) => window.localStorage.getItem(key)), localStorageKeys)).toEqual(localStorageKeys.map(() => null));
+});
+
 test("mobile crossword starts clue-first and switches accessible workspace tabs", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openPuzzle(page);
@@ -466,6 +501,51 @@ test("compact crossword and quest modes preserve their intended first panel", as
   await openPuzzle(page, { boardView: "quest", seed: "mobile-quest" });
   await expect(page.getByRole("tab", { name: "Board", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("heading", { name: "Quest board" })).toBeVisible();
+});
+
+test("portrait Quest offers optional orientation guidance that clears in landscape", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openPuzzle(page, { boardView: "quest", seed: "quest-orientation" });
+  await expect(page.getByRole("tab", { name: "Board", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("quest-orientation-note")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(await page.evaluate(() => document.documentElement.clientWidth));
+
+  await page.setViewportSize({ width: 844, height: 390 });
+  await expect(page.getByTestId("quest-orientation-note")).toBeHidden();
+  await expect(page.getByRole("tab", { name: "Board", exact: true })).toHaveAttribute("aria-selected", "true");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(await page.evaluate(() => document.documentElement.clientWidth));
+});
+
+test("forced colors retain focus, selection, and solved Quest boundaries", async ({ page }) => {
+  await page.emulateMedia({ forcedColors: "active" });
+  await openPuzzle(page, { generatorVersion: "4", boardView: "quest", seed: "trace-myth", topics: "myth", puzzleSize: "6" });
+  const initial = await readStoredAttempt(page);
+  const word = initial.run.words[0];
+  const { start, end } = getQuestEndpoints(initial, word.id);
+  const startCell = page.getByTestId(`board-cell-${start.row}-${start.col}`);
+  await startCell.focus();
+  expect(await startCell.evaluate((element) => getComputedStyle(element).outlineStyle)).not.toBe("none");
+  await startCell.click();
+  await expect(startCell).toHaveAttribute("aria-selected", "true");
+  await page.getByTestId(`board-cell-${end.row}-${end.col}`).click();
+  await expect(startCell).toHaveAttribute("data-solved-cell", "true");
+  expect(await startCell.evaluate((element) => getComputedStyle(element).borderStyle)).toBe("double");
+});
+
+test("compact header navigation activates hidden panels without starting play", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openPreparedPuzzle(page);
+  await expect(page.getByRole("tab", { name: "Clues", exact: true })).toHaveAttribute("aria-selected", "true");
+
+  await page.getByRole("button", { name: "Play", exact: true }).click();
+  await expect(page.getByRole("tab", { name: "Board", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("heading", { name: "Puzzle board" })).toBeVisible();
+
+  await page.getByRole("button", { name: "History", exact: true }).click();
+  await expect(page.getByRole("tab", { name: "Archive", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("heading", { name: "Quest progress" })).toBeVisible();
+  expect(await page.evaluate((keys) => keys.map((key) => window.localStorage.getItem(key)), localStorageKeys)).toEqual(localStorageKeys.map(() => null));
+  await expect(page.getByTestId("elapsed-time")).toHaveText("00:00");
 });
 
 test("an untouched prepared puzzle creates no attempt, timer, storage, or history", async ({ page }) => {
@@ -781,11 +861,16 @@ test("an untouched prepared daily rolls at the exact UTC boundary without persis
 
 test("player sees completion and share actions after solving every word", async ({ page }) => {
   await openPuzzle(page);
+  const completedAttemptId = (await readStoredAttempt(page)).attemptId;
   await solveRunFromPersistedFixture(page);
 
   await expect(page.getByTestId("completion-card")).toBeVisible();
   await expect(page.getByRole("button", { name: "Share run link" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Copy result text" })).toBeVisible();
+  await page.getByRole("button", { name: "Restart", exact: true }).first().click();
+  await expect(page.getByTestId("run-replacement-dialog")).toBeHidden();
+  await expect.poll(async () => (await readStoredAttempt(page)).attemptId).not.toBe(completedAttemptId);
+  expect((await readStoredAttempt(page)).cellEntries).toEqual({});
 });
 
 test("daily completion exposes the daily share action", async ({ page }) => {
@@ -853,6 +938,36 @@ test("unfinished replacement is cancel-first, focus-safe, and idempotent", async
   await expect(historyCard).toContainText(/replay/i);
 });
 
+test("Restart preserves the recorded generator and resets a distinct attempt", async ({ page }) => {
+  await openPuzzle(page, { boardView: "quest", seed: "restart-v3" });
+  const initial = await readStoredAttempt(page);
+  expect(initial.run.generatorVersion).toBe(3);
+  await solveQuestWordByEndpoints(page, initial.activeWordId!);
+  const source = await readStoredAttempt(page);
+
+  await page.getByRole("button", { name: "Restart", exact: true }).first().click();
+  const dialog = page.getByTestId("run-replacement-dialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Save and replace" }).click();
+  const restarted = await readStoredAttempt(page);
+  expect(restarted.attemptId).not.toBe(source.attemptId);
+  expect(restarted.run.generatorVersion).toBe(3);
+  expect(restarted.run.puzzleId).toBe(source.run.puzzleId);
+  expect(restarted.cellEntries).toEqual({});
+  expect(restarted.solvedIds).toEqual([]);
+  expect(restarted.elapsedMs).toBe(0);
+  await expect(page.getByTestId("recent-run-card").filter({ hasText: "1/7 solved" })).toHaveCount(1);
+});
+
+test("Restarting an untouched prepared run starts directly without outgoing history", async ({ page }) => {
+  await openPreparedPuzzle(page);
+  await page.getByRole("button", { name: "Restart", exact: true }).first().click();
+  await expect(page.getByTestId("run-replacement-dialog")).toBeHidden();
+  await expect(page.locator('main#puzzle-studio[data-run-state="attempt"]')).toBeVisible();
+  await expect(page.getByTestId("recent-run-card")).toHaveCount(1);
+  await expect(page.getByTestId("recent-run-card").first()).toContainText("0/7 solved");
+});
+
 test("replacement write failure leaves the source run and storage unchanged", async ({ page }) => {
   await openPuzzle(page);
   await page.getByTestId("active-answer-input").fill("ab");
@@ -890,6 +1005,7 @@ test("replacement write failure leaves the source run and storage unchanged", as
 
 test("autosave failure stays visible and clears only after a verified retry", async ({ page }) => {
   await openPuzzle(page);
+  await expect(page.getByRole("status")).toHaveCount(1);
   await readStoredAttempt(page);
   await page.evaluate(() => {
     const runtimeWindow = window as typeof window & { __astraOriginalSetItem?: Storage["setItem"] };
@@ -902,6 +1018,13 @@ test("autosave failure stays visible and clears only after a verified retry", as
   const input = page.getByTestId("active-answer-input");
   await input.fill("ab");
   await expect(page.getByTestId("storage-status")).toContainText(/not saved locally.*storage is full/i);
+  const warningText = await page.getByTestId("storage-status").textContent();
+  await page.getByRole("button", { name: "Next clue" }).click();
+  await expect(page.getByTestId("storage-status")).toHaveText(warningText!);
+  await expect(page.getByTestId("event-status")).toContainText(/local storage is full/i);
+  const eventBeforeTick = await page.getByTestId("event-status").textContent();
+  await page.waitForTimeout(1_100);
+  await expect(page.getByTestId("event-status")).toHaveText(eventBeforeTick!);
   await expect(page.getByRole("heading", { name: "Facts currently in this tab" })).toBeVisible();
 
   await page.evaluate(() => {

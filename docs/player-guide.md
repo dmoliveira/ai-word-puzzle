@@ -18,6 +18,8 @@ A late canonical completion remains in the local daily record as **Cleared late*
 
 Use Setup to choose topics, challenge, size, style, timer, and learning preferences. A seed reproduces puzzle content; starting or replaying it creates a fresh attempt ID. Crossword answers remain absent from visible and assistive UI until solved or deliberately revealed.
 
+Setup choices do not start or save an attempt. Exclusive choices use standard radio controls, topic buttons announce whether they are pressed, and Advanced setup reports whether its controls are expanded.
+
 ### Trace quest
 
 Quest displays a 14×14 word-search board. Fresh Quest puzzles use the certified v4 generator: each target has one exact path in any of eight horizontal, vertical, or diagonal directions. If an exact setup cannot be certified within its fixed limits, Astra Lexa reports the failure instead of substituting a v3 board. Select a target, then solve it in any of these ways:
@@ -27,6 +29,7 @@ Quest displays a 14×14 word-search board. Fresh Quest puzzles use the certified
 - focus the board, use arrow keys, and press Enter or Space on both endpoints.
 
 Escape clears the current trail. Paused and completed boards remain navigable but read-only.
+On a compact phone in portrait, Astra Lexa suggests landscape as an optional wider view; rotating never changes the active puzzle or selected trail.
 
 ## Crossword controls
 
@@ -46,6 +49,7 @@ Hints, revealed letters, scrambles, word reveals, and a full-puzzle reveal are r
 ## Resume, replay, and share
 
 - Returning to the app resumes only the current unfinished saved attempt.
+- Restart keeps the exact recorded generator and puzzle identity but creates a distinct empty attempt. An unfinished run asks before replacement; an untouched prepared or completed run restarts directly.
 - A shared or malformed link never replaces an unfinished saved attempt during page load; the saved attempt resumes with a visible explanation.
 - History cards always start a fresh attempt; they do not resume old partial entries. **Replay exact puzzle** appears only when generator, corpus, puzzle ID, and fingerprint still reproduce. Otherwise the honest action is **Use settings/current rules**.
 - New shared links carry generator, corpus, seed/options, and an expected puzzle fingerprint. They do not carry your entries, score, streak, or history. Explicit Quest-v4 links regenerate v4; older and unversioned generator-v3 links remain pinned to v3. A fingerprint mismatch fails visibly.
@@ -54,6 +58,8 @@ Hints, revealed letters, scrambles, word reveals, and a full-puzzle reveal are r
 ## Local data and privacy
 
 The current attempt and recent progress are stored in `localStorage` for this site's exact origin. There is no account, analytics database, cloud sync, or recovery service.
+
+The visible event center announces gameplay, sharing, import, and save outcomes without announcing timer ticks. A local-save warning remains visible until a later write is verified. High-contrast and forced-colors modes retain explicit focus, selection, solved, and error boundaries.
 
 Clearing site data, using private browsing, changing browsers/devices, or moving to a different domain removes or separates the visible record. A future custom-domain migration also changes the storage origin, so progress from the GitHub Pages URL will not automatically follow.
 
