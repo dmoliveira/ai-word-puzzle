@@ -84,6 +84,11 @@ jobs:
           REQUIRE_NOJEKYLL: "true"
         run: npm run validate:export
 
+      - name: Enforce artifact budgets
+        env:
+          EXPECTED_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+        run: npm run validate:artifacts
+
       - name: Test mounted Pages artifact
         env:
           EXPECTED_BASE_PATH: ${{ steps.pages.outputs.base_path }}

@@ -43,10 +43,11 @@ npx playwright install chromium
 npm run test:e2e -- --project=chromium
 npm run build
 npm run validate:export
+npm run validate:artifacts
 npm run test:export
 ```
 
-`npm run build` always creates a static export in `out/`. The export validator checks SEO files, canonical and social metadata, image dimensions, manifest paths, local asset resolution, and Next chunk URLs. The export browser test mounts the artifact and proves that it hydrates without failed same-origin requests.
+`npm run build` always creates a static export in `out/`. The export validator checks SEO files, canonical and social metadata, image dimensions, manifest paths, local asset resolution, and Next chunk URLs. The artifact-budget validator caps HTML and compressed JavaScript delivery. The export browser test mounts the artifact and proves that it hydrates without failed same-origin requests.
 
 ## Project map
 

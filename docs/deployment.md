@@ -34,6 +34,9 @@ EXPECTED_SITE_URL=https://dmoliveira.github.io/ai-word-puzzle/ \
 EXPECTED_BASE_PATH= \
 npm run validate:export
 
+EXPECTED_BASE_PATH= \
+npm run validate:artifacts
+
 ALLOW_SITE_PATH_MISMATCH=true \
 EXPECTED_SITE_URL=https://dmoliveira.github.io/ai-word-puzzle/ \
 EXPECTED_BASE_PATH= \
@@ -53,6 +56,9 @@ EXPECTED_BASE_PATH=/ai-word-puzzle \
 EXPECTED_SITE_URL=https://dmoliveira.github.io/ai-word-puzzle/ \
 REQUIRE_NOJEKYLL=true \
 npm run validate:export
+
+EXPECTED_BASE_PATH=/ai-word-puzzle \
+npm run validate:artifacts
 
 EXPECTED_BASE_PATH=/ai-word-puzzle \
 EXPECTED_SITE_URL=https://dmoliveira.github.io/ai-word-puzzle/ \
@@ -76,9 +82,10 @@ git restore next-env.d.ts
 5. installs with `npm ci`, verifies registry signatures, requires zero production dependency findings, and runs lint, TypeScript, unit tests, the 32-seed generator matrix, and Chromium gameplay tests;
 6. builds the static export with the Pages URL contract;
 7. adds `.nojekyll` and validates HTML, metadata, manifest, images, paths, and local assets;
-8. mounts the exact `out/` directory at the Pages base path and checks hydration and asset loading in Chromium;
-9. uploads the validated artifact; and
-10. only for a `main` push or a `main` manual dispatch, deploys the artifact and runs a retrying smoke against the H1, canonical, manifest, a Next chunk, sitemap, and social PNG.
+8. enforces a 45 KiB HTML ceiling, a 220 KiB aggregate modern initial-JavaScript gzip ceiling, and a 250 KiB gzip ceiling for every initial or lazy JavaScript chunk;
+9. mounts the exact `out/` directory at the Pages base path and checks hydration and asset loading in Chromium;
+10. uploads the validated artifact; and
+11. only for a `main` push or a `main` manual dispatch, deploys the artifact and runs a retrying smoke against the H1, canonical, manifest, a Next chunk, sitemap, and social PNG.
 
 Build and deploy jobs receive separate least-privilege tokens. Pull requests have an isolated, cancelable concurrency lane and never deploy. Production runs share a non-canceling lane so an older build cannot activate after a newer one. A manual dispatch from a non-`main` ref validates and uploads an artifact but deliberately skips deployment.
 
