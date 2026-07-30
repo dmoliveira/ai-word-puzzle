@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { getRunTargetCells } from "@/lib/puzzle-board";
 import { buildPuzzleRun } from "@/lib/puzzle-generator";
 import {
+  canAcceptPlayIntent,
   canMutateAttempt,
+  buildAssistRecap,
   createAttemptFromRun,
+  createPreparedRunState,
   finalizeAttempt,
   getAssistCount,
   getDisplayedElapsedMs,
+  isStartedAttempt,
   recordAnagram,
   recordHintStep,
   recordPuzzleReveal,
@@ -16,6 +21,7 @@ import {
   setAttemptPaused,
   setAttemptVisibility,
   snapshotAttempt,
+  startPreparedAttempt,
 } from "@/lib/run-state";
 
 function createState(nowMs = 1_000) {
@@ -28,6 +34,33 @@ function createState(nowMs = 1_000) {
   });
   return createAttemptFromRun(run, nowMs, `attempt-${nowMs}`);
 }
+
+test("prepared puzzles have no attempt identity, timestamps, or active clock", () => {
+  const prepared = createPreparedRunState(createState().run);
+
+  assert.equal(prepared.attemptId, null);
+  assert.equal(prepared.startedAt, null);
+  assert.equal(prepared.completedAt, null);
+  assert.equal(prepared.elapsedMs, 0);
+  assert.equal(prepared.lastTickAt, null);
+  assert.equal(isStartedAttempt(prepared), false);
+  assert.equal(canAcceptPlayIntent(prepared), true);
+});
+
+test("starting a prepared puzzle uses the supplied identity and clock exactly once", () => {
+  const prepared = {
+    ...createPreparedRunState(createState().run),
+    activeWordId: createState().run.words[1].id,
+  };
+  const started = startPreparedAttempt(prepared, 12_345, "attempt-explicit");
+
+  assert.equal(started.attemptId, "attempt-explicit");
+  assert.equal(started.startedAt, new Date(12_345).toISOString());
+  assert.equal(started.lastTickAt, 12_345);
+  assert.equal(started.activeWordId, prepared.activeWordId);
+  assert.equal(isStartedAttempt(started), true);
+  assert.equal(startPreparedAttempt(started, 99_999, "attempt-replacement"), started);
+});
 
 test("attempt identity is separate from deterministic puzzle identity", () => {
   const run = createState().run;
@@ -72,7 +105,7 @@ test("serialized snapshots settle active time and resume without counting offlin
 test("assist ledger is bounded, deduplicated, and blocked while paused", () => {
   const initial = createState();
   const wordId = initial.run.words[0].id;
-  const cell = initial.run.board.cells[0];
+  const cell = getRunTargetCells(initial.run)[0];
   const cellKey = `${cell.row}:${cell.col}`;
   let assisted = initial;
 
@@ -94,6 +127,26 @@ test("assist ledger is bounded, deduplicated, and blocked while paused", () => {
   const paused = setAttemptPaused(assisted, true, 2_000);
   assert.equal(recordHintStep(paused, initial.run.words[1].id), paused);
   assert.equal(canMutateAttempt(paused), false);
+});
+
+test("assist recap keeps global events separate from deterministic per-word attribution", () => {
+  const initial = createState();
+  const crossing = getRunTargetCells(initial.run).find((cell) => cell.wordIds.length === 2)!;
+  const crossingKey = `${crossing.row}:${crossing.col}`;
+  const hintedWord = initial.run.words[0].id;
+  const assisted = recordRevealedCell(recordHintStep(initial, hintedWord), crossingKey);
+  const recap = buildAssistRecap(assisted);
+
+  assert.equal(recap.global.total, 2, "one hint step and one revealed cell are two global assists");
+  assert.deepEqual(recap.words.map((word) => word.wordId), initial.run.words.map((word) => word.id));
+  assert.equal(recap.words.reduce((total, word) => total + word.hintSteps + word.revealedLetters, 0), 3, "one crossing reveal is attributed to both affected words");
+  assert.equal(recap.affectedWordCount, new Set([hintedWord, ...crossing.wordIds]).size);
+  assert.equal(recap.unaffectedWordCount, initial.run.words.length - recap.affectedWordCount);
+
+  const fullyRevealed = buildAssistRecap(recordPuzzleReveal(assisted));
+  assert.equal(fullyRevealed.global.total, 3, "full-puzzle reveal remains one global assist");
+  assert.equal(fullyRevealed.affectedWordCount, initial.run.words.length);
+  assert.ok(fullyRevealed.words.every((word) => word.puzzleRevealed));
 });
 
 test("completion timestamp and elapsed time are immutable", () => {

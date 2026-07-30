@@ -9,6 +9,7 @@ import type {
   TopicId,
 } from "@/lib/game-types";
 import { crosswordContentPackIds, crosswordTopicIds } from "@/lib/clue-catalog";
+import { currentCorpusRevision, puzzleFingerprintVersion } from "@/lib/puzzle-provenance";
 
 const modes = ["custom", "daily"] as const satisfies readonly PuzzleMode[];
 const challenges = ["breeze", "quest", "mythic"] as const satisfies readonly ChallengeLevel[];
@@ -29,6 +30,9 @@ const contentPackIds = [
 
 const sharedOptionKeys = [
   "generatorVersion",
+  "corpusRevision",
+  "fingerprintVersion",
+  "puzzleFingerprint",
   "mode",
   "seed",
   "topics",
@@ -42,10 +46,17 @@ const sharedOptionKeys = [
   "learningMode",
 ] as const;
 
+export type SharedPuzzleProvenance = {
+  generatorVersion: 3 | 4;
+  corpusRevision: string;
+  fingerprintVersion: 1;
+  puzzleFingerprint: string;
+};
+
 export type SharedOptionsResult =
   | { kind: "none" }
   | { kind: "invalid"; reason: string }
-  | { kind: "valid"; options: PuzzleOptions };
+  | { kind: "valid"; options: PuzzleOptions; generatorVersion: 3 | 4; expectedProvenance: SharedPuzzleProvenance | null };
 
 function includesValue<T extends string>(values: readonly T[], value: string | null): value is T {
   return value !== null && values.includes(value as T);
@@ -165,8 +176,21 @@ export function parseSharedOptions(search: string, nowMs = Date.now()): SharedOp
   }
 
   const generatorVersion = params.get("generatorVersion");
-  if (generatorVersion !== null && generatorVersion !== "3") {
+  if (generatorVersion !== null && generatorVersion !== "3" && generatorVersion !== "4") {
     return { kind: "invalid", reason: "That shared puzzle uses an unsupported generator version." };
+  }
+  const corpusRevision = params.get("corpusRevision");
+  const fingerprintVersion = params.get("fingerprintVersion");
+  const puzzleFingerprint = params.get("puzzleFingerprint");
+  const provenanceValues = [generatorVersion, corpusRevision, fingerprintVersion, puzzleFingerprint];
+  const hasAnyExactProvenance = provenanceValues.slice(1).some((value) => value !== null);
+  if (hasAnyExactProvenance && provenanceValues.some((value) => value === null)) {
+    return { kind: "invalid", reason: "The shared puzzle provenance is incomplete." };
+  }
+  if (hasAnyExactProvenance && (corpusRevision !== currentCorpusRevision
+    || fingerprintVersion !== String(puzzleFingerprintVersion)
+    || !puzzleFingerprint || !/^p1-[a-f0-9]{64}$/.test(puzzleFingerprint))) {
+    return { kind: "invalid", reason: "That shared puzzle uses unsupported provenance." };
   }
 
   const modeValue = params.get("mode");
@@ -197,6 +221,10 @@ export function parseSharedOptions(search: string, nowMs = Date.now()): SharedOp
   }
 
   const resolvedBoardView = boardView ?? "crossword";
+  const resolvedGeneratorVersion = generatorVersion === "4" ? 4 : 3;
+  if (resolvedGeneratorVersion === 4 && resolvedBoardView !== "quest") {
+    return { kind: "invalid", reason: "Generator v4 is available only for Quest boards." };
+  }
   if (resolvedBoardView === "crossword"
     && ((topics && topics.some((topic) => !crosswordTopicIds.includes(topic as (typeof crosswordTopicIds)[number])))
       || (contentPackId && contentPackId !== "auto" && !crosswordContentPackIds.includes(contentPackId as (typeof crosswordContentPackIds)[number])))) {
@@ -226,6 +254,7 @@ export function parseSharedOptions(search: string, nowMs = Date.now()): SharedOp
 
   return {
     kind: "valid",
+    generatorVersion: resolvedGeneratorVersion,
     options: normalizePuzzleOptions({
       mode,
       seed,
@@ -239,5 +268,11 @@ export function parseSharedOptions(search: string, nowMs = Date.now()): SharedOp
       learningMode,
       topics: topics as TopicId[] | undefined,
     }, nowMs),
+    expectedProvenance: hasAnyExactProvenance ? {
+      generatorVersion: resolvedGeneratorVersion,
+      corpusRevision: corpusRevision!,
+      fingerprintVersion: 1,
+      puzzleFingerprint: puzzleFingerprint!,
+    } : null,
   };
 }

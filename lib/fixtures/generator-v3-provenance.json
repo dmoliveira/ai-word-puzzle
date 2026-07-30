@@ -1,0 +1,26 @@
+[
+  {
+    "name": "daily-new-year-2026",
+    "puzzleFingerprint": "p1-72ff8832321d7edf43d7fadbfe1cabea38b1488477245f0e7d8029f7e0e65127"
+  },
+  {
+    "name": "daily-leap-day-2028",
+    "puzzleFingerprint": "p1-9e7765b15569acc3af1dd3d22940e7fe3a01ab04e0afc31430d8fb8071c47723"
+  },
+  {
+    "name": "custom-crossword-classic",
+    "puzzleFingerprint": "p1-77d8b21c0360b805ba3162519ea36eba8b27a56c36ae461b353ae5d16fbc227f"
+  },
+  {
+    "name": "custom-crossword-themed",
+    "puzzleFingerprint": "p1-3d72fd092d368a0bc15260742820d8daa3a8a8475cd038fd1da2c35e6130b24e"
+  },
+  {
+    "name": "custom-quest-classic",
+    "puzzleFingerprint": "p1-a182d39c1f2530323e4c3d7d5545ca6619ef47142600b216d78c275a4e5d8623"
+  },
+  {
+    "name": "custom-quest-themed",
+    "puzzleFingerprint": "p1-065ed543e6b047cd66a539b4746ee6fcde7b442383c9c56bdfcf05183c87b4e9"
+  }
+]

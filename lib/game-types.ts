@@ -101,11 +101,13 @@ export type PuzzleBoardCell = {
   wordIds: string[];
 };
 
-export type PuzzleBoard = {
+export type PuzzleBoardV3 = {
   size: number;
   placements: PuzzlePlacement[];
   cells: PuzzleBoardCell[];
 };
+
+export type PuzzleBoard = PuzzleBoardV3 | import("@/lib/quest-v4-engine").QuestV4Board;
 
 export type PuzzleOptions = {
   mode: PuzzleMode;
@@ -125,6 +127,9 @@ export type PuzzleRun = {
   id: string;
   puzzleId: string;
   generatorVersion: number;
+  corpusRevision: string | null;
+  fingerprintVersion: 1 | null;
+  puzzleFingerprint: string | null;
   createdAt: string;
   seed: string;
   options: PuzzleOptions;
@@ -186,6 +191,23 @@ export type PersistedRunState = {
   lastTickAt: number | null;
 };
 
+export type PreparedRunState = {
+  attemptId: null;
+  startedAt: null;
+  completedAt: null;
+  run: PuzzleRun;
+  guesses: Record<string, string>;
+  cellEntries: Record<string, string>;
+  solvedIds: string[];
+  activeWordId: string | null;
+  assists: AssistLedger;
+  paused: false;
+  elapsedMs: 0;
+  lastTickAt: null;
+};
+
+export type CurrentRunState = PreparedRunState | PersistedRunState;
+
 export type AssistSummary = {
   total: number;
   hintSteps: number;
@@ -195,9 +217,15 @@ export type AssistSummary = {
   puzzleRevealed: boolean;
 };
 
+export type DailyLedgerOutcome = "started" | "late-clear" | "credited";
+
 export type RunSummary = {
   attemptId: string;
   puzzleId: string;
+  generatorVersion: number;
+  corpusRevision: string | null;
+  fingerprintVersion: 1 | null;
+  puzzleFingerprint: string | null;
   runId: string;
   title: string;
   seed: string;
@@ -209,6 +237,7 @@ export type RunSummary = {
   totalWords: number;
   finished: boolean;
   canonicalDaily: boolean;
+  dailyOutcome: DailyLedgerOutcome | null;
   elapsedMs: number;
   assists: AssistSummary;
   createdAt: string;
@@ -216,11 +245,12 @@ export type RunSummary = {
 };
 
 export type ProgressSnapshot = {
-  schemaVersion: 2;
+  schemaVersion: 3;
   streak: number;
   bestStreak: number;
   lastDailySeed: string | null;
   lastCompletedAt: string | null;
+  dailyLedger: Record<string, DailyLedgerOutcome>;
   history: RunSummary[];
 };
 

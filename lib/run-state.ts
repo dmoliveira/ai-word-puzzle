@@ -1,4 +1,5 @@
-import type { AssistLedger, AssistSummary, PersistedRunState, PuzzleRun } from "@/lib/game-types";
+import type { AssistLedger, AssistSummary, CurrentRunState, PersistedRunState, PreparedRunState, PuzzleRun } from "@/lib/game-types";
+import { getRunTargetCells } from "@/lib/puzzle-board";
 
 export const runStateSchemaVersion = 2 as const;
 
@@ -15,6 +16,49 @@ export function createEmptyAssistLedger(): AssistLedger {
 export function createAttemptId(nowMs = Date.now(), randomId?: string) {
   const generated = randomId ?? globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
   return `attempt-${nowMs.toString(36)}-${generated}`;
+}
+
+export function createPreparedRunState(run: PuzzleRun): PreparedRunState {
+  return {
+    attemptId: null,
+    startedAt: null,
+    completedAt: null,
+    run,
+    guesses: {},
+    cellEntries: {},
+    solvedIds: [],
+    activeWordId: run.words[0]?.id ?? null,
+    assists: createEmptyAssistLedger(),
+    paused: false,
+    elapsedMs: 0,
+    lastTickAt: null,
+  };
+}
+
+export function isStartedAttempt(state: CurrentRunState): state is PersistedRunState {
+  return state.attemptId !== null && state.startedAt !== null;
+}
+
+export function startPreparedAttempt(
+  state: CurrentRunState,
+  nowMs = Date.now(),
+  attemptId = createAttemptId(nowMs),
+): PersistedRunState {
+  if (isStartedAttempt(state)) {
+    return state;
+  }
+
+  return {
+    schemaVersion: runStateSchemaVersion,
+    ...state,
+    attemptId,
+    startedAt: new Date(nowMs).toISOString(),
+    lastTickAt: state.run.options.timerEnabled ? nowMs : null,
+  };
+}
+
+export function canAcceptPlayIntent(state: CurrentRunState) {
+  return !isStartedAttempt(state) || canMutateAttempt(state);
 }
 
 export function createAttemptFromRun(run: PuzzleRun, nowMs = Date.now(), attemptId = createAttemptId(nowMs)): PersistedRunState {
@@ -162,7 +206,7 @@ export function recordHintStep(state: PersistedRunState, wordId: string) {
 }
 
 export function recordRevealedCell(state: PersistedRunState, cellKey: string) {
-  if (!canMutateAttempt(state) || !state.run.board.cells.some((cell) => `${cell.row}:${cell.col}` === cellKey)) {
+  if (!canMutateAttempt(state) || !getRunTargetCells(state.run).some((cell) => `${cell.row}:${cell.col}` === cellKey)) {
     return state;
   }
 
@@ -230,6 +274,41 @@ export function summarizeAssists(state: PersistedRunState): AssistSummary {
     anagrams,
     revealedWords,
     puzzleRevealed,
+  };
+}
+
+export type WordAssistAttribution = {
+  wordId: string;
+  hintSteps: number;
+  revealedLetters: number;
+  anagramUsed: boolean;
+  wordRevealed: boolean;
+  puzzleRevealed: boolean;
+};
+
+export function buildAssistRecap(state: PersistedRunState) {
+  const revealedCells = new Set(state.assists.revealedCellKeys);
+  const anagramWords = new Set(state.assists.anagramWordIds);
+  const revealedWords = new Set(state.assists.revealedWordIds);
+  const targetCells = getRunTargetCells(state.run);
+  const words: WordAssistAttribution[] = state.run.words.map((word) => {
+    const revealedLetters = targetCells.filter((cell) => revealedCells.has(`${cell.row}:${cell.col}`) && cell.wordIds.includes(word.id)).length;
+    return {
+      wordId: word.id,
+      hintSteps: state.assists.hintStepsByWord[word.id] ?? 0,
+      revealedLetters,
+      anagramUsed: anagramWords.has(word.id),
+      wordRevealed: revealedWords.has(word.id),
+      puzzleRevealed: state.assists.puzzleRevealed,
+    };
+  });
+  const affectedWords = words.filter((word) => word.hintSteps > 0 || word.revealedLetters > 0 || word.anagramUsed || word.wordRevealed || word.puzzleRevealed);
+  return {
+    global: summarizeAssists(state),
+    words,
+    affectedWords,
+    affectedWordCount: affectedWords.length,
+    unaffectedWordCount: words.length - affectedWords.length,
   };
 }
 

@@ -1,4 +1,4 @@
-import type { PuzzleBoard, PuzzleBoardCell, PuzzleDirection, PuzzlePlacement, PuzzleWord } from "@/lib/game-types";
+import type { PuzzleBoardCell, PuzzleBoardV3, PuzzleDirection, PuzzlePlacement, PuzzleWord } from "@/lib/game-types";
 
 type DraftPlacement = {
   word: PuzzleWord;
@@ -169,7 +169,7 @@ function cluesAreCompatible(placements: DraftPlacement[], word: PuzzleWord) {
     && !clueContainsAnswer(placement.word.clue, word.normalized));
 }
 
-function numberAndNormalizePlacements(drafts: DraftPlacement[]): PuzzleBoard {
+function numberAndNormalizePlacements(drafts: DraftPlacement[]): PuzzleBoardV3 {
   const bounds = getBounds(drafts);
   const contentWidth = bounds.maxCol - bounds.minCol + 1;
   const contentHeight = bounds.maxRow - bounds.minRow + 1;
@@ -284,7 +284,7 @@ export function buildConnectedCrossword(candidates: PuzzleWord[], targetSize: nu
   return null;
 }
 
-export function buildQuestBoard(words: PuzzleWord[], seed: string): PuzzleBoard {
+export function buildQuestBoard(words: PuzzleWord[], seed: string): PuzzleBoardV3 {
   const size = 14;
   const rowOrder = Array.from({ length: size }, (_, row) => row)
     .sort((left, right) => hashString(`${seed}:row:${left}`) - hashString(`${seed}:row:${right}`));

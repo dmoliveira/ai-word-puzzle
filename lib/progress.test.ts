@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { getRunTargetCells } from "@/lib/puzzle-board";
 import { buildDailyArchive, createEmptyProgress, decodeProgressSnapshot, recordRunProgress } from "@/lib/progress";
 import { buildPuzzleRun } from "@/lib/puzzle-generator";
 import { getCanonicalDailyOptions } from "@/lib/puzzle-options";
@@ -62,7 +63,7 @@ test("progress decoder migrates legacy summaries and drops malformed entries", (
   });
 
   assert.ok(decoded);
-  assert.equal(decoded.schemaVersion, 2);
+  assert.equal(decoded.schemaVersion, 3);
   assert.equal(decoded.history.length, 1);
   assert.match(decoded.history[0].attemptId, /^legacy-/);
   assert.equal(decoded.history[0].runId, run.id);
@@ -77,7 +78,7 @@ test("daily archive prefers a completion over newer unfinished retries", () => {
   const retryRun = buildPuzzleRun({ ...getCanonicalDailyOptions(Date.parse("2026-04-24T12:00:00Z")), seed: day });
   const retry = createAttemptFromRun(retryRun, Date.parse("2026-04-24T13:00:00Z"), "newer-retry");
   const withRetry = recordRunProgress(completedSnapshot, retry, Date.parse("2026-04-24T13:00:00Z"));
-  const archive = buildDailyArchive(withRetry.history, 1, Date.parse("2026-04-24T18:00:00Z"));
+  const archive = buildDailyArchive(withRetry, 1, Date.parse("2026-04-24T18:00:00Z"));
 
   assert.equal(withRetry.history[0].attemptId, "newer-retry");
   assert.equal(archive[0].summary?.attemptId, "completed-attempt");
@@ -95,7 +96,7 @@ test("noncanonical daily links never earn streak credit", () => {
   assert.equal(snapshot.history[0].canonicalDaily, false);
 });
 
-test("a daily completed after its UTC seed day stays outside streaks and archive", () => {
+test("a canonical daily completed after its UTC seed day is archived late without streak credit", () => {
   const day = "2026-04-24";
   const run = buildPuzzleRun({ ...getCanonicalDailyOptions(Date.parse(`${day}T23:59:00Z`)), seed: day });
   const started = createAttemptFromRun(run, Date.parse(`${day}T23:59:00Z`), "midnight-crossing");
@@ -104,8 +105,10 @@ test("a daily completed after its UTC seed day stays outside streaks and archive
   const snapshot = recordRunProgress(createEmptyProgress(), completed, completedAt);
 
   assert.equal(snapshot.streak, 0);
-  assert.equal(snapshot.history[0].canonicalDaily, false);
-  assert.equal(buildDailyArchive(snapshot.history, 2, completedAt)[1].summary, null);
+  assert.equal(snapshot.history[0].canonicalDaily, true);
+  assert.equal(snapshot.history[0].dailyOutcome, "late-clear");
+  assert.equal(snapshot.dailyLedger[day], "late-clear");
+  assert.equal(buildDailyArchive(snapshot, 2, completedAt)[1].summary?.attemptId, "midnight-crossing");
 });
 
 test("streaks expire after a gap while best streak remains truthful", () => {
@@ -120,11 +123,43 @@ test("streaks expire after a gap while best streak remains truthful", () => {
   assert.equal(snapshot.bestStreak, 2);
 });
 
+test("daily ledger preserves streak truth after recent history eviction", () => {
+  let snapshot = createEmptyProgress();
+  const firstDayMs = Date.parse("2026-01-01T12:00:00.000Z");
+  for (let index = 0; index < 35; index += 1) {
+    const nowMs = firstDayMs + index * 86_400_000;
+    const day = new Date(nowMs).toISOString().slice(0, 10);
+    snapshot = recordRunProgress(snapshot, createCompletedDaily(day, nowMs, `daily-${index}`), nowMs);
+  }
+
+  assert.equal(snapshot.history.length, 30);
+  assert.equal(Object.keys(snapshot.dailyLedger).length, 35);
+  assert.equal(snapshot.streak, 35);
+  assert.equal(snapshot.bestStreak, 35);
+  assert.equal(snapshot.dailyLedger["2026-01-01"], "credited");
+});
+
+test("progress v2 migration preserves aggregates without inventing day-level credits", () => {
+  const decoded = decodeProgressSnapshot({
+    schemaVersion: 2,
+    streak: 2,
+    bestStreak: 5,
+    lastDailySeed: "2026-04-25",
+    lastCompletedAt: "2026-04-25T12:00:00.000Z",
+    history: [],
+  });
+
+  assert.ok(decoded);
+  assert.deepEqual(decoded.dailyLedger, {});
+  assert.equal(decoded.streak, 2);
+  assert.equal(decoded.bestStreak, 5);
+});
+
 test("history stores a finite assist breakdown and elapsed time", () => {
   const run = buildPuzzleRun({ mode: "custom", seed: "assist-history", puzzleSize: 4 });
   let state = createAttemptFromRun(run, 1_000, "assisted-attempt");
   state = recordHintStep(state, run.words[0].id);
-  const cell = run.board.cells[0];
+  const cell = getRunTargetCells(run)[0];
   state = recordRevealedCell(state, `${cell.row}:${cell.col}`);
   const snapshot = recordRunProgress(createEmptyProgress(), { ...state, elapsedMs: 4_200 }, 5_200);
 
